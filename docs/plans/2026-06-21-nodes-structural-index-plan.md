@@ -212,6 +212,8 @@ git commit -m "refactor(store): slim Store to file mechanics; cross-corpus logic
 - `upsert` is the mechanical maintenance op: it never raises on collision. The collision *gate* is the separate `assert_addable`, which `Corpus.add` calls **before** writing the file (so the index never gets ahead of disk). This split is deliberate: `rename` legitimately re-`upsert`s a node whose live id changed, which must not trip a collision.
 - Relations are normalized (source always explicit), so a plain `related:` entry has `source == node.id`. Each `Relation` contributes two `OutRef`s (`relation_source`, `relation_target`); membership members and each edge endpoint contribute their own `OutRef`s. This completeness is what makes `rename` O(degree).
 - `remove(uid)` drops only what this node contributed: its `by_uid` entry, its identity claims, and the `in_refs` rows whose `source_uid == uid`. It must NOT drop `in_refs` rows other nodes contributed pointing at this node — those persist as dangling.
+- `build()` enforces the collision contract: it calls `assert_addable` before each `upsert`, so constructing a `Corpus` over a corrupt corpus (two files claiming the same id) fails early rather than letting the last file silently win.
+- **Membership facet payloads are raw dicts** — the canonical on-disk form. `node.facets["membership"]["edges"]` are plain dicts with string `source`/`target` (this is what `node_to_markdown` yaml-dumps and `node_from_markdown` reads back; `Relation` objects could not serialize there). `_extract_out_refs` therefore reads edges as dicts, by design — do not add a `Relation`-object branch.
 
 - [ ] **Step 1: Write `tests/test_index.py`**
 
@@ -233,14 +235,26 @@ def test_build_and_resolve_live_id():
     assert idx.resolve_uid("topic:missing") is None
 
 
-def test_resolve_prefers_live_over_deprecated():
-    # node A is live as topic:new but still claims topic:old as deprecated;
-    # an unrelated node is live as topic:old.
+def test_resolve_deprecated_id():
     a = Node(id="topic:new", kind="topic", title="A", deprecated_ids=["topic:old"])
-    b = Node(id="topic:other", kind="topic", title="B")
-    idx = Index.build([a, b])
-    # deprecated resolves to A
-    assert idx.resolve_uid("topic:old") == a.uid
+    idx = Index.build([a])
+    assert idx.resolve_uid("topic:old") == a.uid  # deprecated id resolves to A
+
+
+def test_resolve_prefers_live_over_deprecated_map():
+    # White-box: a live id always wins over a deprecated id. In a valid corpus a
+    # ref appears in only one map; this asserts the lookup order directly.
+    idx = Index()
+    idx.id_to_uid["topic:x"] = "uid-live"
+    idx.deprecated_to_uid["topic:x"] = "uid-dep"
+    assert idx.resolve_uid("topic:x") == "uid-live"
+
+
+def test_build_rejects_colliding_corpus():
+    a = Node(id="topic:a", kind="topic", title="A")
+    b = Node(id="topic:a", kind="topic", title="B")  # same id, different uid → corrupt corpus
+    with pytest.raises(CollisionError):
+        Index.build([a, b])
 
 
 def test_assert_addable_rejects_same_id_different_uid():
@@ -387,6 +401,7 @@ class Index:
     def build(cls, nodes: Iterable[Node]) -> "Index":
         idx = cls()
         for node in nodes:
+            idx.assert_addable(node)  # fail-early on a corrupt corpus (collision contract)
             idx.upsert(node)
         return idx
 
@@ -444,7 +459,7 @@ class Index:
 - [ ] **Step 4: Run to verify pass**
 
 Run: `uv run pytest tests/test_index.py -v`
-Expected: PASS (8 tests).
+Expected: PASS (10 tests).
 
 Run: `uv run ruff check . && uv run pyright src`
 Expected: clean.
@@ -607,7 +622,7 @@ Add these methods to the `Index` class (and ensure `ResolvedEdge` is already def
 - [ ] **Step 4: Run to verify pass**
 
 Run: `uv run pytest tests/test_index.py -v`
-Expected: PASS (all Task 2 + Task 3 tests, 14 total).
+Expected: PASS (all Task 2 + Task 3 tests, 16 total).
 
 Run: `uv run ruff check . && uv run pyright src`
 Expected: clean.
@@ -641,7 +656,7 @@ git commit -m "feat(index): relations-only graph queries — outbound, inbound, 
 **Design notes:**
 - `add` collision-checks via `index.assert_addable` **before** `store.write_file`, so the index never gets ahead of disk.
 - Graph queries resolve the input `ref` to a uid first; an unresolvable input raises `RefError` (distinct from a resolvable node with no edges). Dangling *targets* never raise.
-- `_rewrite_refs` is the relocated kernel rewrite logic (relations source+target, membership members list/dict, edge source+target). Define it here; Task 5's `rename` reuses it.
+- `_rewrite_refs` is the relocated kernel rewrite logic (relations source+target, membership members list/dict, edge source+target). Define it here; Task 5's `rename` reuses it. Membership edges are raw dicts (see Task 2's facet note) — the rewrite reads `edge["source"]`/`edge["target"]`, matching `_extract_out_refs`.
 
 - [ ] **Step 1: Write `tests/test_corpus.py` (CRUD + queries; rename is Task 5)**
 
@@ -1077,7 +1092,12 @@ from nodes.kernel.relations import relates_to
 def _normalize(index: Index) -> dict:
     return {
         "by_uid": {
-            uid: (e.id, e.kind, tuple(sorted(e.deprecated_ids)))
+            uid: (
+                e.id,
+                e.kind,
+                tuple(sorted(e.deprecated_ids)),
+                tuple(sorted((o.ref, o.role) for o in e.out_refs)),  # dangling() depends on these
+            )
             for uid, e in index.by_uid.items()
         },
         "id_to_uid": dict(index.id_to_uid),
