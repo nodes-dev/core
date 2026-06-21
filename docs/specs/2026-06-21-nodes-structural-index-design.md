@@ -84,36 +84,47 @@ Maps:
 - `by_uid: dict[str, IndexEntry]`
 - `id_to_uid: dict[str, str]`            # live ids
 - `deprecated_to_uid: dict[str, str]`    # stale-ref resolution; a live id ALWAYS wins
-- `in_refs: dict[str, list[InRef]]`      # reverse map keyed by *target ref string*
+- `in_refs: dict[str, list[InRef]]`      # reverse map keyed by *referenced id string* (any
+                                         #   position that holds an id — see OutRef.role below)
 
 ```
 InRef:
-  source_uid: str          # the node that points at this target ref
-  out_ref: OutRef          # the specific outbound ref (relation or membership)
+  source_uid: str          # the node that holds this reference
+  out_ref: OutRef          # the specific outbound reference (its role + relation, if any)
 ```
 
 ### Outbound refs — what is indexed vs what is queried
 
 There are two distinct concerns:
 
-1. **Maintenance / reverse-ref tracking (must be complete).** `rename` must rewrite every place
-   that points at the old id. The kernel rewrites three kinds of outbound ref: `node.relations`,
-   membership `members` (set/list/dict), and membership `edges`. So `out_refs` /
-   `in_refs` track **all three**, enabling O(degree) rename instead of an O(corpus) scan.
+1. **Maintenance / reverse-ref tracking (must be complete).** `rename` must rewrite every
+   position that holds the old id. The kernel rewrites ids in `node.relations` (both
+   `target` **and** `source`), membership `members` (set/list values and dict values), and
+   membership `edges` (both `source` **and** `target`). So `out_refs` / `in_refs` track an
+   `OutRef` for **each such position** — not just relation targets — enabling O(degree) rename
+   instead of an O(corpus) scan. Indexing only the target side would miss, e.g., a graph node
+   that names `topic:old` as an *edge source*.
 2. **Public graph queries (relations-only).** `outbound()` / `inbound()` expose **`Relation`-primitive
    edges only**, resolved to uids. Membership members/edges are tracked for rename but are **not**
    exposed as public graph edges in Plan 2. Membership traversal is deferred to the layer that
    consumes it.
 
-`OutRef` records enough to distinguish a relation edge from a membership ref and to resolve its
-target:
+Each `OutRef` records one referenced id, the structural position (`role`) it occupies, and —
+for relation positions — the owning `Relation` so the public graph queries can reconstruct the
+edge:
 
 ```
 OutRef:
-  ref: str                 # the target id string as written
-  origin: "relation" | "membership"
-  relation: Relation | None    # present when origin == "relation"
+  ref: str                 # the referenced id string as written (the in_refs key)
+  role: "relation_target" | "relation_source"
+       | "membership_member" | "membership_edge_source" | "membership_edge_target"
+  relation: Relation | None    # present iff role startswith "relation_"
 ```
+
+A single `Relation` with an explicit non-container `source` contributes two `OutRef`s (one
+`relation_source`, one `relation_target`); a membership edge likewise contributes two. The
+public `outbound`/`inbound` queries consider only `relation_*` roles; rename consults every
+role.
 
 ### Resolution
 
@@ -172,20 +183,39 @@ ResolvedEdge:
   target_uid: str | None        # None when the target ref is dangling
 ```
 
+**Graph queries are uid-based, not raw-ref-based.** `inbound(ref)` and `outbound(ref)` first
+resolve `ref` to a uid (`Index.resolve_uid`), then return edges by that uid — so they are
+stable across stale ids. `inbound("topic:new")` merges every `relation_target` `OutRef` whose
+written ref resolves to that uid, including edges still written as the deprecated `topic:old`;
+`outbound` returns the resolved node's own `relation_*` edges. Each returned `ResolvedEdge`
+re-resolves its endpoints to uids (`target_uid = None` when the written ref resolves to
+nothing). A `ref` that resolves to no uid raises `RefError` (it is not the same as a node that
+exists but has no edges).
+
 ### `rename` flow (the O(degree) payoff)
 
 1. Collision-check `new_id` against the index.
-2. Read the node, set `id = new_id`, `kind = parse(new_id).kind`, append `old_id` to
-   `deprecated_ids`.
-3. `store.write_file(new)` first, then `store.delete_file(old)` if the path changed
+2. **Snapshot the referrer set first.** Collect `{inref.source_uid for inref in
+   index.in_refs.get(old_id, [])}` into a deduplicated set *before* any index mutation — the
+   rename loop calls `index.upsert`, which rewrites `in_refs`, so iterating the live structure
+   would skip or double-process entries. The renamed node's own uid is included if it
+   self-references.
+3. Read the node, set `id = new_id`, `kind = parse(new_id).kind`, append `old_id` to
+   `deprecated_ids`. **Rewrite the renamed node's own `old_id` references too** — its
+   `relations` `source`/`target`, and its membership `members`/`edges` — so a relation whose
+   normalized `source` was `old_id` does not serialize a stale explicit `source: old_id` (it
+   must again read as the container source). The node is one of the snapshotted referrers when
+   it self-references; handle it via the same rewrite path.
+4. `store.write_file(new)` first, then `store.delete_file(old)` if the path changed
    (crash-atomic ordering, matching the kernel's hardened rename).
-4. For each `(referrer_uid, ref)` in `index.in_refs[old_id]`, load that referrer, rewrite its
-   `relations` + membership `members` + membership `edges` from `old_id`→`new_id`,
-   `store.write_file` it, and `index.upsert` it.
-5. `index.upsert` the renamed node.
+5. For each *other* `referrer_uid` in the snapshot, load that referrer (`store.read_file` by its
+   live id from `index.by_uid`), rewrite every `old_id` occurrence across its `relations`
+   (`source`+`target`), membership `members`, and membership `edges` (`source`+`target`),
+   `store.write_file` it, then `index.upsert` it.
+6. `index.upsert` the renamed node.
 
 This replaces the kernel's `_rewrite_inbound` whole-corpus scan with a targeted walk of the
-known referrers.
+known referrers. Both the renamed node and every referrer are written exactly once.
 
 ## 6. Core correctness invariant
 
@@ -196,7 +226,11 @@ The spec's promise is "incremental updates == fully rebuildable from the files."
 > `Index.build(store.all_nodes())`.
 
 Equality is defined over all four maps (`by_uid`, `id_to_uid`, `deprecated_to_uid`, `in_refs`).
-This directly catches incremental-maintenance bugs — the main risk of the in-memory+incremental
+The scalar maps compare directly; the **list-valued** structures (`out_refs`, `in_refs`) compare
+as **normalized multisets**, not ordered lists — incremental insertion order differs from
+rebuild scan order even when the index is semantically identical, so the property test sorts
+each ref list by a stable key (e.g. `(ref, role, source_uid)`) before comparing. This directly
+catches incremental-maintenance bugs — the main risk of the in-memory+incremental
 choice.
 
 ## 7. Error handling
@@ -217,7 +251,16 @@ All error types are the existing `nodes.kernel.errors` classes — no new error 
 - **`Corpus` integration tests:** `add` / `get` / `rename` / `delete` round-trips; deprecated-id
   resolution after rename; collision-on-add; `delete` live-id-only behavior; rename rewrites
   every referrer (relations + membership members + membership edges) — these port up from the
-  kernel's existing `Store` rename tests.
+  kernel's existing `Store` rename tests. Plus the cases the design tightened:
+  - **renamed node's own relations** — a node whose outgoing relation had explicit
+    `source == old_id` must, after rename, serialize that relation with the *container* source
+    (no stale `source: old_id`).
+  - **edge-source rename** — renaming an id used as a membership *edge source* (not just a
+    target) must find and rewrite the containing structure node.
+  - **multi-ref referrer** — a referrer that points at `old_id` from several positions is
+    rewritten and written exactly once (snapshot/dedup).
+  - **inbound across a deprecated id** — `inbound(new_id)` includes an edge still written as
+    `old_id`.
 - **Rebuild-equivalence property test (§6):** drive a sequence of mutations, assert live index
   equals a fresh rebuild from disk.
 - **Migration:** Plan 1's `Store` tests for `resolve` / collision / `rename` move up to target
