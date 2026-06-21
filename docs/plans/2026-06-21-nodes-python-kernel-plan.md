@@ -936,7 +936,24 @@ def test_parse_related_and_relations():
     assert n.id == "gene:PHF19" and n.uid == "deadbeefdeadbeefdeadbeefdeadbeef"
     assert relates_to("gene:PHF19", "topic:polycomb") in n.relations
     assert Relation(source="gene:PHF19", predicate="interacts_with", target="gene:EZH2") in n.relations
-    assert n.body == "PHF19 body."
+    assert n.body == "PHF19 body.\n"
+
+
+def test_body_preserves_whitespace_below_frontmatter():
+    text = (
+        "---\n"
+        "id: topic:a\n"
+        "uid: deadbeefdeadbeefdeadbeefdeadbeef\n"
+        "kind: topic\n"
+        "title: A\n"
+        "---\n"
+        "\n"
+        "First paragraph.\n"
+        "\n"
+    )
+    n = node_from_markdown(text)
+    assert n.body == "\nFirst paragraph.\n\n"
+    assert node_from_markdown(node_to_markdown(n)).body == n.body
 
 
 def test_roundtrip_preserves_relations_and_facets():
@@ -991,7 +1008,12 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     if len(parts) < 3:
         return {}, text
     fm = yaml.safe_load(parts[1]) or {}
-    return fm, parts[2].strip()
+    body = parts[2]
+    if body.startswith("\r\n"):
+        body = body[2:]
+    elif body.startswith("\n"):
+        body = body[1:]
+    return fm, body
 
 
 def node_from_markdown(text: str) -> Node:
@@ -1045,13 +1067,13 @@ def node_to_markdown(node: Node) -> str:
     if node.deprecated_ids:
         fm["deprecated_ids"] = node.deprecated_ids
     yaml_text = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).rstrip()
-    return f"---\n{yaml_text}\n---\n{node.body}\n"
+    return f"---\n{yaml_text}\n---\n{node.body}"
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_frontmatter.py -v`
-Expected: PASS (4 cases).
+Expected: PASS (5 cases).
 
 - [ ] **Step 5: Commit**
 
@@ -1073,7 +1095,7 @@ git commit -m "feat(kernel): markdown frontmatter parse/serialize with source-im
 - Produces:
   - `class Store`: constructed with `Store(root: Path)`.
     - `path_for(node_id: str) -> Path` → `root/<kind>/<slug>.md` (slug colons → `__`).
-    - `write(node: Node) -> Path` — refuses to create a *new* file whose id collides with another node's live id or active `deprecated_id` (`CollisionError`); overwriting the same uid is allowed.
+    - `write(node: Node) -> Path` — refuses to create a file whose identity claims collide with another node: duplicate live id, duplicate active `deprecated_id`, live-vs-deprecated overlap, or duplicate `uid` under a different live id (`CollisionError`); overwriting the same live id + uid is allowed.
     - `resolve(ref: str) -> Node` — resolves a ref by live id (direct file path) or active `deprecated_id` (linear scan); raises `RefError` if nothing resolves (spec §3.5).
     - `read(node_id: str) -> Node` — delegates to `resolve`, so stale ids still resolve after a rename.
     - `delete(node_id: str) -> None`.
@@ -1107,6 +1129,21 @@ def test_collision_on_new_id(tmp_path):
     store.write(Node(id="topic:a", kind="topic", title="A"))
     with pytest.raises(CollisionError):
         store.write(Node(id="topic:a", kind="topic", title="Other"))  # different uid, same id
+
+
+def test_collision_on_duplicate_uid_at_different_id(tmp_path):
+    store = Store(tmp_path)
+    original = Node(id="topic:a", kind="topic", title="A")
+    store.write(original)
+    with pytest.raises(CollisionError):
+        store.write(Node(id="topic:b", kind="topic", title="B", uid=original.uid))
+
+
+def test_collision_on_deprecated_id_claim(tmp_path):
+    store = Store(tmp_path)
+    store.write(Node(id="topic:a", kind="topic", title="A"))
+    with pytest.raises(CollisionError):
+        store.write(Node(id="topic:b", kind="topic", title="B", deprecated_ids=["topic:a"]))
 
 
 def test_overwrite_same_uid_ok(tmp_path):
@@ -1196,10 +1233,26 @@ class Store:
                 return n.uid
         return None
 
+    @staticmethod
+    def _claimed_ids(node: Node) -> set[str]:
+        return {node.id, *node.deprecated_ids}
+
+    def _assert_no_identity_collision(self, node: Node) -> None:
+        claimed = self._claimed_ids(node)
+        for existing in self.all_nodes():
+            same_live_identity = existing.id == node.id and existing.uid == node.uid
+            if existing.uid == node.uid and existing.id != node.id:
+                raise CollisionError(
+                    f"uid {node.uid!r} already belongs to live id {existing.id!r}; use rename()"
+                )
+            if same_live_identity:
+                continue
+            overlap = claimed & self._claimed_ids(existing)
+            if overlap:
+                raise CollisionError(f"identity claims already in use: {sorted(overlap)}")
+
     def write(self, node: Node) -> Path:
-        owner = self._id_owner_uid(node.id)
-        if owner is not None and owner != node.uid:
-            raise CollisionError(f"id {node.id!r} already claimed by another node")
+        self._assert_no_identity_collision(node)
         path = self.path_for(node.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(node_to_markdown(node), encoding="utf-8")
@@ -1290,7 +1343,7 @@ Note: `_rewrite_inbound` rewrites both `related`/`relations` (which live in `nod
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_store.py -v`
-Expected: PASS (7 cases).
+Expected: PASS (9 cases).
 
 - [ ] **Step 5: Commit**
 
