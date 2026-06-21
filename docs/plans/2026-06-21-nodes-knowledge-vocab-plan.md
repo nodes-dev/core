@@ -17,7 +17,7 @@
 - The roster is exactly seven kinds: prose `note`, `idea`, `question`, `topic` (bare); source `paper`, `book`, `dataset` (require the `source` facet + `require_identifiable_source`).
 - `Corpus(registry=None)` preserves today's behavior exactly — the existing 86-test suite stays green.
 - Predicate constants and values: `ABOUT="about"`, `CITES="cites"`, `ANSWERS="answers"`, `ASKS="asks"`, `REFINES="refines"`.
-- Gates per task: `uv run pytest -q`, `uv run ruff check src tests`, `uv run pyright src` all clean before commit.
+- Gates per task: `rtk uv run pytest -q`, `rtk uv run ruff check src tests`, `rtk uv run pyright src` all clean before commit.
 
 ---
 
@@ -97,7 +97,7 @@ def test_source_roundtrips_through_facets():
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_vocab_source.py -q`
+Run: `rtk uv run pytest tests/test_vocab_source.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.vocab.source'`.
 
 - [ ] **Step 4: Write the implementation**
@@ -148,15 +148,16 @@ def require_identifiable_source(node: Node) -> None:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_vocab_source.py -q`
+Run: `rtk uv run pytest tests/test_vocab_source.py -q`
 Expected: PASS (7 tests).
 
 - [ ] **Step 6: Run gates and commit**
 
 ```bash
-uv run ruff check src tests && uv run pyright src
-git add src/nodes/vocab/__init__.py src/nodes/vocab/source.py tests/test_vocab_source.py
-git commit -m "feat(vocab): Source bibliographic facet with fail-early validation"
+rtk uv run ruff check src tests
+rtk uv run pyright src
+rtk git add src/nodes/vocab/__init__.py src/nodes/vocab/source.py tests/test_vocab_source.py
+rtk git commit -m "feat(vocab): Source bibliographic facet with fail-early validation"
 ```
 
 ---
@@ -237,7 +238,7 @@ def test_unregistered_kind_raises():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_vocab_kinds.py -q`
+Run: `rtk uv run pytest tests/test_vocab_kinds.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.vocab.kinds'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -281,15 +282,16 @@ def register_knowledge_vocab(reg: Registry) -> None:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_vocab_kinds.py -q`
+Run: `rtk uv run pytest tests/test_vocab_kinds.py -q`
 Expected: PASS (8 tests).
 
 - [ ] **Step 5: Run gates and commit**
 
 ```bash
-uv run ruff check src tests && uv run pyright src
-git add src/nodes/vocab/kinds.py tests/test_vocab_kinds.py
-git commit -m "feat(vocab): seven-kind knowledge roster + register_knowledge_vocab"
+rtk uv run ruff check src tests
+rtk uv run pyright src
+rtk git add src/nodes/vocab/kinds.py tests/test_vocab_kinds.py
+rtk git commit -m "feat(vocab): seven-kind knowledge roster + register_knowledge_vocab"
 ```
 
 ---
@@ -340,7 +342,7 @@ def test_helpers_build_relations():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_vocab_predicates.py -q`
+Run: `rtk uv run pytest tests/test_vocab_predicates.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.vocab.predicates'`.
 
 - [ ] **Step 3: Write the implementation**
@@ -386,15 +388,16 @@ def refines(source: str, target: str) -> Relation:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_vocab_predicates.py -q`
+Run: `rtk uv run pytest tests/test_vocab_predicates.py -q`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Run gates and commit**
 
 ```bash
-uv run ruff check src tests && uv run pyright src
-git add src/nodes/vocab/predicates.py tests/test_vocab_predicates.py
-git commit -m "feat(vocab): canonical relation predicates + helper constructors"
+rtk uv run ruff check src tests
+rtk uv run pyright src
+rtk git add src/nodes/vocab/predicates.py tests/test_vocab_predicates.py
+rtk git commit -m "feat(vocab): canonical relation predicates + helper constructors"
 ```
 
 ---
@@ -462,7 +465,7 @@ def test_registry_accepts_valid_node(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_corpus_registry.py -q`
+Run: `rtk uv run pytest tests/test_corpus_registry.py -q`
 Expected: FAIL — `TypeError: Corpus.__init__() got an unexpected keyword argument 'registry'`.
 
 - [ ] **Step 3: Add the `Registry` import**
@@ -518,15 +521,17 @@ with:
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_corpus_registry.py tests/test_corpus.py -q`
+Run: `rtk uv run pytest tests/test_corpus_registry.py tests/test_corpus.py -q`
 Expected: PASS (4 new + existing corpus tests; the no-registry default keeps the old suite green).
 
 - [ ] **Step 7: Run gates and commit**
 
 ```bash
-uv run pytest -q && uv run ruff check src tests && uv run pyright src
-git add src/nodes/kernel/corpus.py tests/test_corpus_registry.py
-git commit -m "feat(corpus): optional registry validates on add (fail-early, default None)"
+rtk uv run pytest -q
+rtk uv run ruff check src tests
+rtk uv run pyright src
+rtk git add src/nodes/kernel/corpus.py tests/test_corpus_registry.py
+rtk git commit -m "feat(corpus): optional registry validates on add (fail-early, default None)"
 ```
 
 ---
@@ -592,7 +597,7 @@ def test_rename_blocked_by_invalid_referrer_no_writes(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/test_corpus_registry.py -q`
+Run: `rtk uv run pytest tests/test_corpus_registry.py -q`
 Expected: FAIL — current `rename` doesn't validate, so `test_rename_validates_renamed_node_no_write` writes `note:a` (no `FacetError`) and `test_rename_blocked_by_invalid_referrer_no_writes` completes the rename.
 
 - [ ] **Step 3: Replace `rename`**
@@ -616,6 +621,10 @@ In `src/nodes/kernel/corpus.py`, replace the entire existing `rename` method:
         if old_id not in node.deprecated_ids:
             node.deprecated_ids.append(old_id)
         _rewrite_refs(node, old_id, new_id)
+        new_path = self.store.write_file(node)
+        if old_path != new_path:
+            self.store.delete_file(old_id)
+        self.index.upsert(node)
 
         for referrer_uid in referrer_uids:
             if referrer_uid == uid:
@@ -624,11 +633,6 @@ In `src/nodes/kernel/corpus.py`, replace the entire existing `rename` method:
             _rewrite_refs(referrer, old_id, new_id)
             self.store.write_file(referrer)
             self.index.upsert(referrer)
-
-        new_path = self.store.write_file(node)
-        if old_path != new_path:
-            self.store.delete_file(old_id)
-        self.index.upsert(node)
 
         return node
 ```
@@ -682,15 +686,17 @@ with the prepare-all → validate-all → commit-all version:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_corpus_registry.py tests/test_corpus.py -q`
+Run: `rtk uv run pytest tests/test_corpus_registry.py tests/test_corpus.py -q`
 Expected: PASS (3 new rename tests + the existing corpus tests, including the no-registry rename cases).
 
 - [ ] **Step 5: Run gates and commit**
 
 ```bash
-uv run pytest -q && uv run ruff check src tests && uv run pyright src
-git add src/nodes/kernel/corpus.py tests/test_corpus_registry.py
-git commit -m "feat(corpus): validate-all-before-write rename (no partial rename under a registry)"
+rtk uv run pytest -q
+rtk uv run ruff check src tests
+rtk uv run pyright src
+rtk git add src/nodes/kernel/corpus.py tests/test_corpus_registry.py
+rtk git commit -m "feat(corpus): validate-all-before-write rename (no partial rename under a registry)"
 ```
 
 ---
@@ -730,7 +736,7 @@ def test_predicates_module_reachable():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_vocab_exports.py -q`
+Run: `rtk uv run pytest tests/test_vocab_exports.py -q`
 Expected: FAIL — `AttributeError: module 'nodes.vocab' has no attribute 'register_knowledge_vocab'`.
 
 - [ ] **Step 3: Populate `src/nodes/vocab/__init__.py`**
@@ -776,7 +782,7 @@ __all__ = [
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/test_vocab_exports.py -q`
+Run: `rtk uv run pytest tests/test_vocab_exports.py -q`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Append the docs section**
@@ -810,9 +816,11 @@ Register it onto a `Registry` with `register_knowledge_vocab(reg)` (mirrors
 - [ ] **Step 6: Run full gates and commit**
 
 ```bash
-uv run pytest -q && uv run ruff check src tests && uv run pyright src
-git add src/nodes/vocab/__init__.py tests/test_vocab_exports.py docs/format.md
-git commit -m "feat(vocab): package exports + docs(format): Knowledge vocab (Plan 3)"
+rtk uv run pytest -q
+rtk uv run ruff check src tests
+rtk uv run pyright src
+rtk git add src/nodes/vocab/__init__.py tests/test_vocab_exports.py docs/format.md
+rtk git commit -m "feat(vocab): package exports + docs(format): Knowledge vocab (Plan 3)"
 ```
 
 ---
