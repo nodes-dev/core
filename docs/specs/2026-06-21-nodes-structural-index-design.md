@@ -122,9 +122,12 @@ OutRef:
 ```
 
 A single `Relation` with an explicit non-container `source` contributes two `OutRef`s (one
-`relation_source`, one `relation_target`); a membership edge likewise contributes two. The
-public `outbound`/`inbound` queries consider only `relation_*` roles; rename consults every
-role.
+`relation_source`, one `relation_target`); a membership edge likewise contributes two.
+
+`OutRef.role` is purely an **indexing/rename detail** — it makes both the rename rewrite and the
+public graph queries O(degree). The public queries are defined semantically over **distinct
+`Relation` objects**, not over `OutRef` rows (§5), so a relation never appears twice and a
+relation whose `source` is a non-container node still attributes correctly.
 
 ### Resolution
 
@@ -149,11 +152,18 @@ one uid. Violations raise `CollisionError` — same semantics as the kernel's
 ```
 Index.build(nodes: Iterable[Node]) -> Index   # classmethod / constructor
 Index.upsert(node: Node) -> None              # add or replace; updates all maps + reverse refs
-Index.remove(uid: str) -> None                # drop entry; updates all maps + reverse refs
+Index.remove(uid: str) -> None                # drop the node's OWN contributions only
 ```
 
 `upsert` is replace-safe: re-indexing an existing uid first removes its old ref contributions,
 then adds the new ones, so the maps never leak stale entries.
+
+`remove(uid)` deletes only what the removed node itself contributed: its `by_uid` entry, its
+`id_to_uid` / `deprecated_to_uid` identity claims, and the `in_refs` entries it contributed as a
+*source* (its outbound refs). It must **not** drop `in_refs` entries that surviving referrers
+contributed pointing *at* the removed node's ids — those references still exist on disk, so
+they become **dangling** and must remain visible to `dangling()` and consistent with a fresh
+rebuild. (A node's body and identity leave; inbound references to it persist as dangling.)
 
 ## 5. `Corpus` — public API
 
@@ -163,17 +173,17 @@ Corpus(root: Path)                       # build Store, scan corpus, build Index
   .add(node) -> Node                      # index collision-check; store.write_file; index.upsert
   .get(ref) -> Node                       # index.resolve_uid → live id → store.read_file
   .resolve(ref) -> Node                   # alias of get; RefError if unresolved
-  .rename(old_id, new_id) -> Node         # collision-check; write new + delete old file;
-                                          #   rewrite ONLY the referrers in_refs names (O(degree));
-                                          #   reindex affected nodes
+  .rename(old_id, new_id) -> Node         # old_id must be a LIVE id (else RefError); collision-check;
+                                          #   write new + delete old file; rewrite ONLY the referrers
+                                          #   in_refs names (O(degree)); reindex affected nodes
   .delete(id) -> None                     # store.delete_file + index.remove; live-id-only (documented)
   .all() -> list[Node]                    # passthrough to store.all_nodes
 
-  # graph queries (resolved to uids; dangling targets returned, not raised):
-  .outbound(ref) -> list[ResolvedEdge]
-  .inbound(ref) -> list[ResolvedEdge]
+  # graph queries — input ref must resolve (live or via deprecated_ids); else RefError:
+  .outbound(ref) -> list[ResolvedEdge]    # relations whose source resolves to ref's uid
+  .inbound(ref) -> list[ResolvedEdge]     # relations whose target resolves to ref's uid
   .neighbors(ref) -> list[Node]           # distinct resolved neighbors (outbound + inbound)
-  .dangling() -> list[ResolvedEdge]       # edges whose target ref resolves to nothing
+  .dangling() -> list[ResolvedEdge]       # corpus-wide: relations whose target resolves to no uid
 ```
 
 ```
@@ -183,18 +193,27 @@ ResolvedEdge:
   target_uid: str | None        # None when the target ref is dangling
 ```
 
-**Graph queries are uid-based, not raw-ref-based.** `inbound(ref)` and `outbound(ref)` first
-resolve `ref` to a uid (`Index.resolve_uid`), then return edges by that uid — so they are
-stable across stale ids. `inbound("topic:new")` merges every `relation_target` `OutRef` whose
-written ref resolves to that uid, including edges still written as the deprecated `topic:old`;
-`outbound` returns the resolved node's own `relation_*` edges. Each returned `ResolvedEdge`
-re-resolves its endpoints to uids (`target_uid = None` when the written ref resolves to
-nothing). A `ref` that resolves to no uid raises `RefError` (it is not the same as a node that
-exists but has no edges).
+**Graph queries are uid-based and defined over distinct `Relation` objects.** `outbound(ref)`
+and `inbound(ref)` first resolve `ref` to a uid (`Index.resolve_uid`); a ref that resolves to no
+uid raises `RefError` (distinct from a resolvable node that simply has no edges):
+
+- `outbound(uid)` returns the distinct relations whose `source` resolves to `uid`.
+- `inbound(uid)` returns the distinct relations whose `target` resolves to `uid` — merged across
+  every written ref that resolves to that uid, so an edge still written as the deprecated
+  `topic:old` is included in `inbound("topic:new")`.
+
+Each `ResolvedEdge` re-resolves its endpoints to uids. **Dangling-target semantics:** because
+`inbound` is keyed on the *target's* uid, it can only return edges to a node that still
+resolves; it cannot (and need not) surface edges to a fully-deleted id. Edges whose target no
+longer resolves are surfaced by **`outbound(existing_source)`** (with `target_uid = None`) and
+enumerated corpus-wide by **`dangling()`**. A dangling target is never an error.
 
 ### `rename` flow (the O(degree) payoff)
 
-1. Collision-check `new_id` against the index.
+1. **`old_id` must be a live id.** If `old_id` is not in `index.id_to_uid` (it is unknown or
+   only a deprecated id), raise `RefError` and do nothing — rename is live-id-only, consistent
+   with `delete`. This avoids writing a new file while leaving the current live file behind and
+   rewriting only the stale ref string. Then collision-check `new_id` against the index.
 2. **Snapshot the referrer set first.** Collect `{inref.source_uid for inref in
    index.in_refs.get(old_id, [])}` into a deduplicated set *before* any index mutation — the
    rename loop calls `index.upsert`, which rewrites `in_refs`, so iterating the live structure
@@ -238,8 +257,10 @@ choice.
 - Unresolved ref (`get` / `resolve`) → `RefError`.
 - Identity collision (`add` / `rename`) → `CollisionError`.
 - **Dangling edges are a normal state**, not an error: a relation whose target ref does not
-  resolve (target not yet created, or deleted) is returned by `outbound` / `inbound` /
-  `dangling` with `target_uid = None`. Resolution and graph queries never raise on dangling refs.
+  resolve (target not yet created, or deleted) is returned by **`outbound(existing_source)`** and
+  **`dangling()`** with `target_uid = None`. `inbound` is keyed on the target's uid, so by
+  construction it never surfaces edges to an unresolvable id. Graph queries never raise on a
+  dangling *target*; they raise `RefError` only when the *input* `ref` itself does not resolve.
 
 All error types are the existing `nodes.kernel.errors` classes — no new error types.
 
@@ -261,8 +282,12 @@ All error types are the existing `nodes.kernel.errors` classes — no new error 
     rewritten and written exactly once (snapshot/dedup).
   - **inbound across a deprecated id** — `inbound(new_id)` includes an edge still written as
     `old_id`.
-- **Rebuild-equivalence property test (§6):** drive a sequence of mutations, assert live index
-  equals a fresh rebuild from disk.
+  - **rename rejects a deprecated/unknown `old_id`** — `RefError`, no file written or deleted.
+  - **delete leaves dangling inbound** — after deleting a target, `outbound(source)` reports the
+    edge with `target_uid = None`, `dangling()` lists it, `inbound` on the deleted id raises
+    `RefError`, and a fresh rebuild matches the live index (`remove` kept the referrer's `in_ref`).
+- **Rebuild-equivalence property test (§6):** drive a sequence of mutations (add/rename/delete,
+  including deletes that strand inbound refs), assert live index equals a fresh rebuild from disk.
 - **Migration:** Plan 1's `Store` tests for `resolve` / collision / `rename` move up to target
   `Corpus`; `Store`'s own tests shrink to file mechanics. The existing suite stays green
   (adjusted for the relocated API), plus the new `Index` / `Corpus` / property tests.
