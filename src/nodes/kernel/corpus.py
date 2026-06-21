@@ -6,6 +6,7 @@ from nodes.kernel.errors import CollisionError, RefError
 from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
+from nodes.kernel.registry import Registry
 from nodes.kernel.shapes import MEMBERSHIP
 from nodes.kernel.store import Store
 
@@ -37,11 +38,14 @@ def _rewrite_refs(node: Node, old: str, new: str) -> None:
 class Corpus:
     """Coordinator over a `Store` + an in-memory `Index`. The primary kernel API."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, registry: Registry | None = None) -> None:
         self.store = Store(root)
+        self.registry = registry
         self.index = Index.build(self.store.all_nodes())
 
     def add(self, node: Node) -> Node:
+        if self.registry is not None:
+            self.registry.validate(node)
         self.index.assert_addable(node)
         self.store.write_file(node)
         self.index.upsert(node)
