@@ -212,7 +212,11 @@ git commit -m "refactor(store): slim Store to file mechanics; cross-corpus logic
 - `upsert` is the mechanical maintenance op: it never raises on collision. The collision *gate* is the separate `assert_addable`, which `Corpus.add` calls **before** writing the file (so the index never gets ahead of disk). This split is deliberate: `rename` legitimately re-`upsert`s a node whose live id changed, which must not trip a collision.
 - Relations are normalized (source always explicit), so a plain `related:` entry has `source == node.id`. Each `Relation` contributes two `OutRef`s (`relation_source`, `relation_target`); membership members and each edge endpoint contribute their own `OutRef`s. This completeness is what makes `rename` O(degree).
 - `remove(uid)` drops only what this node contributed: its `by_uid` entry, its identity claims, and the `in_refs` rows whose `source_uid == uid`. It must NOT drop `in_refs` rows other nodes contributed pointing at this node — those persist as dangling.
-- `build()` enforces the collision contract: it calls `assert_addable` before each `upsert`, so constructing a `Corpus` over a corrupt corpus (two files claiming the same id) fails early rather than letting the last file silently win.
+- `build()` enforces the collision contract: it rejects duplicate uids and calls
+  `assert_addable` before each `upsert`, so constructing a `Corpus` over a corrupt corpus (two
+  files claiming the same node or same id) fails early rather than letting the last file silently
+  win. `Corpus.add()` still allows same-uid/same-id overwrite; the duplicate-uid check is
+  build-only because disk scan duplicates mean two files claim one identity.
 - **Membership facet payloads are raw dicts** — the canonical on-disk form. `node.facets["membership"]["edges"]` are plain dicts with string `source`/`target` (this is what `node_to_markdown` yaml-dumps and `node_from_markdown` reads back; `Relation` objects could not serialize there). `_extract_out_refs` therefore reads edges as dicts, by design — do not add a `Relation`-object branch.
 
 - [ ] **Step 1: Write `tests/test_index.py`**
@@ -255,6 +259,13 @@ def test_build_rejects_colliding_corpus():
     b = Node(id="topic:a", kind="topic", title="B")  # same id, different uid → corrupt corpus
     with pytest.raises(CollisionError):
         Index.build([a, b])
+
+
+def test_build_rejects_duplicate_uid_same_id():
+    a = Node(id="topic:a", kind="topic", title="A")
+    duplicate = Node(id="topic:a", kind="topic", title="A copy", uid=a.uid)
+    with pytest.raises(CollisionError):
+        Index.build([a, duplicate])
 
 
 def test_assert_addable_rejects_same_id_different_uid():
@@ -401,6 +412,8 @@ class Index:
     def build(cls, nodes: Iterable[Node]) -> "Index":
         idx = cls()
         for node in nodes:
+            if node.uid in idx.by_uid:
+                raise CollisionError(f"duplicate uid {node.uid!r} in corpus")
             idx.assert_addable(node)  # fail-early on a corrupt corpus (collision contract)
             idx.upsert(node)
         return idx
@@ -459,7 +472,7 @@ class Index:
 - [ ] **Step 4: Run to verify pass**
 
 Run: `uv run pytest tests/test_index.py -v`
-Expected: PASS (10 tests).
+Expected: PASS (11 tests).
 
 Run: `uv run ruff check . && uv run pyright src`
 Expected: clean.
@@ -622,7 +635,7 @@ Add these methods to the `Index` class (and ensure `ResolvedEdge` is already def
 - [ ] **Step 4: Run to verify pass**
 
 Run: `uv run pytest tests/test_index.py -v`
-Expected: PASS (all Task 2 + Task 3 tests, 16 total).
+Expected: PASS (all Task 2 + Task 3 tests, 17 total).
 
 Run: `uv run ruff check . && uv run pyright src`
 Expected: clean.
@@ -1075,7 +1088,7 @@ git commit -m "feat(corpus): O(degree) rename — targeted referrer rewrite via 
 - Consumes: `Corpus` (Tasks 4–5), `Index` (Task 2).
 
 **Design notes:**
-- The invariant: after any sequence of `Corpus` mutations, the live index must equal a fresh `Index.build(store.all_nodes())`. Compare via a normalized form — scalar maps directly; list-valued `in_refs` as sorted multisets keyed by `(source_uid, ref, role)` — so insertion-order differences don't cause false failures.
+- The invariant: after any sequence of `Corpus` mutations, the live index must equal a fresh `Index.build(store.all_nodes())`. Compare via a normalized form — scalar maps directly; list-valued `out_refs` / `in_refs` as sorted multisets keyed by `(source_uid, ref, role, relation_signature)` — so insertion-order differences don't cause false failures while still catching stale relation payloads (`predicate`, `directed`, `weight`, `attrs`).
 - Drive a sequence that includes adds, a rename (creating deprecated ids and rewriting referrers), and a delete that strands an inbound ref (exercising the `remove`-keeps-dangling path).
 
 - [ ] **Step 1: Write `tests/test_index_rebuild_equivalence.py`**
@@ -1083,10 +1096,30 @@ git commit -m "feat(corpus): O(degree) rename — targeted referrer rewrite via 
 ```python
 from __future__ import annotations
 
+import json
+
 from nodes.kernel.corpus import Corpus
 from nodes.kernel.index import Index
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
+
+
+def _relation_signature(out_ref) -> tuple | None:
+    rel = out_ref.relation
+    if rel is None:
+        return None
+    return (
+        rel.source,
+        rel.predicate,
+        rel.target,
+        rel.directed,
+        rel.weight,
+        json.dumps(rel.attrs, sort_keys=True, default=repr),
+    )
+
+
+def _out_ref_signature(out_ref) -> tuple:
+    return (out_ref.ref, out_ref.role, _relation_signature(out_ref))
 
 
 def _normalize(index: Index) -> dict:
@@ -1096,14 +1129,14 @@ def _normalize(index: Index) -> dict:
                 e.id,
                 e.kind,
                 tuple(sorted(e.deprecated_ids)),
-                tuple(sorted((o.ref, o.role) for o in e.out_refs)),  # dangling() depends on these
+                tuple(sorted(_out_ref_signature(o) for o in e.out_refs)),
             )
             for uid, e in index.by_uid.items()
         },
         "id_to_uid": dict(index.id_to_uid),
         "deprecated_to_uid": dict(index.deprecated_to_uid),
         "in_refs": {
-            ref: sorted((r.source_uid, r.out_ref.ref, r.out_ref.role) for r in rows)
+            ref: sorted((r.source_uid, *_out_ref_signature(r.out_ref)) for r in rows)
             for ref, rows in index.in_refs.items()
         },
     }
