@@ -9,17 +9,19 @@ from nodes.kernel.relations import RELATES_TO, Relation, relates_to
 
 
 def split_frontmatter(text: str) -> tuple[dict, str]:
-    if not text.startswith("---"):
+    if text.startswith("---\r\n"):
+        nl = "\r\n"
+    elif text.startswith("---\n"):
+        nl = "\n"
+    else:
         return {}, text
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    rest = text[len("---") + len(nl):]
+    sep = f"{nl}---{nl}"
+    idx = rest.find(sep)
+    if idx == -1:
         return {}, text
-    fm = yaml.safe_load(parts[1]) or {}
-    body = parts[2]
-    if body.startswith("\r\n"):
-        body = body[2:]
-    elif body.startswith("\n"):
-        body = body[1:]
+    fm = yaml.safe_load(rest[:idx]) or {}
+    body = rest[idx + len(sep):]
     return fm, body
 
 

@@ -71,3 +71,27 @@ def test_plain_relatesto_serializes_into_related_only():
     md = node_to_markdown(n)
     assert "related:" in md
     assert "relations:" not in md
+
+
+def test_split_is_line_anchored_and_preserves_body_rule():
+    # A non-line-anchored opener must NOT be treated as frontmatter.
+    fm, body = split_frontmatter("---foo\nbar: 1\n---\nx")
+    assert fm == {} and body == "---foo\nbar: 1\n---\nx"
+
+    # A horizontal rule inside the body is preserved verbatim.
+    text = (
+        "---\n"
+        "id: topic:a\n"
+        "uid: deadbeefdeadbeefdeadbeefdeadbeef\n"
+        "kind: topic\n"
+        "title: A\n"
+        "---\n"
+        "Intro.\n"
+        "\n"
+        "---\n"
+        "\n"
+        "After rule.\n"
+    )
+    fm, body = split_frontmatter(text)
+    assert fm["id"] == "topic:a"
+    assert body == "Intro.\n\n---\n\nAfter rule.\n"
