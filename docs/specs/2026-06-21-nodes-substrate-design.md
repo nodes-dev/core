@@ -75,7 +75,7 @@ The universal container. Every node has:
 | `title` | Human-readable display title. |
 | `body` | Markdown content (single author per context, for now). |
 | `metadata` | `created`, `updated`, `version`, … (structural/system metadata). |
-| `related` | Sugar list of untyped backlinks (`predicate: relatesTo`). |
+| `related` | On-disk **sugar** for untyped outbound links (`predicate: relatesTo`) — a serialization projection of those relations, not a separate stored field. |
 | `relations` | Typed relations (see 3.2). |
 | `facets` | Registry-validated map of typed payloads (see 3.3). |
 

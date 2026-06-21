@@ -71,6 +71,7 @@ typeCheckingMode = "basic"
 dev = [
     "pytest>=9.0",
     "ruff>=0.15.7",
+    "pyright>=1.1.390",
 ]
 ```
 
@@ -453,7 +454,7 @@ git commit -m "feat(kernel): Relation primitive with serialized forms + tag/rela
 - Produces:
   - `class NodeMetadata(BaseModel)`: `created: date | None = None`, `updated: date | None = None`, `version: int = 1`.
   - `def new_uid() -> str` — returns `uuid4().hex`.
-  - `class Node(BaseModel)`: `id: str`, `uid: str = Field(default_factory=new_uid)`, `kind: str`, `title: str`, `body: str = ""`, `metadata: NodeMetadata = NodeMetadata()`, `related: list[str] = []`, `relations: list[Relation] = []`, `facets: dict[str, dict] = {}`, `deprecated_ids: list[str] = []`. A model validator asserts `id` parses and its kind segment equals `kind` (raises `ValidationError`).
+  - `class Node(BaseModel)`: `id: str`, `uid: str = Field(default_factory=new_uid)`, `kind: str`, `title: str`, `body: str = ""`, `metadata: NodeMetadata = NodeMetadata()`, `relations: list[Relation] = []`, `facets: dict[str, dict] = {}`, `deprecated_ids: list[str] = []`. A model validator asserts `id` parses and its kind segment equals `kind` (raises `ValidationError`). There is **no** `related` model field: `related:` is an on-disk serialization sugar over `relatesTo` relations (handled in Task 7), not stored separately.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -471,7 +472,7 @@ def test_node_minimal_defaults():
     n = Node(id="topic:polycomb", kind="topic", title="Polycomb")
     assert n.body == ""
     assert n.metadata.version == 1
-    assert n.related == [] and n.relations == [] and n.facets == {}
+    assert n.relations == [] and n.facets == {}
     assert len(n.uid) == 32  # uuid4 hex
 
 
@@ -535,7 +536,6 @@ class Node(BaseModel):
     title: str
     body: str = ""
     metadata: NodeMetadata = Field(default_factory=NodeMetadata)
-    related: list[str] = Field(default_factory=list)
     relations: list[Relation] = Field(default_factory=list)
     facets: dict[str, dict] = Field(default_factory=dict)
     deprecated_ids: list[str] = Field(default_factory=list)
@@ -900,7 +900,7 @@ git commit -m "feat(kernel): structural shapes + membership facet + invariants"
 - Consumes: `Node`, `NodeMetadata` from `nodes.kernel.node`; `Relation`, `RELATES_TO`, `relates_to` from `nodes.kernel.relations`.
 - Produces:
   - `def split_frontmatter(text: str) -> tuple[dict, str]` — returns `(frontmatter_dict, body)`; `({}, text)` when no frontmatter.
-  - `def node_from_markdown(text: str) -> Node` — builds a `Node`; `related:` entries become `relatesTo` relations sourced at the node id; `relations:` entries are deserialized via `Relation.from_serialized(..., container_id=node_id)`.
+  - `def node_from_markdown(text: str) -> Node` — builds a `Node`; top-level `created`/`updated`/`version` populate `NodeMetadata`; `related:` entries become `relatesTo` relations sourced at the node id; `relations:` entries are deserialized via `Relation.from_serialized(..., container_id=node_id)`.
   - `def node_to_markdown(node: Node) -> str` — emits top-level fields, splits relations into `related:` (bare `relatesTo` with no extras) vs `relations:` (everything else, via `to_serialized`), then `facets:`, then the body. Plain-`relatesTo` relations are NOT duplicated into `relations:`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1002,7 +1002,7 @@ def node_from_markdown(text: str) -> Node:
         relations.append(relates_to(node_id, ref))
     for raw in fm.get("relations", []) or []:
         relations.append(Relation.from_serialized(raw, container_id=node_id))
-    meta = NodeMetadata.model_validate(fm.get("metadata", {}))
+    meta = NodeMetadata.model_validate({k: fm[k] for k in ("created", "updated", "version") if k in fm})
     return Node(
         id=node_id,
         uid=fm["uid"],
@@ -1028,9 +1028,12 @@ def _is_plain_relatesto(rel: Relation, node_id: str) -> bool:
 
 def node_to_markdown(node: Node) -> str:
     fm: dict[str, Any] = {"id": node.id, "uid": node.uid, "kind": node.kind, "title": node.title}
-    meta = node.metadata.model_dump(exclude_none=True)
-    if meta != {"version": 1}:
-        fm["metadata"] = meta
+    if node.metadata.created is not None:
+        fm["created"] = node.metadata.created
+    if node.metadata.updated is not None:
+        fm["updated"] = node.metadata.updated
+    if node.metadata.version != 1:
+        fm["version"] = node.metadata.version
     related = [r.target for r in node.relations if _is_plain_relatesto(r, node.id)]
     typed = [r.to_serialized(node.id) for r in node.relations if not _is_plain_relatesto(r, node.id)]
     if related:
@@ -1066,15 +1069,16 @@ git commit -m "feat(kernel): markdown frontmatter parse/serialize with source-im
 - Test: `tests/test_store.py`
 
 **Interfaces:**
-- Consumes: `Node` from `nodes.kernel.node`; `node_from_markdown`, `node_to_markdown` from `nodes.kernel.frontmatter`; `NodeId` from `nodes.kernel.ids`; `CollisionError`, `RefError` from `nodes.kernel.errors`.
+- Consumes: `Node` from `nodes.kernel.node`; `node_from_markdown`, `node_to_markdown` from `nodes.kernel.frontmatter`; `NodeId` from `nodes.kernel.ids`; `MEMBERSHIP` from `nodes.kernel.shapes`; `CollisionError`, `RefError` from `nodes.kernel.errors`.
 - Produces:
   - `class Store`: constructed with `Store(root: Path)`.
     - `path_for(node_id: str) -> Path` → `root/<kind>/<slug>.md` (slug colons → `__`).
     - `write(node: Node) -> Path` — refuses to create a *new* file whose id collides with another node's live id or active `deprecated_id` (`CollisionError`); overwriting the same uid is allowed.
-    - `read(node_id: str) -> Node` (raises `RefError` if absent).
+    - `resolve(ref: str) -> Node` — resolves a ref by live id (direct file path) or active `deprecated_id` (linear scan); raises `RefError` if nothing resolves (spec §3.5).
+    - `read(node_id: str) -> Node` — delegates to `resolve`, so stale ids still resolve after a rename.
     - `delete(node_id: str) -> None`.
     - `all_nodes() -> list[Node]`.
-    - `rename(old_id: str, new_id: str) -> Node` — moves the file, sets new `id`, appends `old_id` to `deprecated_ids`, rewrites every inbound `related`/`relations`/membership-edge ref across the corpus from `old_id` to `new_id`; `uid` unchanged.
+    - `rename(old_id: str, new_id: str) -> Node` — moves the file, sets new `id`, appends `old_id` to `deprecated_ids`, rewrites every inbound ref across the corpus from `old_id` to `new_id` — covering both `related`/`relations` AND the `membership` facet (members + edges) of structure nodes, since those are canonical file refs; `uid` unchanged.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1130,6 +1134,29 @@ def test_rename_rewrites_inbound_refs(tmp_path):
     b = store.read("topic:b")
     assert relates_to("topic:b", "topic:new") in b.relations
     assert all(r.target != "topic:old" for r in b.relations)
+
+
+def test_resolve_old_id_after_rename(tmp_path):
+    store = Store(tmp_path)
+    store.write(Node(id="topic:old", kind="topic", title="Old"))
+    store.rename("topic:old", "topic:new")
+    assert store.resolve("topic:old").id == "topic:new"
+    assert store.read("topic:old").id == "topic:new"  # stale ref survives
+
+
+def test_rename_rewrites_membership_refs(tmp_path):
+    store = Store(tmp_path)
+    store.write(Node(id="topic:old", kind="topic", title="Old"))
+    store.write(Node(id="topic:x", kind="topic", title="X"))
+    store.write(Node(id="graph:g", kind="graph", title="G", facets={"membership": {
+        "shape": "graph",
+        "members": ["topic:old", "topic:x"],
+        "edges": [{"source": "topic:old", "predicate": "to", "target": "topic:x"}],
+    }}))
+    store.rename("topic:old", "topic:new")
+    mem = store.read("graph:g").facets["membership"]
+    assert "topic:new" in mem["members"] and "topic:old" not in mem["members"]
+    assert mem["edges"][0]["source"] == "topic:new"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1149,6 +1176,7 @@ from nodes.kernel.errors import CollisionError, RefError
 from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
 from nodes.kernel.ids import NodeId
 from nodes.kernel.node import Node
+from nodes.kernel.shapes import MEMBERSHIP
 
 
 class Store:
@@ -1177,11 +1205,18 @@ class Store:
         path.write_text(node_to_markdown(node), encoding="utf-8")
         return path
 
+    def resolve(self, ref: str) -> Node:
+        """Resolve a ref by live id (file path) or active deprecated id (spec §3.5)."""
+        path = self.path_for(ref)
+        if path.is_file():
+            return node_from_markdown(path.read_text(encoding="utf-8"))
+        for n in self.all_nodes():
+            if ref in n.deprecated_ids:
+                return n
+        raise RefError(f"no node resolves ref {ref!r}")
+
     def read(self, node_id: str) -> Node:
-        path = self.path_for(node_id)
-        if not path.is_file():
-            raise RefError(f"no node at {node_id!r}")
-        return node_from_markdown(path.read_text(encoding="utf-8"))
+        return self.resolve(node_id)
 
     def delete(self, node_id: str) -> None:
         path = self.path_for(node_id)
@@ -1206,24 +1241,56 @@ class Store:
         for other in self.all_nodes():
             if other.id == new_id:
                 continue
-            changed = False
-            for rel in other.relations:
-                if rel.target == old_id:
-                    rel.target = new_id
-                    changed = True
-                if rel.source == old_id:
-                    rel.source = new_id
-                    changed = True
+            changed = self._rewrite_relations(other, old_id, new_id)
+            changed = self._rewrite_membership(other, old_id, new_id) or changed
             if changed:
                 self.write(other)
+
+    @staticmethod
+    def _rewrite_relations(node: Node, old_id: str, new_id: str) -> bool:
+        changed = False
+        for rel in node.relations:
+            if rel.target == old_id:
+                rel.target = new_id
+                changed = True
+            if rel.source == old_id:
+                rel.source = new_id
+                changed = True
+        return changed
+
+    @staticmethod
+    def _rewrite_membership(node: Node, old_id: str, new_id: str) -> bool:
+        mem = node.facets.get(MEMBERSHIP)
+        if not isinstance(mem, dict):
+            return False
+        changed = False
+        members = mem.get("members")
+        if isinstance(members, list):
+            updated = [new_id if m == old_id else m for m in members]
+            if updated != members:
+                mem["members"] = updated
+                changed = True
+        elif isinstance(members, dict):
+            for key, val in list(members.items()):
+                if val == old_id:
+                    members[key] = new_id
+                    changed = True
+        for edge in mem.get("edges", []) or []:
+            if edge.get("source") == old_id:
+                edge["source"] = new_id
+                changed = True
+            if edge.get("target") == old_id:
+                edge["target"] = new_id
+                changed = True
+        return changed
 ```
 
-Note: `_rewrite_inbound` covers `related:`/`relations:` (both live in `node.relations` after parsing). Membership-edge rewriting for structure nodes is deferred to the index plan (Plan 2), where graph traversal lives; flagged in Task 9's format doc as a known kernel limitation.
+Note: `_rewrite_inbound` rewrites both `related`/`relations` (which live in `node.relations` after parsing) AND the `membership` facet's `members` + `edges` of structure nodes — all are canonical file refs. `resolve()` is a linear scan here; Plan 2's derived index makes it O(1).
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_store.py -v`
-Expected: PASS (5 cases).
+Expected: PASS (7 cases).
 
 - [ ] **Step 5: Commit**
 
@@ -1313,7 +1380,8 @@ One file per node: YAML frontmatter + markdown body. Files are canonical (git-ve
 - `uid` (required): immutable UUID (hex). Identity anchor; survives renames.
 - `kind` (required): must equal the `id`'s kind segment.
 - `title` (required).
-- `metadata` (optional): `created`, `updated`, `version` (default 1; omitted when default).
+- `created`, `updated` (optional): ISO dates, top-level.
+- `version` (optional): integer, top-level, default 1 (omitted when default).
 - `related` (optional): list of target ids — sugar for `relatesTo` relations sourced at this node.
 - `relations` (optional): typed relations; `source` omitted (implied = this node).
 - `facets` (optional): nested map, keyed by facet name.
@@ -1329,8 +1397,8 @@ A structure node carries a `membership` facet: `{shape, members, edges?}`.
 Shapes: `set`, `list`, `dict`, `graph`, `dag`, `tree` (invariants per spec §3.4).
 
 ## Known kernel limitations (resolved in later plans)
-- Rename rewrites `related`/`relations` refs but NOT membership-edge refs (Plan 2: index).
-- No derived search/graph index yet (Plan 2).
+- No derived search/graph index yet (Plan 2): full-text, resolved relation graph, embeddings.
+  Kernel `resolve()` / collision checks do linear scans; the index makes lookups O(1).
 ```
 
 - [ ] **Step 5: Run the whole suite**
@@ -1356,12 +1424,12 @@ git commit -m "docs(kernel): on-disk format reference + golden round-trip test"
 
 **Spec coverage:**
 - §2 layering (`nodes.kernel` subpackage, reserved vocab/domain) → Task 1.
-- §3.1 Node (id/uid/kind/title/body/metadata/related/relations/facets) → Task 4.
+- §3.1 Node (id/uid/kind/title/body/metadata/relations/facets; `related` is on-disk sugar, not a stored field) → Task 4.
 - §3.2 Relation primitive + normalized/serialized forms + tag/related sugar → Task 3; serialize split → Task 7.
 - §3.3 facets + registry + invariants → Task 5.
 - §3.4 structural shapes + membership facet + invariants → Task 6.
-- §3.5 identity/rename contract (stored=id, uid anchor, deprecated_ids, collisions) → Tasks 2, 4, 8.
-- §4 on-disk format (nested facets, source-implied) → Tasks 7, 9.
+- §3.5 identity/rename contract (stored=id, uid anchor, `resolve()` via deprecated_ids, ref rewrite incl. membership, collisions) → Tasks 2, 4, 8.
+- §4 on-disk format (nested facets, top-level created/updated/version, source-implied) → Tasks 7, 9.
 - §5 derived index → **out of scope (Plan 2)**, flagged in `format.md`.
 - §6 Python lib (CRUD) → Tasks 4–8; TS port out of scope.
 - §10 `uid` backfill → **out of scope (science-migration plan)**; kernel mints uuid4 for new nodes (Task 4).
@@ -1370,4 +1438,4 @@ git commit -m "docs(kernel): on-disk format reference + golden round-trip test"
 
 **Type consistency:** `Node`, `Relation`, `Membership`, `Registry`, `KindSpec`, `Store` signatures match across Interfaces blocks and usage. `node.relations` holds the merged related+typed relations everywhere (Tasks 4, 7, 8). `MEMBERSHIP` facet key consistent (Tasks 6, 9).
 
-**Known deferrals (intentional, flagged in `docs/format.md`):** membership-edge rewrite on rename; derived index; TS port; `uid` backfill migration.
+**Known deferrals (intentional, flagged in `docs/format.md`):** derived index (incl. O(1) ref resolution); TS port; `uid` backfill migration. Membership-edge rewrite on rename is **in scope** and implemented in Task 8.
