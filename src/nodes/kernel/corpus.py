@@ -106,6 +106,7 @@ class Corpus:
         uid = self.index.id_to_uid[old_id]
         referrer_uids = {ir.source_uid for ir in self.index.in_refs.get(old_id, [])}
 
+        # --- prepare: rewrite every node that will change, in memory ---
         node = self.store.read_file(old_id)
         old_path = self.store.path_for(old_id)
         node.id = new_id
@@ -113,16 +114,27 @@ class Corpus:
         if old_id not in node.deprecated_ids:
             node.deprecated_ids.append(old_id)
         _rewrite_refs(node, old_id, new_id)
-        new_path = self.store.write_file(node)
-        if old_path != new_path:
-            self.store.delete_file(old_id)
-        self.index.upsert(node)
 
+        referrers: list[Node] = []
         for referrer_uid in referrer_uids:
             if referrer_uid == uid:
                 continue
             referrer = self.store.read_file(self.index.by_uid[referrer_uid].id)
             _rewrite_refs(referrer, old_id, new_id)
+            referrers.append(referrer)
+
+        # --- validate: ALL writes, before ANY write (fail-early, no partial rename) ---
+        if self.registry is not None:
+            self.registry.validate(node)
+            for referrer in referrers:
+                self.registry.validate(referrer)
+
+        # --- commit: renamed node first (crash-atomic), then referrers ---
+        new_path = self.store.write_file(node)
+        if old_path != new_path:
+            self.store.delete_file(old_id)
+        self.index.upsert(node)
+        for referrer in referrers:
             self.store.write_file(referrer)
             self.index.upsert(referrer)
 
