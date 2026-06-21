@@ -2,101 +2,51 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import CollisionError, RefError
+from nodes.kernel.errors import RefError
 from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
 from nodes.kernel.store import Store
 
 
-def test_write_read_roundtrip(tmp_path):
+def test_write_file_read_file_roundtrip(tmp_path):
     store = Store(tmp_path)
     n = Node(id="topic:a", kind="topic", title="A", body="hi")
-    store.write(n)
-    got = store.read("topic:a")
+    store.write_file(n)
+    got = store.read_file("topic:a")
     assert got.title == "A" and got.body == "hi" and got.uid == n.uid
 
 
-def test_collision_on_new_id(tmp_path):
+def test_write_file_has_no_collision_check(tmp_path):
+    # Store is a dumb primitive: writing a different uid at the same id just overwrites.
     store = Store(tmp_path)
-    store.write(Node(id="topic:a", kind="topic", title="A"))
-    with pytest.raises(CollisionError):
-        store.write(Node(id="topic:a", kind="topic", title="Other"))  # different uid, same id
+    store.write_file(Node(id="topic:a", kind="topic", title="A"))
+    store.write_file(Node(id="topic:a", kind="topic", title="Other"))  # no raise
+    assert store.read_file("topic:a").title == "Other"
 
 
-def test_collision_on_duplicate_uid_at_different_id(tmp_path):
+def test_path_for_encodes_curie_slug(tmp_path):
     store = Store(tmp_path)
-    original = Node(id="topic:a", kind="topic", title="A")
-    store.write(original)
-    with pytest.raises(CollisionError):
-        store.write(Node(id="topic:b", kind="topic", title="B", uid=original.uid))
+    path = store.path_for("gene:HGNC:PHF19")
+    assert path == tmp_path / "gene" / "HGNC__PHF19.md"
 
 
-def test_collision_on_deprecated_id_claim(tmp_path):
-    store = Store(tmp_path)
-    store.write(Node(id="topic:a", kind="topic", title="A"))
-    with pytest.raises(CollisionError):
-        store.write(Node(id="topic:b", kind="topic", title="B", deprecated_ids=["topic:a"]))
-
-
-def test_overwrite_same_uid_ok(tmp_path):
-    store = Store(tmp_path)
-    n = Node(id="topic:a", kind="topic", title="A")
-    store.write(n)
-    n.title = "A2"
-    store.write(n)  # same uid → allowed
-    assert store.read("topic:a").title == "A2"
-
-
-def test_read_missing_raises(tmp_path):
+def test_read_file_missing_raises(tmp_path):
     with pytest.raises(RefError):
-        Store(tmp_path).read("topic:ghost")
+        Store(tmp_path).read_file("topic:ghost")
 
 
-def test_rename_rewrites_inbound_refs(tmp_path):
+def test_delete_file_removes_then_missing_raises(tmp_path):
     store = Store(tmp_path)
-    store.write(Node(id="topic:old", kind="topic", title="Old"))
-    store.write(Node(id="topic:b", kind="topic", title="B",
-                     relations=[relates_to("topic:b", "topic:old")]))
-    renamed = store.rename("topic:old", "topic:new")
-    assert renamed.id == "topic:new"
-    assert "topic:old" in renamed.deprecated_ids
-    b = store.read("topic:b")
-    assert relates_to("topic:b", "topic:new") in b.relations
-    assert all(r.target != "topic:old" for r in b.relations)
+    store.write_file(Node(id="topic:a", kind="topic", title="A"))
+    store.delete_file("topic:a")
+    with pytest.raises(RefError):
+        store.read_file("topic:a")
+    with pytest.raises(RefError):
+        store.delete_file("topic:a")
 
 
-def test_resolve_old_id_after_rename(tmp_path):
+def test_all_nodes_scans_corpus_sorted(tmp_path):
     store = Store(tmp_path)
-    store.write(Node(id="topic:old", kind="topic", title="Old"))
-    store.rename("topic:old", "topic:new")
-    assert store.resolve("topic:old").id == "topic:new"
-    assert store.read("topic:old").id == "topic:new"  # stale ref survives
-
-
-def test_rename_rewrites_membership_refs(tmp_path):
-    store = Store(tmp_path)
-    store.write(Node(id="topic:old", kind="topic", title="Old"))
-    store.write(Node(id="topic:x", kind="topic", title="X"))
-    store.write(Node(id="graph:g", kind="graph", title="G", facets={"membership": {
-        "shape": "graph",
-        "members": ["topic:old", "topic:x"],
-        "edges": [{"source": "topic:old", "predicate": "to", "target": "topic:x"}],
-    }}))
-    store.rename("topic:old", "topic:new")
-    mem = store.read("graph:g").facets["membership"]
-    assert "topic:new" in mem["members"] and "topic:old" not in mem["members"]
-    assert mem["edges"][0]["source"] == "topic:new"
-
-
-def test_rename_rewrites_dict_membership_refs(tmp_path):
-    store = Store(tmp_path)
-    store.write(Node(id="topic:old", kind="topic", title="Old"))
-    store.write(Node(id="topic:x", kind="topic", title="X"))
-    store.write(Node(id="dict:d", kind="dict", title="D", facets={"membership": {
-        "shape": "dict",
-        "members": {"a": "topic:old", "b": "topic:x"},
-    }}))
-    store.rename("topic:old", "topic:new")
-    mem = store.read("dict:d").facets["membership"]
-    assert mem["members"]["a"] == "topic:new"
-    assert mem["members"]["b"] == "topic:x"
+    store.write_file(Node(id="topic:b", kind="topic", title="B"))
+    store.write_file(Node(id="topic:a", kind="topic", title="A"))
+    ids = [n.id for n in store.all_nodes()]
+    assert ids == ["topic:a", "topic:b"]
