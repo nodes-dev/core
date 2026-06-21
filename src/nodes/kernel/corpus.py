@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nodes.kernel.errors import RefError
+from nodes.kernel.errors import CollisionError, RefError
+from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
 from nodes.kernel.shapes import MEMBERSHIP
@@ -91,3 +92,34 @@ class Corpus:
                 neighbor_uids.add(edge.source_uid)
         neighbor_uids.discard(uid)
         return [self.store.read_file(self.index.by_uid[u].id) for u in sorted(neighbor_uids)]
+
+    def rename(self, old_id: str, new_id: str) -> Node:
+        if old_id not in self.index.id_to_uid:
+            raise RefError(f"rename source {old_id!r} is not a live id")
+        if self.index.resolve_uid(new_id) is not None:
+            raise CollisionError(f"target id {new_id!r} already in use")
+
+        uid = self.index.id_to_uid[old_id]
+        referrer_uids = {ir.source_uid for ir in self.index.in_refs.get(old_id, [])}
+
+        node = self.store.read_file(old_id)
+        old_path = self.store.path_for(old_id)
+        node.id = new_id
+        node.kind = NodeId.parse(new_id).kind
+        if old_id not in node.deprecated_ids:
+            node.deprecated_ids.append(old_id)
+        _rewrite_refs(node, old_id, new_id)
+        new_path = self.store.write_file(node)
+        if old_path != new_path:
+            self.store.delete_file(old_id)
+        self.index.upsert(node)
+
+        for referrer_uid in referrer_uids:
+            if referrer_uid == uid:
+                continue
+            referrer = self.store.read_file(self.index.by_uid[referrer_uid].id)
+            _rewrite_refs(referrer, old_id, new_id)
+            self.store.write_file(referrer)
+            self.index.upsert(referrer)
+
+        return node
