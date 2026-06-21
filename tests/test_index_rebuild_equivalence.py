@@ -23,7 +23,7 @@ def _relation_signature(out_ref) -> tuple | None:
 
 
 def _out_ref_signature(out_ref) -> tuple:
-    return (out_ref.ref, out_ref.role, _relation_signature(out_ref))
+    return (out_ref.ref, out_ref.role, _relation_signature(out_ref) or ())
 
 
 def _normalize(index: Index) -> dict:
@@ -71,6 +71,12 @@ def test_rebuild_equivalence_through_mutation_sequence(tmp_path):
     c.delete("topic:a")  # strands inbound refs from topic:c and graph:g → must stay as dangling
     _assert_equivalent(c)
     assert len(c.dangling()) >= 1  # topic:c still points at the deleted topic:a
+
+    # re-adding the deleted id reconverges the previously-dangling refs
+    c.add(Node(id="topic:a", kind="topic", title="A again"))
+    _assert_equivalent(c)
+    assert c.dangling() == []  # topic:c's relation to topic:a now resolves
+    assert all(e.target_uid is not None for e in c.outbound("topic:c"))
 
 
 def test_rebuild_equivalence_after_overwrite(tmp_path):

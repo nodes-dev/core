@@ -95,10 +95,6 @@ def test_remove_keeps_surviving_referrers_inbound():
     assert any(r.source_uid == referrer.uid for r in rows)
 
 
-def _uid(idx, node):
-    return idx.id_to_uid[node.id]
-
-
 def test_outbound_returns_source_relations_resolved():
     a = Node(id="topic:a", kind="topic", title="A", relations=[relates_to("topic:a", "topic:b")])
     b = Node(id="topic:b", kind="topic", title="B")
@@ -152,6 +148,7 @@ def test_membership_refs_not_in_graph_queries():
     # membership members/edges are tracked for rename but are not public graph edges
     assert idx.outbound_edges(g.uid) == []
     assert idx.inbound_edges(y.uid) == []
+    assert idx.dangling_edges() == []
 
 
 def test_dangling_lists_unresolved_targets():

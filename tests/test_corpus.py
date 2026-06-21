@@ -105,6 +105,8 @@ def test_rename_resolves_old_id_after(tmp_path):
     c.add(Node(id="topic:old", kind="topic", title="Old"))
     c.rename("topic:old", "topic:new")
     assert c.get("topic:old").id == "topic:new"  # stale ref still resolves
+    fresh = Corpus(tmp_path)  # cold reload proves deprecated alias persisted to disk
+    assert fresh.get("topic:old").id == "topic:new"
 
 
 def test_rename_rewrites_membership_members_and_edges(tmp_path):
@@ -179,10 +181,13 @@ def test_rename_inbound_across_deprecated_id(tmp_path):
 def test_rename_rejects_deprecated_or_unknown_old_id(tmp_path):
     c = Corpus(tmp_path)
     c.add(Node(id="topic:a", kind="topic", title="A", deprecated_ids=["topic:stale"]))
+    before = sorted(p.name for p in tmp_path.rglob("*.md"))
     with pytest.raises(RefError):
         c.rename("topic:stale", "topic:z")  # deprecated, not live
+    assert sorted(p.name for p in tmp_path.rglob("*.md")) == before
     with pytest.raises(RefError):
         c.rename("topic:ghost", "topic:z")  # unknown
+    assert sorted(p.name for p in tmp_path.rglob("*.md")) == before
 
 
 def test_rename_rejects_taken_target(tmp_path):

@@ -39,7 +39,7 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
   raised. `inbound`/`outbound` raise `RefError` only when the *input* ref does not resolve.
 - `delete()` is **live-id-only**: passing a stale/deprecated id raises `RefError`, so a stale
   alias never silently removes the renamed live node. Inbound references to a deleted node remain
-  on disk as dangling.
+  as dangling — retained in the live index and on disk — and are surfaced by `dangling()`.
 
 ### Known kernel limitations (resolved in later plans)
 - The index is in-memory and rebuilt on `Corpus(root)` construction; no on-disk persistence yet.
