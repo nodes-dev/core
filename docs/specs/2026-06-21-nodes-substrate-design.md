@@ -39,7 +39,9 @@ on graph-structured representations of knowledge and ideas. Both applications bu
 
 ## 2. Architecture: three layers
 
-Same repo, distinct modules. Each layer depends only on the ones above it.
+Same repo, distinct modules, with a strict dependency direction: **domain profiles depend on
+the vocab + kernel; the vocab depends on the kernel; the kernel depends on no layer below it**
+(and on no domain). Nothing below the kernel may leak upward into it.
 
 ```
 kernel           Node, Relation, structural shapes, identity grammar, on-disk format,
@@ -77,8 +79,8 @@ The universal container. Every node has:
 | `relations` | Typed relations (see 3.2). |
 | `facets` | Registry-validated map of typed payloads (see 3.3). |
 
-`id` is the reference used in prose and relations; `uid` is the stable internal handle. The
-index maps both. A node's *alias* (mindful's term) **is** its slug.
+A node's *alias* (mindful's term) **is** its slug. The full identity / reference / rename
+contract — stored form, display form, rename behavior, collisions — is specified in §3.5.
 
 ### 3.2 Relation — the single edge primitive
 
@@ -93,6 +95,20 @@ Relation = { source, predicate, target, directed?, weight?, attrs? }
 - An **edge** is just a Relation that lives *inside* a graph structure (3.4).
 - `relations:` carries typed semantic links (`predicate` = `cites`, `supports`, `refines`, …),
   generalizing science's existing `related:` + `relations:` split.
+
+**Normalized vs serialized forms.** The shape above is the *normalized* (in-memory / indexed)
+form, where `source` is always explicit. On disk, `source` is **implied by location**, giving
+two serialized shapes:
+
+- **Node-relation** (in a node's `related:` / `relations:`): `{ predicate, target, … }` —
+  `source` is the containing node's `id`, omitted from the file.
+- **Graph edge** (in a structure's `edges:`): `{ source, target, predicate, … }` — both
+  endpoints are members of the structure, so both are explicit; the structure node is the
+  container, not an endpoint.
+
+Parser contract: deserialize by filling `source` from context into the normalized form;
+serialize by dropping `source` only when it equals the container node. The Python and TS
+parsers MUST round-trip these two shapes identically.
 
 ### 3.3 Facets & the registry — specialization model
 
@@ -119,20 +135,24 @@ genuinely narrows the one above by adding invariants.
 ### 3.4 Structural shapes — the refinement lattice
 
 ```
-Set  →  List  →  Dict          (+ order, + keys)
-Graph → DAG  →  Tree           (+ acyclicity, + single-parent)
+Set ─┬─ List   (+ order, duplicates allowed)
+     └─ Dict   (+ unique keys)
+Graph → DAG → Tree   (+ acyclicity, + single-parent)
 ```
 
-A structure is a Node carrying a **Membership facet** whose shape depends on the kind:
+`List` and `Dict` are **siblings** that refine `Set` along different axes — `List` adds
+ordering, `Dict` adds keying — rather than a single `Set → List → Dict` chain (a dict is not a
+narrowed list). A structure is a Node carrying a **Membership facet** whose shape and
+multiplicity rules depend on the kind:
 
-| Shape | Membership facet |
-|-------|------------------|
-| Set   | `members: [ref]` |
-| List  | ordered `members: [ref]` |
-| Dict  | `members: { key: ref }` |
-| Graph | `members: [ref]` + `edges: [Relation]` |
-| DAG   | Graph + acyclicity invariant |
-| Tree  | DAG + single-parent invariant |
+| Shape | Membership facet | Multiplicity / order |
+|-------|------------------|----------------------|
+| Set   | `members: [ref]` | unique, unordered |
+| List  | `members: [ref]` | ordered, duplicates allowed |
+| Dict  | `members: { key: ref }` | unique keys; insertion order preserved, not semantic |
+| Graph | `members: [ref]` + `edges: [Relation]` | unique members |
+| DAG   | Graph + acyclicity invariant | — |
+| Tree  | DAG + single-parent invariant | — |
 
 Membership edges are **first-class Relations** (the index sees them) but are stored *on the
 structure node* for locality and ordering. This generalizes mindful v5's proven
@@ -145,6 +165,26 @@ NodeGraph → ThoughtGraph (mindmap)
 NodeGraph → NodeDAG → CausalDAG
 NodeList  → ThoughtList (journal)
 ```
+
+### 3.5 Identity, references & rename — contract
+
+- **Stored ref form:** the human-friendly canonical **`id`** (`kind:slug`) everywhere in files —
+  in `relations:`, in membership `members` / `edges`, and in prose / tag links. Git-diffable
+  and readable.
+- **Display ref form:** the same `id` (or the target's `title` in rendered UI). Tags display as
+  `#slug`.
+- **`uid` role:** every `id` resolves (via the index) to the target node's immutable **`uid`**,
+  which is the join key and the identity that survives a rename. `uid` is the *anchor*, not the
+  stored ref form.
+- **Rename behavior:** changing a node's slug/`id` is a **library operation** that (1) updates
+  the node's `id`, (2) appends the previous `id` to its `deprecated_ids`, and (3) rewrites
+  inbound refs across the corpus (mechanical and safe because files are local + git-versioned).
+  The node's `uid` never changes, so the index keeps its identity throughout; any un-rewritten
+  or stale ref still resolves through `deprecated_ids → uid`. This is how `uid` *protects links*
+  without forcing `uid` into prose/tags.
+- **Collision rules:** `id` is unique across the corpus — the registry/index rejects a second
+  node claiming a live `id`, or one claiming another node's still-active `deprecated_id` (fail
+  early). `uid` is globally unique by construction.
 
 ## 4. On-disk format
 
@@ -172,6 +212,9 @@ facets:
 ---
 PHF19 is a PRC2-associated component …
 ```
+
+The `relations:` entry above omits `source` — per §3.2 it is implied to be `gene:PHF19`, the
+containing node.
 
 ## 5. Derived index & fast I/O
 
@@ -228,7 +271,9 @@ Greenfield on the kernel:
 5. **Specialization:** facet composition for domains; constraint refinement for shapes.
 6. **Relations:** one `Relation` primitive; `related:`, tags, and graph edges are all sugar/uses of it.
 7. **Structures:** membership facet stored on the structure node; edges are first-class Relations.
-8. **Identity:** `kind:slug` canonical id + immutable `uid` (UUID) on every node.
+8. **Identity:** `kind:slug` canonical id (the stored + display ref form) + immutable `uid`
+   (UUID) on every node as the identity anchor; rename rewrites inbound refs and records
+   `deprecated_ids` (§3.5).
 9. **Facet serialization:** nested `facets:` map in frontmatter.
 10. **Home:** new `~/d/nodes/` repo; `~/d/mindful/v6/` reserved for the future mindful app.
 
@@ -236,14 +281,19 @@ Greenfield on the kernel:
 
 - **Deferred (YAGNI):** multi-user/authorship, cross-project federation, advanced network ops.
 - **To settle during implementation planning:** exact registry/profile manifest format;
-  index technology choice; precise Python/TS API surface; reference (`ref`) syntax for
-  membership (`uid` vs `id`).
+  index technology choice; precise Python/TS API surface; the `attrs` vocabulary on relations.
 
 ## 10. Migration path (incremental, not a rewrite)
 
 1. Extract the kernel from `science_model`; ship the knowledge-vocab layer.
 2. Land Python + TS kernel libraries + spec + derived index.
 3. Refactor `science` to sit on the kernel via a `science` profile (relabel, move kinds).
+   **`uid` backfill:** `science_model.Entity` carries `id` / `canonical_id` but no `uid`; a
+   one-time migration mints `uid = uuidv5(NODES_NAMESPACE, canonical_id)` for every existing
+   entity and writes it into frontmatter, after which it is immutable regardless of later `id`
+   changes. A bounded migration window lets the parser mint-and-write-back a missing `uid`; in
+   steady state a missing `uid` is a validation error (fail early). Test fixtures gain expected
+   `uid` values from the same deterministic rule.
 4. Build Mindful v6 core (search + CRUD CLI) greenfield on the kernel.
 
 Each step is a separate downstream spec/plan.
