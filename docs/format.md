@@ -46,3 +46,24 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
 - No full-text search or embeddings/similarity index yet.
 - No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
   are tracked internally for rename but are not exposed as graph edges.
+
+## Knowledge vocab (Plan 3)
+`nodes.vocab` is a separately-importable profile of generally-useful knowledge kinds, one layer
+above the domain-free kernel. It imports only from `nodes.kernel`; the kernel never imports it.
+Register it onto a `Registry` with `register_knowledge_vocab(reg)` (mirrors
+`register_builtin_shapes`).
+
+- **Roster (7 kinds).** Prose (bare, no facets): `note`, `idea`, `question`, `topic`. Source
+  (require the `source` facet + the identifiability invariant): `paper`, `book`, `dataset`.
+- **`Source` facet** (`facets.source`): `{authors?, year?, container?, identifier?, url?}`, with
+  `extra="forbid"` (unknown keys fail) and an invariant requiring at least one of
+  `authors`/`year`/`identifier`/`url`. The node's `kind` discriminates paper/book/dataset and
+  `title` holds the work title, so `Source` carries neither.
+- **Predicates** (`nodes.vocab.predicates`): canonical names `about` (→ topic), `cites`
+  (→ source), `answers`/`asks` (→ question), `refines` (→ node), plus helper constructors. A
+  shared vocabulary only — predicates remain free-string and are not enforced by the kernel.
+- **Enforcement.** `Corpus(root, registry=...)` validates on `add` and `rename`; with
+  `registry=None` (default) behavior is unchanged. A registry-backed corpus rejects unregistered
+  kinds and facet/invariant violations **before any disk write**, and `rename`
+  validates the renamed node and every rewritten referrer before writing anything (no partial
+  rename).
