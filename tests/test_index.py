@@ -5,7 +5,7 @@ import pytest
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.index import Index
 from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
+from nodes.kernel.relations import Relation, relates_to
 
 
 def test_build_and_resolve_live_id():
@@ -93,3 +93,70 @@ def test_remove_keeps_surviving_referrers_inbound():
     # ...but the referrer's inbound ref to topic:t persists (now dangling).
     rows = idx.in_refs.get("topic:t", [])
     assert any(r.source_uid == referrer.uid for r in rows)
+
+
+def _uid(idx, node):
+    return idx.id_to_uid[node.id]
+
+
+def test_outbound_returns_source_relations_resolved():
+    a = Node(id="topic:a", kind="topic", title="A", relations=[relates_to("topic:a", "topic:b")])
+    b = Node(id="topic:b", kind="topic", title="B")
+    idx = Index.build([a, b])
+    edges = idx.outbound_edges(a.uid)
+    assert len(edges) == 1
+    assert edges[0].relation.target == "topic:b"
+    assert edges[0].source_uid == a.uid and edges[0].target_uid == b.uid
+
+
+def test_inbound_returns_target_relations_resolved():
+    a = Node(id="topic:a", kind="topic", title="A", relations=[relates_to("topic:a", "topic:b")])
+    b = Node(id="topic:b", kind="topic", title="B")
+    idx = Index.build([a, b])
+    edges = idx.inbound_edges(b.uid)
+    assert len(edges) == 1
+    assert edges[0].source_uid == a.uid and edges[0].target_uid == b.uid
+
+
+def test_inbound_merges_across_deprecated_target_ref():
+    # B is live as topic:new but still has deprecated topic:old;
+    # A points at the stale ref topic:old.
+    b = Node(id="topic:new", kind="topic", title="B", deprecated_ids=["topic:old"])
+    a = Node(id="topic:a", kind="topic", title="A", relations=[relates_to("topic:a", "topic:old")])
+    idx = Index.build([a, b])
+    edges = idx.inbound_edges(b.uid)
+    assert len(edges) == 1 and edges[0].source_uid == a.uid
+
+
+def test_outbound_with_noncontainer_source_attributes_to_source_node():
+    # The relation lives on B's file but its source is topic:a.
+    rel = Relation(source="topic:a", predicate="cites", target="topic:c")
+    a = Node(id="topic:a", kind="topic", title="A")
+    b = Node(id="topic:b", kind="topic", title="B", relations=[rel])
+    c = Node(id="topic:c", kind="topic", title="C")
+    idx = Index.build([a, b, c])
+    out_a = idx.outbound_edges(a.uid)
+    assert len(out_a) == 1 and out_a[0].relation.target == "topic:c"
+    assert idx.outbound_edges(b.uid) == []  # B is not the source of any relation
+
+
+def test_membership_refs_not_in_graph_queries():
+    g = Node(id="graph:g", kind="graph", title="G", facets={"membership": {
+        "shape": "graph",
+        "members": ["topic:x"],
+        "edges": [{"source": "topic:x", "predicate": "to", "target": "topic:y"}],
+    }})
+    x = Node(id="topic:x", kind="topic", title="X")
+    y = Node(id="topic:y", kind="topic", title="Y")
+    idx = Index.build([g, x, y])
+    # membership members/edges are tracked for rename but are not public graph edges
+    assert idx.outbound_edges(g.uid) == []
+    assert idx.inbound_edges(y.uid) == []
+
+
+def test_dangling_lists_unresolved_targets():
+    a = Node(id="topic:a", kind="topic", title="A", relations=[relates_to("topic:a", "topic:gone")])
+    idx = Index.build([a])
+    dangling = idx.dangling_edges()
+    assert len(dangling) == 1
+    assert dangling[0].relation.target == "topic:gone" and dangling[0].target_uid is None

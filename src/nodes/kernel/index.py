@@ -138,3 +138,48 @@ class Index:
                 self.in_refs[ref] = kept
             else:
                 del self.in_refs[ref]
+
+    def _refs_for_uid(self, uid: str) -> list[str]:
+        entry = self.by_uid[uid]
+        return [entry.id, *sorted(entry.deprecated_ids)]
+
+    def _resolve_edge(self, rel: Relation) -> ResolvedEdge:
+        return ResolvedEdge(
+            relation=rel,
+            source_uid=self.resolve_uid(rel.source),
+            target_uid=self.resolve_uid(rel.target),
+        )
+
+    def _relations_by_role(self, uid: str, role: Role) -> list[ResolvedEdge]:
+        seen: set[int] = set()
+        edges: list[ResolvedEdge] = []
+        for ref in self._refs_for_uid(uid):
+            for inref in self.in_refs.get(ref, []):
+                oref = inref.out_ref
+                if oref.role != role or oref.relation is None:
+                    continue
+                if id(oref.relation) in seen:
+                    continue
+                seen.add(id(oref.relation))
+                edges.append(self._resolve_edge(oref.relation))
+        return edges
+
+    def outbound_edges(self, uid: str) -> list[ResolvedEdge]:
+        return self._relations_by_role(uid, "relation_source")
+
+    def inbound_edges(self, uid: str) -> list[ResolvedEdge]:
+        return self._relations_by_role(uid, "relation_target")
+
+    def dangling_edges(self) -> list[ResolvedEdge]:
+        seen: set[int] = set()
+        edges: list[ResolvedEdge] = []
+        for entry in self.by_uid.values():
+            for oref in entry.out_refs:
+                if oref.role != "relation_target" or oref.relation is None:
+                    continue
+                if id(oref.relation) in seen:
+                    continue
+                if self.resolve_uid(oref.ref) is None:
+                    seen.add(id(oref.relation))
+                    edges.append(self._resolve_edge(oref.relation))
+        return edges
