@@ -23,9 +23,26 @@ Normalized form: `{source, predicate, target, directed?, weight?, attrs?}`.
 A structure node carries a `membership` facet: `{shape, members, edges?}`.
 Shapes: `set`, `list`, `dict`, `graph`, `dag`, `tree` (invariants per spec §3.4).
 
-## Known kernel limitations (resolved in later plans)
-- No derived search/graph index yet (Plan 2): full-text, resolved relation graph, embeddings.
-  Kernel `resolve()` / collision checks do linear scans; the index makes lookups O(1).
-- `delete()` operates on a node's current (live) id only; passing a stale/deprecated id raises
-  `RefError`. This is intentional: a stale alias must not silently remove the renamed live node.
-  Use `read()` / `resolve()` first if you need to look up the live id from a deprecated one.
+## Index & API (Plan 2)
+The kernel ships an in-memory **structural index** (`nodes.kernel.index.Index`) and a
+**`Corpus`** coordinator (`nodes.kernel.corpus.Corpus`) that owns a `Store` + an `Index`.
+`Corpus` is the primary API: `add`, `get`/`resolve`, `rename`, `delete`, `all`, and the
+relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
+
+- Resolution (`id` / deprecated `id` → `uid`) and collision checks are **O(1)** via the index;
+  a live id always wins over a deprecated id.
+- `rename` is **O(degree)**: it rewrites only the referrers the reverse index names (relations
+  `source`/`target`, membership members, and edge `source`/`target`), plus the renamed node's
+  own references.
+- Graph queries are **relations-only** and uid-based. Dangling targets (a relation whose target
+  no longer resolves) are a normal state — surfaced by `outbound(source)` and `dangling()`, never
+  raised. `inbound`/`outbound` raise `RefError` only when the *input* ref does not resolve.
+- `delete()` is **live-id-only**: passing a stale/deprecated id raises `RefError`, so a stale
+  alias never silently removes the renamed live node. Inbound references to a deleted node remain
+  on disk as dangling.
+
+### Known kernel limitations (resolved in later plans)
+- The index is in-memory and rebuilt on `Corpus(root)` construction; no on-disk persistence yet.
+- No full-text search or embeddings/similarity index yet.
+- No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
+  are tracked internally for rename but are not exposed as graph edges.
