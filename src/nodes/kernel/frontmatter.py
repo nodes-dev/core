@@ -4,6 +4,7 @@ from typing import Any
 
 import yaml
 
+from nodes.kernel.errors import ValidationError
 from nodes.kernel.node import Node, NodeMetadata
 from nodes.kernel.relations import RELATES_TO, Relation, relates_to
 
@@ -27,6 +28,9 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
 
 def node_from_markdown(text: str) -> Node:
     fm, body = split_frontmatter(text)
+    missing = [k for k in ("id", "uid", "kind", "title") if k not in fm]
+    if missing:
+        raise ValidationError(f"frontmatter missing required field(s): {missing}")
     node_id = fm["id"]
     relations: list[Relation] = []
     for ref in fm.get("related", []) or []:

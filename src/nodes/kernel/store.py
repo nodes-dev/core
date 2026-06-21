@@ -44,12 +44,15 @@ class Store:
             if overlap:
                 raise CollisionError(f"identity claims already in use: {sorted(overlap)}")
 
-    def write(self, node: Node) -> Path:
-        self._assert_no_identity_collision(node)
+    def _write_file(self, node: Node) -> Path:
         path = self.path_for(node.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(node_to_markdown(node), encoding="utf-8")
         return path
+
+    def write(self, node: Node) -> Path:
+        self._assert_no_identity_collision(node)
+        return self._write_file(node)
 
     def resolve(self, ref: str) -> Node:
         """Resolve a ref by live id (file path) or active deprecated id (spec §3.5)."""
@@ -74,12 +77,14 @@ class Store:
         if self._id_owner_uid(new_id) is not None:
             raise CollisionError(f"target id {new_id!r} already in use")
         node = self.read(old_id)
-        self.delete(old_id)
+        old_path = self.path_for(old_id)
         node.id = new_id
         node.kind = NodeId.parse(new_id).kind
         if old_id not in node.deprecated_ids:
             node.deprecated_ids.append(old_id)
-        self.write(node)
+        new_path = self._write_file(node)          # write new file FIRST — no data-loss window
+        if old_path != new_path and old_path.is_file():
+            old_path.unlink()                       # then remove the old file
         self._rewrite_inbound(old_id, new_id)
         return node
 

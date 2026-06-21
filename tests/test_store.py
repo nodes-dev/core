@@ -86,3 +86,17 @@ def test_rename_rewrites_membership_refs(tmp_path):
     mem = store.read("graph:g").facets["membership"]
     assert "topic:new" in mem["members"] and "topic:old" not in mem["members"]
     assert mem["edges"][0]["source"] == "topic:new"
+
+
+def test_rename_rewrites_dict_membership_refs(tmp_path):
+    store = Store(tmp_path)
+    store.write(Node(id="topic:old", kind="topic", title="Old"))
+    store.write(Node(id="topic:x", kind="topic", title="X"))
+    store.write(Node(id="dict:d", kind="dict", title="D", facets={"membership": {
+        "shape": "dict",
+        "members": {"a": "topic:old", "b": "topic:x"},
+    }}))
+    store.rename("topic:old", "topic:new")
+    mem = store.read("dict:d").facets["membership"]
+    assert mem["members"]["a"] == "topic:new"
+    assert mem["members"]["b"] == "topic:x"

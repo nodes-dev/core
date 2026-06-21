@@ -26,3 +26,6 @@ Shapes: `set`, `list`, `dict`, `graph`, `dag`, `tree` (invariants per spec §3.4
 ## Known kernel limitations (resolved in later plans)
 - No derived search/graph index yet (Plan 2): full-text, resolved relation graph, embeddings.
   Kernel `resolve()` / collision checks do linear scans; the index makes lookups O(1).
+- `delete()` operates on a node's current (live) id only; passing a stale/deprecated id raises
+  `RefError`. This is intentional: a stale alias must not silently remove the renamed live node.
+  Use `read()` / `resolve()` first if you need to look up the live id from a deprecated one.

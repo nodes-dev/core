@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from nodes.kernel.errors import ValidationError
 from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown, split_frontmatter
 from nodes.kernel.node import Node
 from nodes.kernel.relations import Relation, relates_to
@@ -71,6 +74,12 @@ def test_plain_relatesto_serializes_into_related_only():
     md = node_to_markdown(n)
     assert "related:" in md
     assert "relations:" not in md
+
+
+def test_missing_required_field_raises_validation_error():
+    text = "---\nid: topic:a\nkind: topic\ntitle: A\n---\nbody\n"  # no uid
+    with pytest.raises(ValidationError):
+        node_from_markdown(text)
 
 
 def test_split_is_line_anchored_and_preserves_body_rule():
