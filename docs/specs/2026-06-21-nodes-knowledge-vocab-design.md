@@ -88,9 +88,14 @@ A shared bibliographic payload for `paper` / `book` / `dataset`. Mirrors the `Me
 pattern in `shapes.py`: a Pydantic model + an `_of(node)` accessor + invariant functions.
 
 ```python
+# imports: from pydantic import BaseModel, ConfigDict, Field
+#          from pydantic import ValidationError as PydanticValidationError
+
 SOURCE = "source"
 
 class Source(BaseModel):
+    model_config = ConfigDict(extra="forbid")   # unknown keys (typos) fail, never silently dropped
+
     authors: list[str] = Field(default_factory=list)
     year: int | None = None
     container: str | None = None   # journal / publisher / repository
@@ -101,7 +106,10 @@ def source_of(node: Node) -> Source:
     raw = node.facets.get(SOURCE)
     if raw is None:
         raise FacetError(f"{node.id}: missing '{SOURCE}' facet")
-    return Source.model_validate(raw)
+    try:
+        return Source.model_validate(raw)
+    except PydanticValidationError as exc:   # malformed payload / unknown key / wrong type
+        raise FacetError(f"{node.id}: invalid '{SOURCE}' facet: {exc}") from exc
 
 def require_identifiable_source(node: Node) -> None:
     s = source_of(node)
@@ -116,6 +124,15 @@ Design notes:
 - **No `type`/discriminator field.** The node's `kind` already says paper vs book vs dataset.
 - **No `title` field.** `Node.title` already holds the work's display title; `Source` is *only*
   bibliographic metadata, avoiding a second source of truth.
+- **`extra="forbid"`.** Unknown source keys are a fail-early error, not silently ignored — a typo
+  like `identifer` or `contaner` raises rather than being dropped, honoring the typed-facet
+  contract. (Pydantic's default would silently discard them.)
+- **Pydantic errors are wrapped.** `Source.model_validate` raises Pydantic's `ValidationError`
+  for a malformed payload (unknown key under `extra="forbid"`, or a wrong-typed field such as
+  `year: "soon"`). `source_of` catches it and re-raises `FacetError`, so every failure surfaces
+  through the kernel's error hierarchy (§7) — callers never see a raw Pydantic exception. (Aliased
+  on import as `PydanticValidationError` to avoid colliding with the kernel's own
+  `nodes.kernel.errors.ValidationError`.)
 - The invariant rejects an empty `Source` facet — a bibliographic node with no authors, year,
   identifier, or url carries no bibliographic information and is an error (explicit > defensive).
 - `source_of` raising `FacetError` on a missing facet is belt-and-suspenders: the registry's
@@ -168,18 +185,49 @@ class Corpus:
         return node
 ```
 
-`rename` validates the **renamed node** after its own refs are rewritten and *before* any file
-is written:
+`rename` is restructured into **prepare-all → validate-all → commit-all** so that *every* node
+it will write is validated before *any* write happens — the guarantee "a registry-backed corpus
+never writes an invalid node" then holds for renamed node and referrers alike, with no partial
+rename if validation fails:
 
 ```python
 def rename(self, old_id: str, new_id: str) -> Node:
     # ... existing guards (old_id live, new_id free) ...
+    uid = self.index.id_to_uid[old_id]
+    referrer_uids = {ir.source_uid for ir in self.index.in_refs.get(old_id, [])}
+
+    # --- prepare: rewrite every node that will change, in memory ---
     node = self.store.read_file(old_id)
-    # ... set node.id/kind, append deprecated_id, _rewrite_refs(node, old_id, new_id) ...
+    old_path = self.store.path_for(old_id)
+    node.id = new_id
+    node.kind = NodeId.parse(new_id).kind
+    if old_id not in node.deprecated_ids:
+        node.deprecated_ids.append(old_id)
+    _rewrite_refs(node, old_id, new_id)
+
+    referrers = []
+    for ruid in referrer_uids:
+        if ruid == uid:
+            continue
+        ref = self.store.read_file(self.index.by_uid[ruid].id)
+        _rewrite_refs(ref, old_id, new_id)
+        referrers.append(ref)
+
+    # --- validate: ALL writes, before ANY write (fail-early, no partial rename) ---
     if self.registry is not None:
-        self.registry.validate(node)       # rename can change kind; reject before any write
+        self.registry.validate(node)
+        for ref in referrers:
+            self.registry.validate(ref)
+
+    # --- commit: renamed node first (crash-atomic write-new-then-delete-old), then referrers ---
     new_path = self.store.write_file(node)
-    # ... delete-old-if-path-changed, upsert, rewrite referrers ...
+    if old_path != new_path:
+        self.store.delete_file(old_id)
+    self.index.upsert(node)
+    for ref in referrers:
+        self.store.write_file(ref)
+        self.index.upsert(ref)
+    return node
 ```
 
 Semantics:
@@ -189,11 +237,16 @@ Semantics:
 - **`registry` present** rejects any node whose kind is unregistered (`UnknownKindError`) or
   whose facets/invariants fail (`FacetError` / `InvariantError`) — enforcing the closed
   vocabulary fail-early, before any disk write.
-- **`rename` validates only the renamed node**, not referrers. A rename can change a node's
-  `kind` (e.g. `topic:x` → `note:y`); if the resulting facets don't fit the new kind, the rename
-  is rejected before any write. Referrers are *not* re-validated: their kind/facets are
-  unchanged, only ref strings are rewritten, and re-validating them could surface pre-existing
-  invalidity unrelated to the rename.
+- **`rename` validates the renamed node *and* every referrer it rewrites**, all before the first
+  write. A rename can change a node's `kind` (e.g. `topic:x` → `note:y`); if the resulting facets
+  don't fit the new kind, the rename is rejected before any write. In normal operation a referrer
+  validation always passes — a rename changes only ref *strings* on referrers, not their
+  kind/facets — so this only fires when the store already held an invalid referrer (one not added
+  through a registry-backed corpus). In that case failing early, writing nothing, is the correct
+  posture: a registry-backed corpus does not silently propagate invalid nodes to disk.
+- The restructure preserves the Plan-2 atomicity property (renamed node via
+  write-new-then-delete-old) and O(degree) referrer cost; it only moves the referrer reads/rewrites
+  ahead of the writes so validation can gate them.
 
 ## 7. Error handling
 
@@ -201,16 +254,21 @@ All errors reuse the kernel's existing hierarchy (`nodes.kernel.errors`):
 
 - Missing required facet → `FacetError` (from `Registry.validate` and from `source_of`).
 - Unexpected facet on a bare kind → `FacetError` (from `Registry.validate`).
+- Malformed `Source` payload — unknown key (under `extra="forbid"`) or wrong-typed field →
+  `FacetError` (from `source_of`, wrapping Pydantic's `ValidationError`).
 - Empty `Source` facet → `InvariantError` (from `require_identifiable_source`).
 - Unregistered kind on a registry-backed `Corpus` → `UnknownKindError` (from `Registry.get`).
 
-No new error types are introduced.
+No new error types are introduced; every failure surfaces through the kernel's existing
+hierarchy (a raw Pydantic `ValidationError` never escapes `source_of`).
 
 ## 8. Testing
 
 - **`test_vocab_source.py`** — `Source` defaults; `source_of` on a node missing the facet →
-  `FacetError`; `require_identifiable_source` on an empty source → `InvariantError`; a populated
-  source passes; the facet round-trips through `node.facets` (dict in, `Source` out).
+  `FacetError`; an unknown source key (typo like `identifer`) → `FacetError` (extra-forbid,
+  wrapped from Pydantic); a wrong-typed field (e.g. `year: "soon"`) → `FacetError` (wrapped, never
+  a raw Pydantic error); `require_identifiable_source` on an empty source → `InvariantError`; a
+  populated source passes; the facet round-trips through `node.facets` (dict in, `Source` out).
 - **`test_vocab_kinds.py`** — `register_knowledge_vocab` registers all seven; a bare `note`
   validates; `note` + a stray facet → `FacetError`; each source kind missing `source` →
   `FacetError`, with an empty `source` → `InvariantError`, with a valid `source` passes; an
@@ -221,7 +279,11 @@ No new error types are introduced.
   (add any kind, no validation); a `Corpus` built with a vocab+shapes registry rejects an
   invalid node on `add` **with no file written**; a valid node is added; `rename` validates the
   renamed node (a rename into a kind whose facets don't fit is rejected, **no file written**);
-  a valid rename passes. The existing 86-test suite stays green (registry defaults to `None`).
+  a valid rename of a node that has a referrer passes and rewrites the referrer; and — documenting
+  the all-or-nothing guarantee — when the store is seeded with an **invalid referrer** (a file not
+  added through the registry) and the referenced node is renamed, the rename raises and **neither
+  the renamed node nor the referrer file is changed** (no partial rename). The existing 86-test
+  suite stays green (registry defaults to `None`).
 
 ## 9. Docs
 
