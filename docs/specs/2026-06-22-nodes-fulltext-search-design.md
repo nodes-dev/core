@@ -102,7 +102,9 @@ A committed `fixtures/search.tokenizer.json`: a list of `{input, tokens}` cases
 that **both** languages must reproduce exactly. Required coverage: stop-words;
 mixed case; punctuation; underscores; numbers; apostrophes; hyphens; composed
 (NFC) vs decomposed (NFD) accents normalizing to the same tokens; empty string;
-whitespace-only; and mixed scripts (e.g. Latin + CJK + Cyrillic).
+whitespace-only; mixed scripts (e.g. Latin + CJK + Cyrillic); and at least one
+non-BMP alphanumeric token so the TS code-point comparator is exercised rather
+than silently falling back to UTF-16 code-unit order.
 
 ## 4. Scoring — BM25F (field-weighted)
 
@@ -142,15 +144,28 @@ BODY_BOOST  = 1.0
 Float accumulation order is fixed so both languages run the same operation
 sequence:
 
-- Query terms are reduced to a **sorted, deduplicated** list before scoring.
+- Query terms are reduced to a **deduplicated list sorted by Unicode code point
+  order** before scoring. Python's default string sort already has this behavior;
+  TS must use an explicit comparator over `Array.from(token)` code points rather
+  than default UTF-16 code-unit sort.
 - Per term, fields are combined in the fixed order `title` then `body`.
 - The document score sums per-term scores in sorted-term order.
 
 Even with an identical operation sequence, Python and JS `log`/libm can differ in
 the last few ULPs, so scores are **not** asserted bit-identical. The parity
 contract is the ranking oracle (§8): identical ranked `id` order, and scores equal
-when rounded to 6 decimal places. The fixed accumulation order keeps that rounding
-stable; ties in ranking are broken by `id`, never by raw float order.
+when rounded to 6 decimal places. Production ranking uses the same rounded score
+key before the `id` tie-breaker, so two hits that are indistinguishable under the
+oracle cannot flip order because of raw-float noise:
+
+```
+score_key(score) = floor(score * 1_000_000 + 0.5) / 1_000_000
+sort key = (-score_key(score), id)
+```
+
+Scores are non-negative, so this half-up helper is sufficient and identical in
+both languages. The fixed accumulation order keeps rounding stable; ties in
+ranking are broken by `id`, never by raw float order.
 
 ## 5. `SearchIndex` — state & operations
 
@@ -194,13 +209,16 @@ class SearchHit:
 
 `Corpus.search(query: str, limit: int | None = None) -> list[SearchHit]`:
 
-1. `terms = sorted(set(tokenize(query)))`. If empty → return `[]`.
+1. `terms = sorted(set(tokenize(query)), key=unicode_codepoint_order)`. If empty
+   → return `[]`. TS must use the same code-point comparator, not default
+   UTF-16 sort.
 2. Candidate docs = union of `postings[t]` over `t ∈ terms`. Score each (§4).
-3. Sort by **(score descending, id ascending)** — id breaks ties for full
-   determinism.
+3. Sort by **(score_key descending, id ascending)**, where `score_key` is the
+   6-decimal half-up rounded score from §4.2 — id breaks rounded-score ties for
+   full determinism.
 4. Truncate to `limit` (`None` = unbounded).
 5. Each `SearchHit.matched_terms` = the subset of `terms` present in that doc,
-   sorted lexicographically.
+   sorted by the same Unicode code-point order.
 
 The caller fetches the `Node` via `Corpus.get(hit.id)` when it needs the text.
 
@@ -250,7 +268,7 @@ A committed fixture corpus with prose-rich bodies plus a ranking oracle:
   `kind/slug.md` layout, with varied natural-language bodies (so term frequency
   and field length actually differ across docs).
 - `fixtures/search.oracle.json` — a list of `{query, hits}` cases, where each hit
-  is `{id, score}` with `score` rounded to 6 decimal places, in ranked order.
+  is `{id, score}` with `score` rounded by `score_key` (§4.2), in ranked order.
 
 Both languages: build a `SearchIndex` over the fixture corpus, run each query, and
 assert the ranked `id` order and 6-dp scores equal the oracle. Mirrors the
@@ -271,7 +289,7 @@ existing `fixtures/corpus.rename.canonical.json` cross-language parity check.
   (`upsert`/`remove`) equals a fresh `build()` of the same final node set —
   mirrors `test_index_rebuild_equivalence.py`.
 - **`Corpus.search` integration:** ranking correct after `add`/`delete`/`rename`;
-  title boost observable; `limit` honored.
+  title boost observable; `limit` honored; rounded-score ties fall back to `id`.
 - **Cross-language ranking oracle:** §8.
 
 ## 10. Error handling
@@ -296,9 +314,11 @@ existing `fixtures/corpus.rename.canonical.json` cross-language parity check.
 4. **Tokenizer:** NFC → lowercase → Unicode-alphanumeric runs → drop fixed
    stop-words; no stemming. Pinned by an oracle built first.
 5. **Scoring:** standard BM25 numerator `(K1 + 1)·tf'/(K1 + tf')`; non-negative
-   Lucene IDF; deterministic accumulation order.
-6. **Results:** ranked refs + score + matched terms; sort `(score desc, id asc)`;
-   caller hydrates nodes lazily.
+   Lucene IDF; deterministic accumulation order; ranking uses a shared 6-decimal
+   half-up `score_key` before the `id` tie-break.
+6. **Results:** ranked refs + score + matched terms; sort
+   `(score_key desc, id asc)`; query terms and `matched_terms` use Unicode
+   code-point ordering; caller hydrates nodes lazily.
 7. **Mutation ordering:** `add`/`delete` are disk-first, then `index` and
    `search_index` together (all-or-nothing). `rename` stays best-effort, tracking
    the kernel's existing multi-file commit model; this plan does not refactor it.

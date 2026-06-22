@@ -460,6 +460,17 @@ def test_matched_terms_is_sorted_subset_present_in_doc():
     assert hits[0].matched_terms == ["alpha", "gamma"]
 
 
+def test_query_terms_use_unicode_codepoint_order_not_utf16_order():
+    # U+F900 sorts before U+1D7D9 by Unicode code point, but JS default UTF-16
+    # sort would put the surrogate-pair token first. This pins the TS parity contract.
+    bmp = "\uf900"       # CJK COMPATIBILITY IDEOGRAPH-F900, category Lo
+    non_bmp = "\U0001D7D9"  # MATHEMATICAL DOUBLE-STRUCK DIGIT ONE, category Nd
+    idx = SearchIndex()
+    idx.upsert(Node(id="topic:a", kind="topic", title=bmp, body=non_bmp))
+    hits = idx.search(f"{non_bmp} {bmp}")
+    assert hits[0].matched_terms == [bmp, non_bmp]
+
+
 def test_empty_stopword_and_absent_queries_return_empty():
     idx = SearchIndex()
     idx.upsert(Node(id="topic:a", kind="topic", title="alpha", body="the cat"))
@@ -516,6 +527,16 @@ def score_key(score: float) -> float:
     in both languages.
     """
     return math.floor(score * 1_000_000 + 0.5) / 1_000_000
+
+
+def _codepoint_sorted(values: set[str] | list[str]) -> list[str]:
+    """Sort by Unicode code point order.
+
+    Python's default string sort already uses code-point order; this named helper
+    keeps the parity contract visible and gives the TS port a function to mirror
+    with an explicit comparator instead of default UTF-16 sorting.
+    """
+    return sorted(values)
 ```
 
 Add the `SearchHit` dataclass just above the `SearchIndex` class:
@@ -533,9 +554,11 @@ Add the `search` method to `SearchIndex` (after `remove`):
 
 ```python
     def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
-        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0
+        ):
             raise ValueError(f"limit must be a positive int or None, got {limit!r}")
-        terms = sorted(set(tokenize(query)))  # dedup; Python str sort is code-point order
+        terms = _codepoint_sorted(set(tokenize(query)))  # dedup; Python str sort is code-point order
         if not terms:
             return []
 
@@ -564,7 +587,12 @@ Add the `search` method to `SearchIndex` (after `remove`):
                 matched.setdefault(uid, []).append(term)
 
         hits = [
-            SearchHit(id=self.id_by_uid[uid], uid=uid, score=scores[uid], matched_terms=sorted(matched[uid]))
+            SearchHit(
+                id=self.id_by_uid[uid],
+                uid=uid,
+                score=scores[uid],
+                matched_terms=_codepoint_sorted(matched[uid]),
+            )
             for uid in scores
         ]
         hits.sort(key=lambda h: (-score_key(h.score), h.id))
@@ -957,12 +985,12 @@ rtk git commit -m "test(search): cross-language ranking oracle + fixture corpus;
 - §3.2 tokenizer oracle built first (all listed cases incl. NFD↔NFC, mixed scripts, non-BMP) → Task 1 ✅
 - §4 BM25F (IDF, per-field tf' with `avglen_f==0` guard, `(K1+1)` numerator, deduped doc score) → Task 3 ✅
 - §4.1 constants → Task 3 ✅
-- §4.2 determinism (sorted-set code-point terms, fixed field order, `score_key`, sort key) → Task 3 ✅
+- §4.2 determinism (sorted-set code-point terms, fixed field order, `score_key`, sort key) → Task 3, including a BMP-vs-non-BMP regression test that would catch TS default UTF-16 sorting ✅
 - §5 SearchIndex state + build(dup-uid→CollisionError)/upsert(replace)/remove(no-op)/empty-doc slot → Task 2 ✅
 - §6 `SearchHit`, `Corpus.search` flow, sort, `matched_terms`, lazy hydration → Tasks 3–4 ✅
 - §7 single-scan `__init__`; add/delete disk-then-both; rename single search upsert → Task 4 ✅
 - §8 ranking oracle (fixture corpus + `search.oracle.json`; both languages assert) → Task 5 ✅
-- §9 testing (tokenizer, scorer hand-computed, build/upsert/remove, rebuild-equivalence, Corpus integration incl. rename tie→id, parity) → Tasks 1–5 ✅
+- §9 testing (tokenizer, scorer hand-computed, build/upsert/remove, rebuild-equivalence, Corpus integration incl. rename tie→id, code-point term ordering, parity) → Tasks 1–5 ✅
 - §10 error handling (`limit` ValueError incl. bool/non-int/≤0; zero matches → []; build CollisionError; no new error types) → Tasks 2–3 ✅
 - §11/§12 resolved decisions / deferrals → respected; deferrals (stemming, snippets, facet indexing, persistence) not built ✅
 
