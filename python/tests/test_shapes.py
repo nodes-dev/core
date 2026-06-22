@@ -46,6 +46,16 @@ def test_dag_rejects_cycle(reg):
         reg.validate(_struct("dag", cyclic))
 
 
+def test_dag_allows_diamond(reg):
+    # a:1→a:2, a:1→a:3, a:2→a:4, a:3→a:4 — shared sink reached by two paths; must not throw
+    diamond = {"shape": "dag", "members": ["a:1", "a:2", "a:3", "a:4"],
+               "edges": [{"source": "a:1", "predicate": "to", "target": "a:2"},
+                         {"source": "a:1", "predicate": "to", "target": "a:3"},
+                         {"source": "a:2", "predicate": "to", "target": "a:4"},
+                         {"source": "a:3", "predicate": "to", "target": "a:4"}]}
+    reg.validate(_struct("dag", diamond))  # no raise
+
+
 def test_tree_rejects_multiple_parents(reg):
     multi = {"shape": "tree", "members": ["a:1", "a:2", "a:3"],
              "edges": [{"source": "a:1", "predicate": "to", "target": "a:3"},

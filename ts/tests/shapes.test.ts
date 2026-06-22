@@ -50,6 +50,20 @@ describe("shapes", () => {
     expect(() => requireAcyclic(shaped("dag", m))).toThrow(InvariantError);
   });
 
+  it("requireAcyclic does not throw on a diamond DAG (shared sink reached by two paths)", () => {
+    const m = {
+      shape: "graph",
+      members: ["a:1", "a:2", "a:3", "a:4"],
+      edges: [
+        { source: "a:1", predicate: "e", target: "a:2" },
+        { source: "a:1", predicate: "e", target: "a:3" },
+        { source: "a:2", predicate: "e", target: "a:4" },
+        { source: "a:3", predicate: "e", target: "a:4" },
+      ],
+    };
+    expect(() => requireAcyclic(shaped("dag", m))).not.toThrow();
+  });
+
   it("requireSingleParent rejects two parents of one target", () => {
     const m = {
       shape: "tree",
