@@ -148,7 +148,7 @@ describe("Corpus — rename", () => {
           membership: {
             shape: "graph",
             members: ["topic:old", "topic:x"],
-            edges: [{ source: "topic:old", predicate: "to", target: "topic:x" }],
+            edges: [{ source: "topic:old", predicate: "to", target: "topic:old" }],
           },
         },
       }),
@@ -156,7 +156,9 @@ describe("Corpus — rename", () => {
     c.rename("topic:old", "topic:new");
     const mem = c.get("graph:g").facets.membership as Record<string, unknown>;
     expect(mem.members).toEqual(["topic:new", "topic:x"]);
-    expect((mem.edges as Array<Record<string, unknown>>)[0].source).toBe("topic:new");
+    const edge = (mem.edges as Array<Record<string, unknown>>)[0];
+    expect(edge.source).toBe("topic:new");
+    expect(edge.target).toBe("topic:new");
   });
 
   it("rewrites dict-membership values", () => {

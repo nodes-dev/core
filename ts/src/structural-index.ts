@@ -197,6 +197,8 @@ export class Index {
     const edges: ResolvedEdge[] = [];
     for (const entry of this.byUid.values()) {
       for (const oref of entry.outRefs) {
+        // Only the target side can dangle: a relation is dangling when its TARGET ref resolves
+        // to no live uid. (Source-side refs are the node's own outbound edges, always resolvable.)
         if (oref.role !== "relation_target" || oref.relation === undefined) continue;
         if (seen.has(oref.relation)) continue;
         if (this.resolveUid(oref.ref) === null) {
