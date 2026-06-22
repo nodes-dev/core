@@ -1,0 +1,36 @@
+{
+  "id": "gene:PHF19",
+  "uid": "7b2cdeadbeef7b2cdeadbeef7b2cdeef",
+  "kind": "gene",
+  "title": "PHF19",
+  "body": "PHF19 is a PRC2-associated component.\n",
+  "metadata": {
+    "created": null,
+    "updated": null,
+    "version": 1
+  },
+  "relations": [
+    {
+      "source": "gene:PHF19",
+      "predicate": "relatesTo",
+      "target": "topic:polycomb",
+      "directed": true,
+      "weight": null,
+      "attrs": {}
+    },
+    {
+      "source": "gene:PHF19",
+      "predicate": "interacts_with",
+      "target": "gene:EZH2",
+      "directed": true,
+      "weight": null,
+      "attrs": {}
+    }
+  ],
+  "facets": {
+    "bio-axes": {
+      "primary_external_id": "HGNC:7296"
+    }
+  },
+  "deprecated_ids": []
+}
