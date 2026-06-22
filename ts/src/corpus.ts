@@ -2,6 +2,7 @@ import { CollisionError, RefError } from "./errors.js";
 import { NodeId } from "./ids.js";
 import type { Node } from "./node.js";
 import type { Registry } from "./registry.js";
+import { type SearchHit, SearchIndex } from "./search.js";
 import { MEMBERSHIP } from "./shapes.js";
 import { Store } from "./store.js";
 import { Index, type ResolvedEdge } from "./structural-index.js";
@@ -42,11 +43,14 @@ export class Corpus {
   readonly store: Store;
   readonly registry?: Registry;
   readonly index: Index;
+  readonly searchIndex: SearchIndex;
 
   constructor(root: string, registry?: Registry) {
     this.store = new Store(root);
     this.registry = registry;
-    this.index = Index.build(this.store.allNodes());
+    const nodes = this.store.allNodes();
+    this.index = Index.build(nodes);
+    this.searchIndex = SearchIndex.build(nodes);
   }
 
   private idFor(uid: string): string {
@@ -66,6 +70,7 @@ export class Corpus {
     this.index.assertAddable(node);
     this.store.writeFile(node);
     this.index.upsert(node);
+    this.searchIndex.upsert(node);
     return node;
   }
 
@@ -82,6 +87,7 @@ export class Corpus {
     if (uid === undefined) throw new RefError(`no live node at ${JSON.stringify(nodeId)}`);
     this.store.deleteFile(nodeId);
     this.index.remove(uid);
+    this.searchIndex.remove(uid);
   }
 
   all(): Node[] {
@@ -157,6 +163,11 @@ export class Corpus {
       this.index.upsert(referrer);
     }
 
+    this.searchIndex.upsert(node);
     return node;
+  }
+
+  search(query: string, limit?: number): SearchHit[] {
+    return this.searchIndex.search(query, limit);
   }
 }

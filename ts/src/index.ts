@@ -50,3 +50,4 @@ export {
   type ResolvedEdge,
   type Role,
 } from "./structural-index.js";
+export { SearchIndex, type SearchHit, scoreKey, tokenize } from "./search.js";
