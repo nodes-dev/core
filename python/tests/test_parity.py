@@ -31,3 +31,13 @@ def test_py_emit_round_trips_to_oracle():
     assert to_canonical(node_from_markdown(PY_EMIT.read_text(encoding="utf-8"))) == json.loads(
         ORACLE.read_text(encoding="utf-8")
     )
+
+
+TS_EMIT = FIXTURES / "gene_phf19.ts-emit.md"
+
+
+def test_python_parses_ts_emit_to_oracle():
+    # Check 3: TS-emitted markdown, parsed by Python, equals the oracle.
+    assert to_canonical(node_from_markdown(TS_EMIT.read_text(encoding="utf-8"))) == json.loads(
+        ORACLE.read_text(encoding="utf-8")
+    )

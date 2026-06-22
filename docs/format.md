@@ -67,3 +67,21 @@ Register it onto a `Registry` with `register_knowledge_vocab(reg)` (mirrors
   kinds and facet/invariant violations **before any disk write**, and `rename`
   validates the renamed node and every rewritten referrer before writing anything (no partial
   rename).
+
+## TypeScript kernel (Plan 4)
+
+The TypeScript kernel (`ts/`) reads and writes the **same on-disk format** as the Python kernel.
+Parity is **semantic, not byte-identical** — PyYAML and the JS `yaml` emitter differ in formatting,
+which is an explicit non-goal to reconcile.
+
+Parity is pinned to a shared oracle under root `fixtures/`:
+
+- `gene_phf19.md` — shared source node.
+- `gene_phf19.canonical.json` — the canonical-JSON oracle (normalized relations; dates as
+  `YYYY-MM-DD` strings; on-disk field name `deprecated_ids`).
+- `gene_phf19.py-emit.md`, `gene_phf19.ts-emit.md` — committed cross-emitted samples. Each is kept
+  current by a **regenerate-and-diff** test in its emitting language, then parsed by the other
+  language and checked against the oracle.
+
+The TypeScript `Store` is the Plan-1 CRUD surface; `Corpus`, the derived index, and the knowledge
+vocab are not yet ported.

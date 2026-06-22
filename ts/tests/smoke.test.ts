@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { KERNEL_VERSION } from "../src/index.js";
+import { Registry, Store, makeNode, nodeFromMarkdown, nodeToMarkdown, registerBuiltinShapes } from "../src/index.js";
 
-describe("scaffold", () => {
-  it("exposes a version string", () => {
-    expect(KERNEL_VERSION).toBe("0.1.0");
+describe("barrel", () => {
+  it("re-exports the public surface", () => {
+    expect(typeof makeNode).toBe("function");
+    expect(typeof nodeFromMarkdown).toBe("function");
+    expect(typeof nodeToMarkdown).toBe("function");
+    expect(typeof registerBuiltinShapes).toBe("function");
+    expect(typeof Registry).toBe("function");
+    expect(typeof Store).toBe("function");
   });
 });

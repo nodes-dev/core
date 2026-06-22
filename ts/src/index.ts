@@ -1,1 +1,43 @@
-export const KERNEL_VERSION = "0.1.0";
+export {
+  CollisionError,
+  FacetError,
+  IdError,
+  InvariantError,
+  NodesError,
+  RefError,
+  UnknownKindError,
+  ValidationError,
+} from "./errors.js";
+export { NodeId, type Ref } from "./ids.js";
+export {
+  RELATES_TO,
+  RelationSchema,
+  type Relation,
+  fromSerialized,
+  relatesTo,
+  tagToRelation,
+  toSerialized,
+} from "./relations.js";
+export {
+  NodeMetadataSchema,
+  NodeSchema,
+  type Node,
+  type NodeInput,
+  type NodeMetadata,
+  makeNode,
+  newUid,
+} from "./node.js";
+export { nodeFromMarkdown, nodeToMarkdown, splitFrontmatter } from "./frontmatter.js";
+export { type Invariant, type KindSpec, Registry } from "./registry.js";
+export {
+  MEMBERSHIP,
+  MembershipSchema,
+  type Membership,
+  membershipOf,
+  registerBuiltinShapes,
+  requireAcyclic,
+  requireDictKeys,
+  requireSingleParent,
+  requireUniqueMembers,
+} from "./shapes.js";
+export { Store } from "./store.js";
