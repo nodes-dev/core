@@ -1,3 +1,6 @@
+import { CollisionError } from "./errors.js";
+import type { Node } from "./node.js";
+
 /** Fixed English stop-word list (33 words), frozen by the tokenizer oracle. */
 export const STOP_WORDS: ReadonlySet<string> = new Set([
   "a",
@@ -71,4 +74,86 @@ export function tokenize(text: string): string[] {
   const normalized = text.normalize("NFC").toLowerCase();
   const matches = normalized.match(TOKEN_RE) ?? [];
   return matches.filter((tok) => !STOP_WORDS.has(tok));
+}
+
+export const K1 = 1.5;
+export const B = 0.75;
+export const TITLE_BOOST = 2.0;
+export const BODY_BOOST = 1.0;
+
+export interface SearchHit {
+  id: string;
+  uid: string;
+  score: number;
+  matchedTerms: string[];
+}
+
+/** In-memory inverted index over node title+body. Pure data; no file I/O. */
+export class SearchIndex {
+  postings = new Map<string, Map<string, [number, number]>>(); // term -> uid -> [titleTf, bodyTf]
+  lengths = new Map<string, [number, number]>(); // uid -> [titleLen, bodyLen]
+  idByUid = new Map<string, string>();
+  totalTitle = 0;
+  totalBody = 0;
+
+  get n(): number {
+    return this.lengths.size;
+  }
+
+  static build(nodes: Iterable<Node>): SearchIndex {
+    const idx = new SearchIndex();
+    for (const node of nodes) {
+      if (idx.lengths.has(node.uid)) {
+        throw new CollisionError(`duplicate uid ${JSON.stringify(node.uid)} in corpus`);
+      }
+      idx.upsert(node);
+    }
+    return idx;
+  }
+
+  private static counts(tokens: string[]): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const tok of tokens) counts.set(tok, (counts.get(tok) ?? 0) + 1);
+    return counts;
+  }
+
+  upsert(node: Node): void {
+    if (this.lengths.has(node.uid)) this.drop(node.uid);
+    const titleTokens = tokenize(node.title);
+    const bodyTokens = tokenize(node.body);
+    const titleCounts = SearchIndex.counts(titleTokens);
+    const bodyCounts = SearchIndex.counts(bodyTokens);
+    const terms = new Set<string>([...titleCounts.keys(), ...bodyCounts.keys()]);
+    for (const term of terms) {
+      let docs = this.postings.get(term);
+      if (docs === undefined) {
+        docs = new Map<string, [number, number]>();
+        this.postings.set(term, docs);
+      }
+      docs.set(node.uid, [titleCounts.get(term) ?? 0, bodyCounts.get(term) ?? 0]);
+    }
+    this.lengths.set(node.uid, [titleTokens.length, bodyTokens.length]);
+    this.idByUid.set(node.uid, node.id);
+    this.totalTitle += titleTokens.length;
+    this.totalBody += bodyTokens.length;
+  }
+
+  remove(uid: string): void {
+    this.drop(uid);
+  }
+
+  private drop(uid: string): void {
+    const lengths = this.lengths.get(uid);
+    if (lengths === undefined) return;
+    this.totalTitle -= lengths[0];
+    this.totalBody -= lengths[1];
+    this.lengths.delete(uid);
+    this.idByUid.delete(uid);
+    for (const [term, docs] of [...this.postings]) {
+      if (docs.has(uid)) {
+        docs.delete(uid);
+        if (docs.size === 0) this.postings.delete(term);
+      }
+    }
+  }
 }
