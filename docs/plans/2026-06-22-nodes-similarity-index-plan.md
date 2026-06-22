@@ -17,7 +17,7 @@
 - **`embed_text(node)` (frozen contract):** `f"{node.title}\n\n{node.body}"` — one vector per node from title and body joined by exactly one blank line.
 - **Cache key:** `text_hash(text) = sha256(text.encode("utf-8")).hexdigest()`. Cache path: `<root>/.nodes-index/vectors/<namespace>/<text_hash>.json`. The cache stores **raw** (un-normalized) embedder output as `{"dim": N, "vector": [...]}`, written with `allow_nan=False`, via temp-file-then-`os.replace`.
 - **`cache_namespace` validation:** non-empty, matches `^[A-Za-z0-9._-]+$`, and not `.` or `..`; else `ValueError`.
-- **Vector validation (every vector entering the system — embedder output, cache load, query input):** length ≥ 1; every element finite (`NaN`/`±Infinity` → `ValueError`); length equals the index's established `dim` once set (else `ValueError`). Stored vectors are L2-normalized on the way into memory (zero-norm → `ValueError`); the cache keeps raw vectors.
+- **Vector validation (every vector entering the system — embedder output, cache load, query input):** length ≥ 1; every element is numeric (`int`/`float`) but **not** `bool`, and finite (`NaN`/`±Infinity` → `ValueError`); length equals the index's established `dim` once set (else `ValueError`). Values are converted to `float` only after this type/finite validation. Stored vectors are L2-normalized on the way into memory (zero-norm → `ValueError`); the cache keeps raw vectors.
 - **Dimension & namespace lifecycle:** empty `VectorIndex` has `dim = None`, `namespace = None`; the first committed vector establishes `dim`; the first `build`/`upsert` binds `namespace`; a later `build`/`upsert` whose embedder reports a different `cache_namespace` raises `ValueError`. Query paths never re-check the namespace except `similar_text`, which enforces `embedder.cache_namespace == self.namespace` when bound.
 - **Ranking key (shared with search):** `score_key(s) = math.floor(s * 1_000_000 + 0.5) / 1_000_000`, from `ranking.py`. Cosine similarity `cos = Σ_i a_i·b_i` over the two L2-normalized vectors, summed in **index order**. Ranking sort key is `(-score_key(score), id)`.
 - **`k` contract (identical to search's `limit`):** `None` = unbounded; otherwise a positive `int` (`bool` rejected as non-int, non-`int` rejected, `<= 0` rejected) → `ValueError`.
@@ -154,7 +154,7 @@ The pure, I/O-free primitives every later task consumes.
 
 **Interfaces:**
 - Consumes: `Node` (`nodes.kernel.node`).
-- Produces: `Vector = tuple[float, ...]`; `class Embedder(Protocol)` with `cache_namespace: str` and `embed(texts: list[str]) -> list[Vector]`; `embed_text(node: Node) -> str`; `text_hash(text: str) -> str`; `validate_namespace(namespace: str) -> None`; `validate_text_hash(text_hash: str) -> None`; `_validate_finite(vec: Vector) -> None`; `_normalize(vec: Vector) -> Vector`.
+- Produces: `Vector = tuple[float, ...]`; `class Embedder(Protocol)` with `cache_namespace: str` and `embed(texts: list[str]) -> list[Vector]`; `embed_text(node: Node) -> str`; `text_hash(text: str) -> str`; `validate_namespace(namespace: str) -> None`; `validate_text_hash(text_hash: str) -> None`; `_validate_finite(vec: tuple[object, ...]) -> None`; `_normalize(vec: Vector) -> Vector`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -215,9 +215,13 @@ def test_validate_text_hash_rejects_bad(h):
 
 def test_validate_finite_rejects_empty_and_nonfinite():
     _validate_finite((1.0, 2.0))  # ok
+    _validate_finite((1, 2.0))     # ints are accepted and later coerced to float
     with pytest.raises(ValueError):
         _validate_finite(())
     for bad in (math.nan, math.inf, -math.inf):
+        with pytest.raises(ValueError):
+            _validate_finite((1.0, bad))
+    for bad in (True, False, "1.0"):
         with pytest.raises(ValueError):
             _validate_finite((1.0, bad))
 
@@ -286,16 +290,16 @@ def validate_text_hash(text_hash: str) -> None:
         raise ValueError(f"invalid text_hash {text_hash!r}")
 
 
-def _validate_finite(vec: Vector) -> None:
+def _validate_finite(vec: tuple[object, ...]) -> None:
     if len(vec) < 1:
         raise ValueError("vector must have length >= 1")
     for x in vec:
-        if not math.isfinite(x):
-            raise ValueError(f"vector contains non-finite value {x!r}")
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+            raise ValueError(f"vector contains non-finite or non-numeric value {x!r}")
 
 
 def _normalize(vec: Vector) -> Vector:
-    """Return the L2-normalized vector; reject zero-norm and non-finite input."""
+    """Return the L2-normalized vector; reject zero-norm and invalid numeric input."""
     _validate_finite(vec)
     norm = math.sqrt(sum(x * x for x in vec))
     if norm == 0.0:
@@ -411,9 +415,23 @@ def test_dim_length_mismatch_fails_early(tmp_path):
         cache.get("model-v1", H)
 
 
+def test_bool_vector_element_in_cache_fails_early(tmp_path):
+    cache = VectorCache(tmp_path)
+    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / f"{H}.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"dim": 1, "vector": [True]}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        cache.get("model-v1", H)
+
+
 def test_put_rejects_nonfinite(tmp_path):
     with pytest.raises(ValueError):
         VectorCache(tmp_path).put("model-v1", H, (float("nan"),))
+
+
+def test_put_rejects_bool(tmp_path):
+    with pytest.raises(ValueError):
+        VectorCache(tmp_path).put("model-v1", H, (True,))
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -462,12 +480,9 @@ class VectorCache:
         raw = data["vector"]
         if not isinstance(raw, list) or len(raw) != data["dim"]:
             raise ValueError(f"corrupt cache file {path}: dim/vector length mismatch")
-        try:
-            vec: Vector = tuple(float(x) for x in raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"corrupt cache file {path}: non-numeric vector") from exc
-        _validate_finite(vec)
-        return vec
+        raw_tuple = tuple(raw)
+        _validate_finite(raw_tuple)
+        return tuple(float(x) for x in raw_tuple)
 
     def put(self, namespace: str, text_hash: str, vector: Vector) -> None:
         _validate_finite(vector)
@@ -627,6 +642,13 @@ def test_zero_norm_vector_rejected(tmp_path):
         VectorIndex.build(nodes, emb, VectorCache(tmp_path))
 
 
+def test_bool_embedder_vector_rejected(tmp_path):
+    nodes = [_node("topic:a", "a")]
+    emb = _embedder(nodes, [(True,)])
+    with pytest.raises(ValueError):
+        VectorIndex.build(nodes, emb, VectorCache(tmp_path))
+
+
 def test_empty_build_binds_namespace(tmp_path):
     idx = VectorIndex.build([], DictEmbedder({}, namespace="model-x"), VectorCache(tmp_path))
     assert idx.namespace == "model-x"
@@ -699,8 +721,9 @@ class VectorIndex:
             embedded = embedder.embed([text])
             if len(embedded) != 1:
                 raise ValueError(f"embedder returned {len(embedded)} vectors for 1 input")
-            raw: Vector = tuple(float(x) for x in embedded[0])
-            _validate_finite(raw)
+            raw_values = tuple(embedded[0])
+            _validate_finite(raw_values)
+            raw: Vector = tuple(float(x) for x in raw_values)
             cache.put(namespace, h, raw)
         else:
             raw = cached
@@ -860,6 +883,8 @@ def test_query_validates_vector_even_when_empty(tmp_path):
         idx.query_vector((0.0, 0.0))                  # zero-norm still rejected
     with pytest.raises(ValueError):
         idx.query_vector(())                          # empty vector still rejected
+    with pytest.raises(ValueError):
+        idx.query_vector((True,))                      # bool is not accepted as numeric
 
 
 def test_query_dim_mismatch_rejected(tmp_path):
@@ -876,6 +901,14 @@ def test_score_uses_score_key_for_ranking(tmp_path):
     hits = idx.query_vector((1.0, 0.0))
     assert score_key(hits[0].score) == score_key(hits[1].score)
     assert [h.id for h in hits] == ["topic:a", "topic:b"]
+
+
+def test_similar_text_rejects_bool_embedder_vector(tmp_path):
+    nodes = [_node("topic:x", "x")]
+    idx, emb = _index(tmp_path, nodes, [(1.0, 0.0)])
+    emb._table["bad"] = (True,)
+    with pytest.raises(ValueError):
+        idx.similar_text("bad", emb)
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -928,14 +961,14 @@ and add these methods to `VectorIndex` (after `remove`):
         embedded = embedder.embed([text])
         if len(embedded) != 1:
             raise ValueError(f"embedder returned {len(embedded)} vectors for 1 input")
-        return self.query_vector(tuple(float(x) for x in embedded[0]), k)
+        return self.query_vector(tuple(embedded[0]), k)
 
     def _prepare_query(self, vec: Vector) -> Vector:
-        vec = tuple(float(x) for x in vec)
-        _validate_finite(vec)
-        if self.dim is not None and len(vec) != self.dim:
-            raise ValueError(f"query dim {len(vec)} != index dim {self.dim}")
-        return _normalize(vec)
+        raw_values = tuple(vec)
+        _validate_finite(raw_values)
+        if self.dim is not None and len(raw_values) != self.dim:
+            raise ValueError(f"query dim {len(raw_values)} != index dim {self.dim}")
+        return _normalize(tuple(float(x) for x in raw_values))
 
     def _rank(self, query_vec: Vector, k: int | None, *, exclude_uid: str | None) -> list[SimilarHit]:
         hits = [
@@ -1496,7 +1529,7 @@ similarity APIs raise `EmbedderRequiredError`.
   `score_key` (shared with search, in `nodes.kernel.ranking`) then `id`. Exact
   brute-force cosine — no ANN.
 - **Determinism & failure.** The index is bound to one embedder namespace and one
-  dimension; mismatches, zero-norm, and non-finite vectors fail early. `add`
+  dimension; mismatches, zero-norm, bool/non-numeric, and non-finite vectors fail early. `add`
   validates the vector before any disk write (no partial corpus state).
 - **Parity.** A fixture corpus (`fixtures/similarity-corpus/`), frozen low-dim
   vectors (`fixtures/similarity.vectors.json`), and a ranking oracle
