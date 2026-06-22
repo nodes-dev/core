@@ -9,7 +9,10 @@ registry, structural shapes, a slimmed `Store` (pure file mechanics), an in-memo
 (O(1) resolution + resolved relations graph), and a `Corpus` coordinator — the primary API for
 all mutations (`add`/`get`/`rename`/`delete`) and graph queries (`outbound`/`inbound`/`neighbors`/
 `dangling`). There is **no full-text search, no embeddings, no on-disk index persistence, and no
-membership-graph traversal** — those, and the knowledge vocab, are later TypeScript plans.
+membership-graph traversal** — those are later TypeScript plans. The knowledge vocab
+(`ts/src/vocab/` — `note`/`idea`/`question`/`topic`/`paper`/`book`/`dataset`, the `Source`
+facet, and the predicate vocabulary) is ported as a separate layer that imports only from the
+kernel; register it onto a `Registry` with `registerKnowledgeVocab(reg)`.
 
 ## Conventions
 

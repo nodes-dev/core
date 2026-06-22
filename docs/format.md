@@ -84,7 +84,8 @@ Parity is pinned to a shared oracle under root `fixtures/`:
   language and checked against the oracle.
 
 The TypeScript `Store` is slimmed to pure file mechanics; the `Corpus` coordinator and its in-memory
-structural `Index` are ported (see below). The knowledge vocab is not yet ported.
+structural `Index` are ported (see below). The knowledge vocab is ported too — see "TypeScript
+knowledge vocab" below.
 
 ## Corpus rename parity (TypeScript structural index)
 
@@ -99,3 +100,23 @@ languages under root `fixtures/`:
 Both languages run the same check: copy the fixture corpus into a temp dir, run the fixed
 `Corpus.rename`, canonicalize every node, and assert equality with the shared oracle. Parity is
 semantic, not byte-identical.
+
+## TypeScript knowledge vocab
+
+`ts/src/vocab/` mirrors the Python `nodes.vocab` layer (see "Knowledge vocab (Plan 3)" above):
+the same seven kinds, the same `Source` facet, and the same predicate vocabulary. It imports only
+from the kernel modules; the kernel never imports it, and it is **not** part of the kernel barrel
+(`ts/src/index.ts`) — import it from `ts/src/vocab/index.ts`.
+
+- **Source facet.** `SourceSchema` is a Zod `.strict()` object (`authors`, `year`, `container`,
+  `identifier`, `url`); `.strict()` is the parity analog of Pydantic's `extra="forbid"` — unknown
+  keys fail. `sourceOf(node)` raises `FacetError` on a missing or malformed facet (never a raw
+  `ZodError`); `requireIdentifiableSource(node)` raises `InvariantError` on a source with no
+  identifying fields (none of `authors`/`year`/`identifier`/`url` set).
+- **Kinds.** `registerKnowledgeVocab(reg)` registers prose kinds (`note`/`idea`/`question`/`topic`)
+  bare and source kinds (`paper`/`book`/`dataset`) with the `source` facet + identifiability
+  invariant — mirroring `registerBuiltinShapes`.
+- **Predicates.** `ABOUT`/`CITES`/`ANSWERS`/`ASKS`/`REFINES` constants plus helper constructors,
+  exposed as the `predicates` namespace. Free-string only; never enforced by the kernel.
+- **Enforcement.** `new Corpus(root, reg)` with a vocab-registered `Registry` validates on `add`
+  and `rename` before any disk write — same fail-early contract as the Python `Corpus`.
