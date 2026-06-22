@@ -525,8 +525,6 @@ rtk git commit -m "feat(ts): Index data layer — resolution, collision gate, up
 Append to `ts/tests/structural-index.test.ts`:
 
 ```typescript
-import { Relation as _RelationTypeOnly } from "../src/relations.js"; // (type import already covered; see note)
-
 describe("Index — graph queries", () => {
   it("outbound returns the node's source relations, resolved", () => {
     const a = makeNode({ id: "topic:a", kind: "topic", title: "A", relations: [relatesTo("topic:a", "topic:b")] });
@@ -602,7 +600,7 @@ describe("Index — graph queries", () => {
 });
 ```
 
-> Note on the import line: delete the `import { Relation as _RelationTypeOnly } ...` line shown above before committing — it is a marker only. The appended tests need no new imports beyond `makeNode`, `relatesTo`, `Index`, and the vitest helpers already imported at the top of the file.
+The appended tests need no new imports beyond `makeNode`, `relatesTo`, `Index`, and the vitest helpers already imported at the top of the file.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -707,7 +705,7 @@ rtk git commit -m "feat(ts): Index graph queries (outbound/inbound/dangling, rel
 
 ---
 
-### Task 4: `Corpus` — CRUD, resolution, neighbors (no rename yet)
+### Task 4: `Corpus` — CRUD, resolution, neighbors (`rename` stub)
 
 **Files:**
 - Create: `ts/src/corpus.ts`
@@ -715,7 +713,7 @@ rtk git commit -m "feat(ts): Index graph queries (outbound/inbound/dangling, rel
 
 **Interfaces:**
 - Consumes: `RefError` (`./errors.js`); `type Node` (`./node.js`); `Store` (`./store.js`); `Index`, `type ResolvedEdge` (`./structural-index.js`).
-- Produces: `class Corpus { constructor(root: string, registry?: Registry); readonly store: Store; readonly index: Index; add(node): Node; get(ref): Node; resolve(ref): Node; delete(id): void; all(): Node[]; outbound(ref): ResolvedEdge[]; inbound(ref): ResolvedEdge[]; dangling(): ResolvedEdge[]; neighbors(ref): Node[] }`. `rename` is NOT declared in this task — Task 5 adds it (with its extra imports + the `rewriteRefs` helper). `add` already calls `registry?.validate`.
+- Produces: `class Corpus { constructor(root: string, registry?: Registry); readonly store: Store; readonly index: Index; add(node): Node; get(ref): Node; resolve(ref): Node; delete(id): void; all(): Node[]; outbound(ref): ResolvedEdge[]; inbound(ref): ResolvedEdge[]; dangling(): ResolvedEdge[]; neighbors(ref): Node[]; rename(oldId, newId): Node }`. `rename` is a deliberate stub in this task so Task 5's failing tests fail at runtime with the expected message, not at compile/type-analysis time. Task 5 replaces the stub with the real implementation and adds its extra imports + the `rewriteRefs` helper. `add` already calls `registry?.validate`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -836,7 +834,7 @@ Expected: FAIL — `../src/corpus.js` does not exist.
 
 - [ ] **Step 3: Implement `Corpus` (CRUD + queries; `rename` stubbed for Task 5)**
 
-Create `ts/src/corpus.ts` (the `rewriteRefs` helper and the `rename` method are added in Task 5; this task imports only what CRUD + queries need):
+Create `ts/src/corpus.ts` (the `rewriteRefs` helper and the real `rename` method are added in Task 5; this task imports only what CRUD + queries need):
 
 ```typescript
 import { RefError } from "./errors.js";
@@ -920,10 +918,16 @@ export class Corpus {
     neighborUids.delete(uid);
     return [...neighborUids].sort().map((u) => this.store.readFile(this.idFor(u)));
   }
+
+  rename(oldId: string, newId: string): Node {
+    void oldId;
+    void newId;
+    throw new Error("rename not yet implemented");
+  }
 }
 ```
 
-(No `rename` method yet — Task 5 adds it. The Task 4 tests do not call `rename`, so the suite is green.)
+(`rename` is intentionally stubbed. The Task 4 tests do not call `rename`, so the suite is green; Task 5's first test run exercises the stub and fails before the implementation is added.)
 
 - [ ] **Step 4: Run the full gate**
 
@@ -963,7 +967,7 @@ Append to `ts/tests/corpus.test.ts`:
 
 ```typescript
 import { existsSync } from "node:fs";
-import { FacetError, InvariantError, UnknownKindError } from "../src/errors.js";
+import { InvariantError, UnknownKindError } from "../src/errors.js";
 import { Registry } from "../src/registry.js";
 import { registerBuiltinShapes } from "../src/shapes.js";
 
@@ -1163,7 +1167,14 @@ describe("Corpus — registry validation (built-in shapes)", () => {
 
   it("rename blocked by an invalid referrer writes nothing", () => {
     const seed = new Corpus(root); // no registry — lets us write an invalid referrer
-    seed.add(n("topic:t", "topic"));
+    seed.add(
+      makeNode({
+        id: "set:t",
+        kind: "set",
+        title: "set:t",
+        facets: { membership: { shape: "set", members: ["a:1"] } },
+      }),
+    );
     seed.add(
       makeNode({
         id: "dag:bad",
@@ -1176,20 +1187,18 @@ describe("Corpus — registry validation (built-in shapes)", () => {
             edges: [{ source: "a:1", predicate: "e", target: "a:1" }], // self-cycle → requireAcyclic fails
           },
         },
-        relations: [{ source: "dag:bad", predicate: "about", target: "topic:t" }],
+        relations: [{ source: "dag:bad", predicate: "about", target: "set:t" }],
       }),
     );
     const c = new Corpus(root, shapeRegistry());
-    expect(() => c.rename("topic:t", "topic:t2")).toThrow(InvariantError);
+    expect(() => c.rename("set:t", "set:t2")).toThrow(InvariantError);
     const fresh = new Corpus(root);
-    expect(fresh.get("topic:t").title).toBe("topic:t"); // unchanged
-    expect(() => fresh.get("topic:t2")).toThrow(RefError);
-    expect(fresh.get("dag:bad").relations[0].target).toBe("topic:t"); // referrer untouched
+    expect(fresh.get("set:t").title).toBe("set:t"); // unchanged
+    expect(() => fresh.get("set:t2")).toThrow(RefError);
+    expect(fresh.get("dag:bad").relations[0].target).toBe("set:t"); // referrer untouched
   });
 });
 ```
-
-> Note: `FacetError` is imported above for symmetry with the Python suite but the built-in-shapes adaptation uses `InvariantError`/`UnknownKindError`. If Biome flags `FacetError` as an unused import, remove it from the import line.
 
 - [ ] **Step 2: Run to verify it fails**
 
