@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.node import Node
+from nodes.kernel.ranking import score_key
 
 STOP_WORDS: frozenset[str] = frozenset(
     {
@@ -24,15 +25,6 @@ K1 = 1.5
 B = 0.75
 TITLE_BOOST = 2.0
 BODY_BOOST = 1.0
-
-
-def score_key(score: float) -> float:
-    """Half-up rounding to 6 decimal places — the shared ranking/parity key.
-
-    Scores are non-negative, so this floor-based half-up is correct and identical
-    in both languages.
-    """
-    return math.floor(score * 1_000_000 + 0.5) / 1_000_000
 
 
 def _codepoint_sorted(values: set[str] | list[str]) -> list[str]:

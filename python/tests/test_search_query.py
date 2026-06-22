@@ -5,7 +5,7 @@ import math
 import pytest
 
 from nodes.kernel.node import Node
-from nodes.kernel.search import SearchHit, SearchIndex, score_key
+from nodes.kernel.search import SearchHit, SearchIndex
 
 
 def _two_doc_index() -> SearchIndex:
@@ -84,10 +84,3 @@ def test_search_rejects_bad_limit(bad):
     idx.upsert(Node(id="topic:a", kind="topic", title="alpha", body=""))
     with pytest.raises(ValueError):
         idx.search("alpha", limit=bad)
-
-
-def test_score_key_rounds_to_6dp():
-    # Inputs kept clear of the exact .5 boundary so float representation can't flip them.
-    assert score_key(1.2345674) == 1.234567   # rounds down
-    assert score_key(1.2345678) == 1.234568   # rounds up
-    assert score_key(0.0) == 0.0

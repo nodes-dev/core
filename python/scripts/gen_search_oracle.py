@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from nodes.kernel.corpus import Corpus
-from nodes.kernel.search import score_key
+from nodes.kernel.ranking import score_key
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"
 CORPUS = FIXTURES / "search-corpus"
