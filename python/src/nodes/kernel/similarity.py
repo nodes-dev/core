@@ -12,6 +12,7 @@ from typing import Protocol
 
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.node import Node
+from nodes.kernel.ranking import score_key
 
 Vector = tuple[float, ...]
 
@@ -67,6 +68,18 @@ def _normalize(vec: Vector) -> Vector:
     if norm == 0.0:
         raise ValueError("cannot normalize a zero-norm vector")
     return tuple(x / norm for x in vec)
+
+
+@dataclass
+class SimilarHit:
+    id: str
+    uid: str
+    score: float
+
+
+def _validate_k(k: int | None) -> None:
+    if k is not None and (isinstance(k, bool) or not isinstance(k, int) or k <= 0):
+        raise ValueError(f"k must be a positive int or None, got {k!r}")
 
 
 class VectorCache:
@@ -188,3 +201,44 @@ class VectorIndex:
         self.vectors.pop(uid, None)
         self.id_by_uid.pop(uid, None)
         self.hash_by_uid.pop(uid, None)
+
+    def query_vector(self, vec: Vector, k: int | None = None) -> list[SimilarHit]:
+        _validate_k(k)
+        return self._rank(self._prepare_query(vec), k, exclude_uid=None)
+
+    def similar(self, uid: str, k: int | None = None) -> list[SimilarHit]:
+        _validate_k(k)
+        if uid not in self.vectors:
+            raise KeyError(uid)
+        return self._rank(self.vectors[uid], k, exclude_uid=uid)
+
+    def similar_text(self, text: str, embedder: Embedder, k: int | None = None) -> list[SimilarHit]:
+        _validate_k(k)
+        if self.namespace is not None and embedder.cache_namespace != self.namespace:
+            raise ValueError(
+                f"embedder namespace {embedder.cache_namespace!r} != index namespace {self.namespace!r}"
+            )
+        embedded = embedder.embed([text])
+        if len(embedded) != 1:
+            raise ValueError(f"embedder returned {len(embedded)} vectors for 1 input")
+        return self.query_vector(tuple(embedded[0]), k)
+
+    def _prepare_query(self, vec: Vector) -> Vector:
+        raw_values = tuple(vec)
+        _validate_finite(raw_values)
+        if self.dim is not None and len(raw_values) != self.dim:
+            raise ValueError(f"query dim {len(raw_values)} != index dim {self.dim}")
+        return _normalize(tuple(float(x) for x in raw_values))
+
+    def _rank(self, query_vec: Vector, k: int | None, *, exclude_uid: str | None) -> list[SimilarHit]:
+        hits = [
+            SimilarHit(
+                id=self.id_by_uid[uid],
+                uid=uid,
+                score=sum(a * b for a, b in zip(query_vec, vec)),
+            )
+            for uid, vec in self.vectors.items()
+            if uid != exclude_uid
+        ]
+        hits.sort(key=lambda h: (-score_key(h.score), h.id))
+        return hits if k is None else hits[:k]
