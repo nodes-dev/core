@@ -1,0 +1,83 @@
+[
+  {
+    "input": "",
+    "tokens": []
+  },
+  {
+    "input": "   \t\n ",
+    "tokens": []
+  },
+  {
+    "input": "The Quick Brown Fox",
+    "tokens": [
+      "quick",
+      "brown",
+      "fox"
+    ]
+  },
+  {
+    "input": "the THE The",
+    "tokens": []
+  },
+  {
+    "input": "well-known",
+    "tokens": [
+      "well",
+      "known"
+    ]
+  },
+  {
+    "input": "state_of_art",
+    "tokens": [
+      "state",
+      "art"
+    ]
+  },
+  {
+    "input": "don't",
+    "tokens": [
+      "don",
+      "t"
+    ]
+  },
+  {
+    "input": "3.14 and 2",
+    "tokens": [
+      "3",
+      "14",
+      "2"
+    ]
+  },
+  {
+    "input": "café",
+    "tokens": [
+      "café"
+    ]
+  },
+  {
+    "input": "café",
+    "tokens": [
+      "café"
+    ]
+  },
+  {
+    "input": "Hello МИР",
+    "tokens": [
+      "hello",
+      "мир"
+    ]
+  },
+  {
+    "input": "hello 世界",
+    "tokens": [
+      "hello",
+      "世界"
+    ]
+  },
+  {
+    "input": "data𝟙point",
+    "tokens": [
+      "data𝟙point"
+    ]
+  }
+]
