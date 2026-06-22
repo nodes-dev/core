@@ -6,3 +6,4 @@ uv.lock
 .venv/
 node_modules/
 ts/dist/
+.nodes-index/
