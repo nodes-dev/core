@@ -114,7 +114,8 @@ the parity fixtures (§7), and must be identical in the TypeScript port.
 Embeddings are expensive to recompute and require the model to be present.
 A content-addressed cache reconciles that with §5's "files canonical, index
 disposable" rule: a rebuild re-embeds only new/changed text; unchanged text is a
-cache hit, and a warm cache needs no embedder for already-seen content.
+cache hit, so a warm cache needs no model call (no remote embedding request) for
+already-seen content.
 
 - **Location:** `<corpus_root>/.nodes-index/vectors/<namespace>/<text_hash>.json`
   - `<namespace>` = the embedder's validated `cache_namespace` — incompatible
@@ -203,10 +204,13 @@ embedders is meaningless):
   are the caller's job (`Corpus.similar`, §6). Implemented via a private
   `_rank(query_vec, k, *, exclude_uid=None)`; `query_vector` passes
   `exclude_uid=None`, `similar` passes the node's own uid.
-- `similar_text(text, embedder, k) -> list[SimilarHit]` — `embedder.embed([text])`
-  then `query_vector`. The only query path that needs a live embedder. It uses
-  the embedder directly and **does not write the query vector to the cache** (the
-  cache is for node content, not arbitrary queries).
+- `similar_text(text, embedder, k) -> list[SimilarHit]` — the only query path
+  that needs a live embedder. When `self.namespace is not None` it first enforces
+  `embedder.cache_namespace == self.namespace`, raising `ValueError` on mismatch,
+  so a direct caller cannot rank a model-B query vector against model-A stored
+  vectors. It then calls `embedder.embed([text])` and `query_vector`, using the
+  embedder directly and **not** writing the query vector to the cache (the cache
+  is for node content, not arbitrary queries).
 
 **Ranking key — identical to full-text search:** sort by
 `(-score_key(score), id)` ascending on id, where `score` is cosine similarity and
