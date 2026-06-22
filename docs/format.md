@@ -43,9 +43,8 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
 
 ### Known kernel limitations (resolved in later plans)
 - The index is in-memory and rebuilt on `Corpus(root)` construction; no on-disk persistence yet.
-- No embeddings/similarity index yet. (Full-text search is now implemented in the
-  Python kernel — see "Full-text search (derived index)" below; the TypeScript port
-  is a later plan.)
+- No embeddings/similarity index yet. (Full-text search is implemented in both the
+  Python and TypeScript kernels — see "Full-text search (derived index)" below.)
 - No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
   are tracked internally for rename but are not exposed as graph edges.
 
@@ -145,3 +144,17 @@ exposes `Corpus.search(query, limit=None) -> list[SearchHit]`.
 
 This is in-memory and rebuilt on `Corpus` construction; on-disk persistence is a
 later plan.
+
+### TypeScript full-text search
+
+The TypeScript kernel (`ts/src/search.ts`) is a semantic port of `nodes.kernel.search`:
+the same tokenizer, BM25F scoring, constants, and `SearchIndex` operations, exposed as
+`Corpus.search(query, limit?) -> SearchHit[]` (`SearchHit` carries `id`, `uid`, `score`,
+`matchedTerms`). Query-term ordering uses an explicit Unicode code-point comparator — not
+JavaScript's default UTF-16 code-unit sort — so non-BMP tokens order identically to Python.
+
+Parity is pinned by the same two fixtures Python generated: `fixtures/search.tokenizer.json`
+(the tokenizer freeze) and `fixtures/search-corpus/` + `fixtures/search.oracle.json` (the
+ranking freeze). Both languages assert ranked ids and 6-decimal scores against them. Scores
+are not claimed bit-identical; the 6-dp `scoreKey` is the cross-language contract, and oracle
+scores are compared numerically (not string-compared) to absorb JSON trailing-zero formatting.
