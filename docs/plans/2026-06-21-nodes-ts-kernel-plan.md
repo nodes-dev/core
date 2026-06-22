@@ -1162,7 +1162,7 @@ export function nodeToMarkdown(node: Node): string {
   if (Object.keys(node.facets).length > 0) fm.facets = node.facets;
   if (node.deprecatedIds.length > 0) fm.deprecated_ids = node.deprecatedIds;
 
-  const yamlText = stringify(fm, { sortKeys: false }).trimEnd();
+  const yamlText = stringify(fm, { sortMapEntries: false }).trimEnd();
   return `---\n${yamlText}\n---\n${node.body}`;
 }
 ```
