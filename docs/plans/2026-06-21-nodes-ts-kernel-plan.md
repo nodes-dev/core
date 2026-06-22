@@ -18,9 +18,9 @@
 - **Dates are `YYYY-MM-DD` strings or `null` — never a JS `Date`.** Validated by a Zod date-string schema.
 - **Zod defaults MUST match Pydantic defaults:** `metadata` → `{created:null, updated:null, version:1}`; `relations` → `[]`; `facets` → `{}`; `deprecatedIds` → `[]`; `Membership.members` → `[]`; `Membership.edges` → `[]`.
 - **Explicit YAML parse-error handling:** the frontmatter parser uses `parseDocument` and inspects `.errors`; it never assumes malformed YAML throws.
-- **Zod validation errors are wrapped into the kernel error hierarchy** (`ValidationError`/`FacetError`), never leaked raw.
+- **Boundary parsers wrap Zod errors into the kernel error hierarchy** (`ValidationError`/`FacetError`), never leaking raw. The boundary parsers are `makeNode`, `nodeFromMarkdown`, and `membershipOf` — the functions that ingest untrusted external input. Low-level schema helpers (`fromSerialized`, `relatesTo`, direct `RelationSchema.parse`) may surface raw Zod errors, mirroring Python where `Relation(...)`/`Relation.from_serialized` surface raw Pydantic errors. Callers reach disk through the boundary parsers, which catch and re-wrap.
 - **Tooling:** ESM (`"type":"module"`), `strict:true`, target ES2022, `NodeNext` resolution; relative imports use the `.js` extension. `engines.node` `>=20`, `packageManager` `npm@11.11.0` (refines the spec's illustrative `npm@10` to the installed npm).
-- **Tool commands (`git`, `npm`, `npx`, `uv`, `node`, `grep`) are shown `rtk`-prefixed**; the Claude Code hook also rewrites bare commands transparently, so plain filesystem primitives (`mkdir`, `mv`, `rmdir`) are shown bare. Gate commands are listed **one per line**, never chained with `&&`. Python commands run from `python/`; TS commands run from `ts/`.
+- **Command convention.** `rtk` is a token-optimizing proxy for *tool* commands whose output it can trim — `git`, `npm`, `npx`, `uv`, `node`, `grep` — so those are shown `rtk`-prefixed. Shell builtins (`cd`) and filesystem primitives (`mkdir`, `mv`, `rmdir`) have nothing for `rtk` to optimize and are shown bare. Every command — including `cd` — sits on **its own line**; no `&&` chaining. Python commands run from `python/`; TS commands run from `ts/`.
 - **Docs use `~/d/` paths**, never `/home/keith/...` or `/mnt/ssd/...`.
 - **Final gate:** TS — `vitest run` green, `tsc --noEmit` clean, `biome check` clean. Python — full suite green (≥112), `ruff check` clean, `pyright` clean, both run from `python/`.
 
@@ -610,7 +610,8 @@ describe("relations", () => {
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
+cd ~/d/nodes/ts
+rtk npm test
 ```
 
 Expected: FAIL (module not found).
@@ -636,6 +637,9 @@ export const RelationSchema = z.object({
 
 export type Relation = z.infer<typeof RelationSchema>;
 
+// Low-level schema helpers. Like Python's `Relation(...)` / `Relation.from_serialized`, these may
+// surface a raw ZodError on malformed input. The "never leak raw" contract lives in the boundary
+// parsers (`makeNode`, `nodeFromMarkdown`, `membershipOf`), which catch and re-wrap as kernel errors.
 export function fromSerialized(data: Record<string, unknown>, containerId: string): Relation {
   const { source, ...rest } = data;
   return RelationSchema.parse({ source: source !== undefined ? source : containerId, ...rest });
@@ -755,13 +759,25 @@ describe("node", () => {
       makeNode({ id: "topic:x", kind: "topic", title: "X", metadata: { created: "2024-02-29" } }).metadata.created,
     ).toBe("2024-02-29");
   });
+
+  it("accepts low years 0001-0099 (Python date MINYEAR parity, not JS Date 1900 offset)", () => {
+    for (const ok of ["0001-01-01", "0099-12-31", "0004-02-29"]) {
+      expect(
+        makeNode({ id: "topic:x", kind: "topic", title: "X", metadata: { created: ok } }).metadata.created,
+      ).toBe(ok);
+    }
+    expect(() => makeNode({ id: "topic:x", kind: "topic", title: "X", metadata: { created: "0000-01-01" } })).toThrow(
+      ValidationError,
+    );
+  });
 });
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
+cd ~/d/nodes/ts
+rtk npm test
 ```
 
 Expected: FAIL.
@@ -782,14 +798,19 @@ export function newUid(): string {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const dateStr = z
   .string()
   .regex(DATE_RE, "expected a YYYY-MM-DD date string")
   .refine((s) => {
-    // Real-calendar validity (Python's `date` rejects e.g. 2026-99-99, 2026-02-30, non-leap 02-29).
+    // Real-calendar validity via explicit arithmetic — full parity with Python's `date`
+    // (MINYEAR=1, rejects 2026-99-99 / 2026-02-30 / non-leap 02-29, accepts 0001-0099).
+    // Deliberately avoids JS `Date`, which maps years 0-99 onto 1900-1999.
     const [y, m, d] = s.split("-").map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+    if (y < 1 || m < 1 || m > 12 || d < 1) return false;
+    const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+    const maxDay = m === 2 && leap ? 29 : DAYS_IN_MONTH[m - 1];
+    return d <= maxDay;
   }, "not a valid calendar date");
 
 export const NodeMetadataSchema = z.object({
@@ -967,6 +988,28 @@ describe("frontmatter", () => {
       ValidationError,
     );
   });
+
+  it("rejects a non-list 'related' (scalar or mapping) as ValidationError, never a raw TypeError", () => {
+    // scalar
+    expect(() => nodeFromMarkdown("---\nid: a:1\nuid: u\nkind: a\ntitle: A\nrelated: 123\n---\nx\n")).toThrow(
+      ValidationError,
+    );
+    // mapping
+    expect(() => nodeFromMarkdown("---\nid: a:1\nuid: u\nkind: a\ntitle: A\nrelated:\n  b: c\n---\nx\n")).toThrow(
+      ValidationError,
+    );
+  });
+
+  it("rejects a non-list 'relations' (scalar or mapping) as ValidationError, never a raw TypeError", () => {
+    // scalar
+    expect(() => nodeFromMarkdown("---\nid: a:1\nuid: u\nkind: a\ntitle: A\nrelations: 7\n---\nx\n")).toThrow(
+      ValidationError,
+    );
+    // a single mapping where a list was expected
+    expect(() =>
+      nodeFromMarkdown("---\nid: a:1\nuid: u\nkind: a\ntitle: A\nrelations:\n  predicate: cites\n  target: c:3\n---\nx\n"),
+    ).toThrow(ValidationError);
+  });
 });
 ```
 
@@ -1009,7 +1052,8 @@ describe("cross-language parity (TS side)", () => {
 - [ ] **Step 3: Run to verify they fail**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
+cd ~/d/nodes/ts
+rtk npm test
 ```
 
 Expected: FAIL (module + ts-emit fixture missing).
@@ -1052,7 +1096,16 @@ export function nodeFromMarkdown(text: string): Node {
   }
   const nodeId = fm.id as string;
 
-  // Wrap Zod errors at the on-disk ingestion boundary (spec §7 — never leak raw ZodError).
+  // `nodeFromMarkdown` is a boundary parser: every malformed-input path leaves as a typed
+  // kernel error (spec §7), never a raw ZodError or a raw TypeError. Collection fields must be
+  // lists — a scalar or mapping is a ValidationError, not a "not iterable" TypeError. (Python's
+  // node_from_markdown leaks a raw TypeError here; the TS boundary deliberately tightens that.)
+  if (fm.related !== undefined && !Array.isArray(fm.related)) {
+    throw new ValidationError(`'related' must be a list in ${JSON.stringify(nodeId)}`);
+  }
+  if (fm.relations !== undefined && !Array.isArray(fm.relations)) {
+    throw new ValidationError(`'relations' must be a list in ${JSON.stringify(nodeId)}`);
+  }
   const relations: Relation[] = [];
   try {
     for (const ref of (fm.related as unknown[] | undefined) ?? []) {
@@ -1217,7 +1270,8 @@ describe("Registry", () => {
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
+cd ~/d/nodes/ts
+rtk npm test
 ```
 
 Expected: FAIL.
@@ -1396,7 +1450,8 @@ describe("shapes", () => {
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
+cd ~/d/nodes/ts
+rtk npm test
 ```
 
 Expected: FAIL.
@@ -1633,7 +1688,8 @@ describe("Store CRUD", () => {
 - [ ] **Step 2: Run to verify they fail**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
+cd ~/d/nodes/ts
+rtk npm test
 ```
 
 Expected: FAIL.
@@ -1974,8 +2030,10 @@ describe("cross-language parity (check 4)", () => {
 - [ ] **Step 3: Run both to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test
-cd ~/d/nodes/python && rtk uv run pytest tests/test_parity.py -q
+cd ~/d/nodes/ts
+rtk npm test
+cd ~/d/nodes/python
+rtk uv run pytest tests/test_parity.py -q
 ```
 
 Expected: TS green; Python parity tests green (now 4). (Both committed cross-emitted fixtures already exist from Tasks 2 and 6; their currency guards live in their emitting language.)

@@ -291,8 +291,14 @@ The TS hierarchy mirrors §6.1 one-for-one. Validation failures map to the same 
 Python: malformed id → `IdError` (wrapped to `ValidationError` inside `Node`); missing
 frontmatter field → `ValidationError`; bad/missing facet → `FacetError`; invariant breach →
 `InvariantError`; id collision → `CollisionError`; unresolvable ref → `RefError`; unknown kind →
-`UnknownKindError`. Zod validation errors are caught at the schema boundary and re-thrown as the
-appropriate kernel error (never leaked raw), matching Plan 3's Pydantic-wrapping discipline.
+`UnknownKindError`. The **boundary parsers** — `makeNode`, `nodeFromMarkdown`, `membershipOf` —
+catch Zod errors and re-throw the appropriate kernel error (never leaked raw); they also guard
+container shapes (e.g. a non-list `related`/`relations`) so an ingestion failure is a typed
+`ValidationError`, never a raw `TypeError`. Low-level schema helpers (`fromSerialized`,
+`relatesTo`, direct `RelationSchema.parse`) may surface raw Zod errors — exactly as Python's
+`Relation(...)`/`Relation.from_serialized` surface raw Pydantic errors — because callers reach
+disk through the boundary parsers, which do the wrapping. This matches Plan 3's discipline:
+wrap at the boundary, not in every internal helper.
 
 ## 8. Testing
 
