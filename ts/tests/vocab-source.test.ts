@@ -55,6 +55,13 @@ describe("Source facet", () => {
     expect(sourceOf(paper({ year: 2026.0 })).year).toBe(2026);
   });
 
+  it("rejects the year coercion boundary cases z.coerce.number() would wrongly accept", () => {
+    // Pins the reason the schema avoids z.coerce.number(): "" must NOT become 0, and a
+    // non-integral float must fail — matching Pydantic's int|None rejects.
+    expect(() => sourceOf(paper({ year: "" }))).toThrow(FacetError);
+    expect(() => sourceOf(paper({ year: 2026.5 }))).toThrow(FacetError);
+  });
+
   it("roundtrips a populated source through the facet", () => {
     const s = sourceOf(paper({ authors: ["A. Author"], year: 2026, identifier: "10.1/x" }));
     expect(s.authors).toEqual(["A. Author"]);
