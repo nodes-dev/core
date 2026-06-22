@@ -1,0 +1,44 @@
+[
+  {
+    "id": "graph:g",
+    "uid": "33333333333333333333333333333333",
+    "kind": "graph",
+    "title": "G",
+    "body": "",
+    "metadata": { "created": null, "updated": null, "version": 1 },
+    "relations": [],
+    "facets": {
+      "membership": {
+        "shape": "graph",
+        "members": ["topic:new"],
+        "edges": [{ "source": "topic:new", "predicate": "to", "target": "topic:new" }]
+      }
+    },
+    "deprecated_ids": []
+  },
+  {
+    "id": "note:r",
+    "uid": "22222222222222222222222222222222",
+    "kind": "note",
+    "title": "R",
+    "body": "",
+    "metadata": { "created": null, "updated": null, "version": 1 },
+    "relations": [
+      { "source": "note:r", "predicate": "relatesTo", "target": "topic:new", "directed": true, "weight": null, "attrs": {} },
+      { "source": "note:r", "predicate": "cites", "target": "topic:new", "directed": true, "weight": null, "attrs": {} }
+    ],
+    "facets": {},
+    "deprecated_ids": []
+  },
+  {
+    "id": "topic:new",
+    "uid": "11111111111111111111111111111111",
+    "kind": "topic",
+    "title": "Old",
+    "body": "",
+    "metadata": { "created": null, "updated": null, "version": 1 },
+    "relations": [],
+    "facets": {},
+    "deprecated_ids": ["topic:old"]
+  }
+]
