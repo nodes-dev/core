@@ -4,10 +4,12 @@ TypeScript port of the `nodes` kernel — behavioral + on-disk-format parity wit
 
 ## Scope
 
-Mirrors the **Plan-1 Python kernel**: `Node`/`Relation`, ids, errors, frontmatter parse/serialize,
-registry, structural shapes, and a `Store` that is the full CRUD surface (O(n) collision detection,
-resolution, and crash-atomic rename). There is **no `Corpus` and no derived `Index`** — those, and
-the knowledge vocab, are later TypeScript plans.
+Mirrors the current Python kernel: `Node`/`Relation`, ids, errors, frontmatter parse/serialize,
+registry, structural shapes, a slimmed `Store` (pure file mechanics), an in-memory `Index`
+(O(1) resolution + resolved relations graph), and a `Corpus` coordinator — the primary API for
+all mutations (`add`/`get`/`rename`/`delete`) and graph queries (`outbound`/`inbound`/`neighbors`/
+`dangling`). There is **no full-text search, no embeddings, no on-disk index persistence, and no
+membership-graph traversal** — those, and the knowledge vocab, are later TypeScript plans.
 
 ## Conventions
 

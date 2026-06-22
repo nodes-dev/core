@@ -83,5 +83,19 @@ Parity is pinned to a shared oracle under root `fixtures/`:
   current by a **regenerate-and-diff** test in its emitting language, then parsed by the other
   language and checked against the oracle.
 
-The TypeScript `Store` is the Plan-1 CRUD surface; `Corpus`, the derived index, and the knowledge
-vocab are not yet ported.
+The TypeScript `Store` is slimmed to pure file mechanics; the `Corpus` coordinator and its in-memory
+structural `Index` are ported (see below). The knowledge vocab is not yet ported.
+
+## Corpus rename parity (TypeScript structural index)
+
+`Corpus.rename` rewrites files on disk. A corpus-level parity fixture pins this behavior across
+languages under root `fixtures/`:
+
+- `fixtures/corpus/` — a committed multi-node source corpus (a rename target plus referrers via
+  relations and membership members/edges), in the on-disk `kind/slug.md` layout.
+- `fixtures/corpus.rename.canonical.json` — the post-rename canonical-JSON oracle (the whole
+  corpus after `topic:old` → `topic:new`, as canonical node forms sorted by id).
+
+Both languages run the same check: copy the fixture corpus into a temp dir, run the fixed
+`Corpus.rename`, canonicalize every node, and assert equality with the shared oracle. Parity is
+semantic, not byte-identical.

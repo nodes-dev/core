@@ -41,3 +41,12 @@ export {
   requireUniqueMembers,
 } from "./shapes.js";
 export { Store } from "./store.js";
+export { Corpus } from "./corpus.js";
+export {
+  Index,
+  type InRef,
+  type IndexEntry,
+  type OutRef,
+  type ResolvedEdge,
+  type Role,
+} from "./structural-index.js";
