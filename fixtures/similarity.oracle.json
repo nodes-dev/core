@@ -1,0 +1,160 @@
+{
+  "similar": [
+    {
+      "ref": "topic:cat",
+      "hits": [
+        {
+          "id": "topic:dog",
+          "score": 0.992928
+        },
+        {
+          "id": "topic:car",
+          "score": 0.0
+        },
+        {
+          "id": "topic:truck",
+          "score": 0.0
+        }
+      ]
+    },
+    {
+      "ref": "topic:dog",
+      "hits": [
+        {
+          "id": "topic:cat",
+          "score": 0.992928
+        },
+        {
+          "id": "topic:car",
+          "score": 0.0
+        },
+        {
+          "id": "topic:truck",
+          "score": 0.0
+        }
+      ]
+    },
+    {
+      "ref": "topic:car",
+      "hits": [
+        {
+          "id": "topic:truck",
+          "score": 0.992928
+        },
+        {
+          "id": "topic:cat",
+          "score": 0.0
+        },
+        {
+          "id": "topic:dog",
+          "score": 0.0
+        }
+      ]
+    },
+    {
+      "ref": "topic:truck",
+      "hits": [
+        {
+          "id": "topic:car",
+          "score": 0.992928
+        },
+        {
+          "id": "topic:cat",
+          "score": 0.0
+        },
+        {
+          "id": "topic:dog",
+          "score": 0.0
+        }
+      ]
+    }
+  ],
+  "query_vector": [
+    {
+      "text": "pet",
+      "hits": [
+        {
+          "id": "topic:cat",
+          "score": 0.99838
+        },
+        {
+          "id": "topic:dog",
+          "score": 0.998074
+        },
+        {
+          "id": "topic:car",
+          "score": 0.0
+        },
+        {
+          "id": "topic:truck",
+          "score": 0.0
+        }
+      ]
+    },
+    {
+      "text": "vehicle",
+      "hits": [
+        {
+          "id": "topic:car",
+          "score": 0.99838
+        },
+        {
+          "id": "topic:truck",
+          "score": 0.998074
+        },
+        {
+          "id": "topic:cat",
+          "score": 0.0
+        },
+        {
+          "id": "topic:dog",
+          "score": 0.0
+        }
+      ]
+    }
+  ],
+  "similar_text": [
+    {
+      "text": "pet",
+      "hits": [
+        {
+          "id": "topic:cat",
+          "score": 0.99838
+        },
+        {
+          "id": "topic:dog",
+          "score": 0.998074
+        },
+        {
+          "id": "topic:car",
+          "score": 0.0
+        },
+        {
+          "id": "topic:truck",
+          "score": 0.0
+        }
+      ]
+    },
+    {
+      "text": "vehicle",
+      "hits": [
+        {
+          "id": "topic:car",
+          "score": 0.99838
+        },
+        {
+          "id": "topic:truck",
+          "score": 0.998074
+        },
+        {
+          "id": "topic:cat",
+          "score": 0.0
+        },
+        {
+          "id": "topic:dog",
+          "score": 0.0
+        }
+      ]
+    }
+  ]
+}

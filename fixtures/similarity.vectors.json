@@ -1,0 +1,12 @@
+{
+  "documents": [
+    {"id": "topic:cat",   "vector": [1.0, 0.1, 0.0, 0.0]},
+    {"id": "topic:dog",   "vector": [0.9, 0.2, 0.0, 0.0]},
+    {"id": "topic:car",   "vector": [0.0, 0.0, 1.0, 0.1]},
+    {"id": "topic:truck", "vector": [0.0, 0.0, 0.9, 0.2]}
+  ],
+  "queries": [
+    {"text": "pet",     "vector": [0.95, 0.15, 0.0, 0.0]},
+    {"text": "vehicle", "vector": [0.0, 0.0, 0.95, 0.15]}
+  ]
+}

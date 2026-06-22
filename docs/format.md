@@ -43,8 +43,6 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
 
 ### Known kernel limitations (resolved in later plans)
 - The index is in-memory and rebuilt on `Corpus(root)` construction; no on-disk persistence yet.
-- No embeddings/similarity index yet. (Full-text search is implemented in both the
-  Python and TypeScript kernels — see "Full-text search (derived index)" below.)
 - No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
   are tracked internally for rename but are not exposed as graph edges.
 
@@ -158,3 +156,35 @@ Parity is pinned by the same two fixtures Python generated: `fixtures/search.tok
 ranking freeze). Both languages assert ranked ids and 6-decimal scores against them. Scores
 are not claimed bit-identical; the 6-dp `scoreKey` is the cross-language contract, and oracle
 scores are compared numerically (not string-compared) to absorb JSON trailing-zero formatting.
+
+## Similarity / embedding index (derived index)
+
+The Python kernel ships a third derived index beside the structural `Index` and
+the BM25F `SearchIndex`: an in-memory cosine-similarity index over dense
+embeddings (`nodes.kernel.similarity`). It is **opt-in** — pass an embedder:
+`Corpus(root, embedder=...)`. Without one, the vector index is not built and the
+similarity APIs raise `EmbedderRequiredError`.
+
+- **Seam.** The kernel ships no model. An `Embedder` protocol
+  (`cache_namespace: str`, `embed(texts) -> list[Vector]`) is injected by the
+  caller. One vector per node from `embed_text(node) = f"{title}\n\n{body}"`.
+- **Vectors.** Stored L2-normalized in memory (cosine = dot product); raw
+  embedder output is persisted in a content-addressed, per-namespace cache under
+  `<root>/.nodes-index/vectors/<namespace>/<sha256>.json` (git-ignored,
+  disposable, atomic writes). A warm cache needs no model call for already-seen
+  content.
+- **Queries.** `Corpus.similar(ref, k=None)` (excludes the node itself),
+  `Corpus.query_vector(vec, k=None)`, `Corpus.similar_text(text, k=None)`.
+  Results are `SimilarHit`s (`id`, `uid`, `score`), sorted by a 6-decimal half-up
+  `score_key` (shared with search, in `nodes.kernel.ranking`) then `id`. Exact
+  brute-force cosine — no ANN.
+- **Determinism & failure.** The index is bound to one embedder namespace and one
+  dimension; mismatches, zero-norm, bool/non-numeric, and non-finite vectors fail early. `add`
+  validates the vector before any disk write (no partial corpus state).
+- **Parity.** A fixture corpus (`fixtures/similarity-corpus/`), frozen low-dim
+  vectors (`fixtures/similarity.vectors.json`), and a ranking oracle
+  (`fixtures/similarity.oracle.json`) pin ranked ids and 6-dp scores. Because
+  model embeddings are not portable across languages, the *vectors* are frozen
+  (not computed); both languages inject a lookup embedder over the frozen vectors
+  and assert identical rankings. On-disk index persistence and the TypeScript
+  port are later plans.
