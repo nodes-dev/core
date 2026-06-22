@@ -2,9 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CollisionError, RefError } from "../src/errors.js";
+import { RefError } from "../src/errors.js";
 import { type Node, makeNode } from "../src/node.js";
-import { relatesTo } from "../src/relations.js";
 import { Store } from "../src/store.js";
 
 let root: string;
@@ -20,72 +19,38 @@ function n(id: string, kind: string, extra: Partial<Node> = {}): Node {
   return makeNode({ id, kind, title: id, ...extra });
 }
 
-describe("Store CRUD", () => {
-  it("writes then reads a node back", () => {
-    const a = n("topic:a", "topic");
-    store.write(a);
-    expect(store.read("topic:a").id).toBe("topic:a");
+describe("Store file mechanics", () => {
+  it("writeFile then readFile round-trips", () => {
+    store.writeFile(makeNode({ id: "topic:a", kind: "topic", title: "A", body: "hi" }));
+    const got = store.readFile("topic:a");
+    expect(got.title).toBe("A");
+    expect(got.body).toBe("hi");
   });
 
-  it("resolve() throws RefError for an unknown ref", () => {
-    expect(() => store.resolve("topic:missing")).toThrow(RefError);
+  it("writeFile has no collision check — a different uid at the same id just overwrites", () => {
+    store.writeFile(n("topic:a", "topic"));
+    store.writeFile(makeNode({ id: "topic:a", kind: "topic", title: "Other" }));
+    expect(store.readFile("topic:a").title).toBe("Other");
   });
 
-  it("write() rejects a second node reusing a live uid under a different id", () => {
-    const a = n("topic:a", "topic");
-    store.write(a);
-    const clash = makeNode({ id: "topic:b", kind: "topic", title: "b", uid: a.uid });
-    expect(() => store.write(clash)).toThrow(CollisionError);
+  it("pathFor encodes a CURIE slug", () => {
+    expect(store.pathFor("gene:HGNC:PHF19")).toBe(join(root, "gene", "HGNC__PHF19.md"));
   });
 
-  it("delete() removes a node and errors when absent", () => {
-    store.write(n("topic:a", "topic"));
-    store.delete("topic:a");
-    expect(() => store.delete("topic:a")).toThrow(RefError);
+  it("readFile on a missing node throws RefError", () => {
+    expect(() => store.readFile("topic:ghost")).toThrow(RefError);
   });
 
-  it("rename() rewrites the node, records a deprecated id, and rewrites inbound refs", () => {
-    store.write(n("topic:old", "topic"));
-    store.write(n("note:r", "note", { relations: [relatesTo("note:r", "topic:old")] }));
-
-    const renamed = store.rename("topic:old", "topic:new");
-    expect(renamed.id).toBe("topic:new");
-    expect(renamed.deprecatedIds).toContain("topic:old");
-
-    // old ref still resolves through the deprecated alias
-    expect(store.resolve("topic:old").id).toBe("topic:new");
-    // inbound reference was rewritten
-    expect(store.read("note:r").relations[0].target).toBe("topic:new");
+  it("deleteFile removes, then a second delete and a read both throw RefError", () => {
+    store.writeFile(n("topic:a", "topic"));
+    store.deleteFile("topic:a");
+    expect(() => store.readFile("topic:a")).toThrow(RefError);
+    expect(() => store.deleteFile("topic:a")).toThrow(RefError);
   });
 
-  it("rename() rejects a target id already in use", () => {
-    store.write(n("topic:a", "topic"));
-    store.write(n("topic:b", "topic"));
-    expect(() => store.rename("topic:a", "topic:b")).toThrow(CollisionError);
-  });
-
-  it("rename() rewrites membership members and edges", () => {
-    store.write(n("topic:old", "topic"));
-    store.write(
-      makeNode({
-        id: "graph:g",
-        kind: "graph",
-        title: "g",
-        facets: {
-          membership: {
-            shape: "graph",
-            members: ["topic:old"],
-            edges: [{ source: "topic:old", predicate: "e", target: "topic:old" }],
-          },
-        },
-      }),
-    );
-    store.rename("topic:old", "topic:new");
-    const g = store.read("graph:g");
-    expect(g.facets.membership.members).toEqual(["topic:new"]);
-    expect((g.facets.membership.edges as Array<Record<string, unknown>>)[0]).toMatchObject({
-      source: "topic:new",
-      target: "topic:new",
-    });
+  it("allNodes scans the corpus sorted by path", () => {
+    store.writeFile(n("topic:b", "topic"));
+    store.writeFile(n("topic:a", "topic"));
+    expect(store.allNodes().map((x) => x.id)).toEqual(["topic:a", "topic:b"]);
   });
 });
