@@ -7,6 +7,7 @@ from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
+from nodes.kernel.search import SearchHit, SearchIndex
 from nodes.kernel.shapes import MEMBERSHIP
 from nodes.kernel.store import Store
 
@@ -41,7 +42,9 @@ class Corpus:
     def __init__(self, root: Path, registry: Registry | None = None) -> None:
         self.store = Store(root)
         self.registry = registry
-        self.index = Index.build(self.store.all_nodes())
+        nodes = self.store.all_nodes()
+        self.index = Index.build(nodes)
+        self.search_index = SearchIndex.build(nodes)
 
     def add(self, node: Node) -> Node:
         if self.registry is not None:
@@ -49,6 +52,7 @@ class Corpus:
         self.index.assert_addable(node)
         self.store.write_file(node)
         self.index.upsert(node)
+        self.search_index.upsert(node)
         return node
 
     def get(self, ref: str) -> Node:
@@ -66,6 +70,7 @@ class Corpus:
             raise RefError(f"no live node at {node_id!r}")
         self.store.delete_file(node_id)
         self.index.remove(uid)
+        self.search_index.remove(uid)
 
     def all(self) -> list[Node]:
         return self.store.all_nodes()
@@ -96,6 +101,9 @@ class Corpus:
                 neighbor_uids.add(edge.source_uid)
         neighbor_uids.discard(uid)
         return [self.store.read_file(self.index.by_uid[u].id) for u in sorted(neighbor_uids)]
+
+    def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
+        return self.search_index.search(query, limit)
 
     def rename(self, old_id: str, new_id: str) -> Node:
         if old_id not in self.index.id_to_uid:
@@ -138,4 +146,5 @@ class Corpus:
             self.store.write_file(referrer)
             self.index.upsert(referrer)
 
+        self.search_index.upsert(node)
         return node
