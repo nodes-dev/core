@@ -139,15 +139,18 @@ BODY_BOOST  = 1.0
 
 ### 4.2 Determinism (parity-critical)
 
-Float accumulation order is fixed so results are bit-identical across languages:
+Float accumulation order is fixed so both languages run the same operation
+sequence:
 
 - Query terms are reduced to a **sorted, deduplicated** list before scoring.
 - Per term, fields are combined in the fixed order `title` then `body`.
 - The document score sums per-term scores in sorted-term order.
 
-Both languages run IEEE-754 doubles through the same operation sequence, so
-scores match. The ranking oracle (§8) additionally compares scores rounded to 6
-decimal places as a belt-and-braces check.
+Even with an identical operation sequence, Python and JS `log`/libm can differ in
+the last few ULPs, so scores are **not** asserted bit-identical. The parity
+contract is the ranking oracle (§8): identical ranked `id` order, and scores equal
+when rounded to 6 decimal places. The fixed accumulation order keeps that rounding
+stable; ties in ranking are broken by `id`, never by raw float order.
 
 ## 5. `SearchIndex` — state & operations
 
@@ -163,7 +166,11 @@ State (all in memory):
 
 Operations mirror the structural `Index`:
 
-- `build(nodes) -> SearchIndex` (classmethod) — full construction.
+- `build(nodes) -> SearchIndex` (classmethod) — full construction. Like the
+  structural `Index.build`, it **rejects a duplicate `uid`** in its input with
+  `CollisionError` (from `nodes.kernel.errors`) — it does not silently let a later
+  node's `upsert` overwrite an earlier one. (`build` is fed validated corpus
+  snapshots, but failing early keeps it honest and matches the structural index.)
 - `upsert(node)` — if `node.uid` is already present, remove its old postings and
   lengths first; then tokenize `title` and `body`, add per-field postings, record
   lengths, and set `id_by_uid[uid] = node.id`. Idempotent and update-safe.
@@ -199,22 +206,39 @@ The caller fetches the `Node` via `Corpus.get(hit.id)` when it needs the text.
 
 ## 7. Corpus integration
 
-`Corpus.__init__` builds the search index after the structural index:
-`self.search_index = SearchIndex.build(self.store.all_nodes())`.
+`Corpus.__init__` builds **both** derived indexes from a single `all_nodes()`
+scan, so they share one snapshot and the disk is read once:
 
-Mutation ordering mirrors the structural index — **the disk write/delete succeeds
-first, then both derived indexes update together** (no derived-index change is
-observable if the disk operation raises):
+```python
+nodes = self.store.all_nodes()
+self.index = Index.build(nodes)
+self.search_index = SearchIndex.build(nodes)
+```
+
+For `add` and `delete`, mutation ordering mirrors the structural index — **the
+disk write/delete succeeds first, then both derived indexes update together**, so
+no derived-index change is observable if the disk operation raises:
 
 - **`add`**: `validate → index.assert_addable → store.write_file →
-  index.upsert(node) → search_index.upsert(node)`.
+  index.upsert(node) → search_index.upsert(node)`. The structural `assert_addable`
+  is the single point that can reject; once `write_file` succeeds, both `upsert`s
+  are pure in-memory dict updates that do not raise on valid nodes.
 - **`delete`**: `store.delete_file → index.remove(uid) →
   search_index.remove(uid)`.
-- **`rename`**: unchanged through the commit (write new file, delete old,
-  `index.upsert` the renamed node and referrers). Then `search_index.upsert(node)`
-  for the renamed node — its `uid` is unchanged and its `title`/`body` are
-  untouched by rename, so only `id_by_uid` changes. Referrers' searchable text and
-  ids are unchanged by rename, so they need no search-index update.
+
+**`rename` is best-effort, not all-or-nothing** — and this is unchanged from the
+existing kernel. Rename validates every write before any write (no *partial disk*
+rename), then commits across multiple files: write the new file, delete the old,
+`index.upsert` the renamed node, then for each referrer write the file and
+`index.upsert`. A disk failure *during* that multi-file commit can already leave
+the structural index partially updated relative to disk; the recovery is a rebuild
+(`Corpus(root)`), which both indexes support by construction. The search index
+adds exactly one in-memory step to this same sequence: after the structural
+updates, `search_index.upsert(node)` for the renamed node — its `uid` is unchanged
+and its `title`/`body` are untouched by rename, so only `id_by_uid` changes.
+Referrers' searchable text and ids are unchanged by rename, so they need no
+search-index update. This plan does **not** refactor rename's commit atomicity;
+the search index simply tracks the structural index's existing consistency model.
 
 `Corpus.search` delegates to `self.search_index.search`.
 
@@ -241,7 +265,8 @@ existing `fixtures/corpus.rename.canonical.json` cross-language parity check.
   length norms, and the title boost are checked against worked-out numbers;
   include the `avglen_f == 0` guard and a single-term/single-doc baseline.
 - **`SearchIndex` build/upsert/remove:** unit tests, including re-`upsert` of an
-  existing uid (postings replaced, not duplicated) and `remove` of an absent uid.
+  existing uid (postings replaced, not duplicated), `remove` of an absent uid, and
+  `build` rejecting a duplicate-`uid` input with `CollisionError`.
 - **Rebuild-equivalence property:** an index mutated incrementally
   (`upsert`/`remove`) equals a fresh `build()` of the same final node set —
   mirrors `test_index_rebuild_equivalence.py`.
@@ -255,8 +280,11 @@ existing `fixtures/corpus.rename.canonical.json` cross-language parity check.
 - `limit`: `None` = unbounded; otherwise must be an `int` with `limit > 0`. `0`,
   negative, or non-`int` → `ValueError`. (`bool` is rejected as non-int.)
 - Empty / stop-word-only / non-tokenizing query → `[]`.
-- No new error types; the search layer raises only `ValueError` for the `limit`
-  contract. It never raises on corpus content.
+- `SearchIndex.build` raises `CollisionError` (existing kernel error) on a
+  duplicate `uid` in its input, mirroring `Index.build`.
+- No new error types. Beyond the `build` collision check, the search layer raises
+  only `ValueError` for the `limit` contract; it never raises on corpus content at
+  query time.
 
 ## 11. Resolved decisions
 
@@ -271,8 +299,11 @@ existing `fixtures/corpus.rename.canonical.json` cross-language parity check.
    Lucene IDF; deterministic accumulation order.
 6. **Results:** ranked refs + score + matched terms; sort `(score desc, id asc)`;
    caller hydrates nodes lazily.
-7. **Mutation ordering:** disk first, then `index` and `search_index` together.
-8. **Parity:** two shared fixtures — tokenizer oracle and ranking oracle.
+7. **Mutation ordering:** `add`/`delete` are disk-first, then `index` and
+   `search_index` together (all-or-nothing). `rename` stays best-effort, tracking
+   the kernel's existing multi-file commit model; this plan does not refactor it.
+8. **Parity:** asserted by two shared fixtures — a tokenizer oracle and a ranking
+   oracle (ranked `id` order + 6-dp scores). Scores are not claimed bit-identical.
 
 ## 12. Deferred / open
 
