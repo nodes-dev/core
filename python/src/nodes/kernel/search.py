@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.node import Node
@@ -18,6 +20,30 @@ STOP_WORDS: frozenset[str] = frozenset(
 
 _TOKEN_RE = re.compile(r"[^\W_]+")
 
+K1 = 1.5
+B = 0.75
+TITLE_BOOST = 2.0
+BODY_BOOST = 1.0
+
+
+def score_key(score: float) -> float:
+    """Half-up rounding to 6 decimal places — the shared ranking/parity key.
+
+    Scores are non-negative, so this floor-based half-up is correct and identical
+    in both languages.
+    """
+    return math.floor(score * 1_000_000 + 0.5) / 1_000_000
+
+
+def _codepoint_sorted(values: set[str] | list[str]) -> list[str]:
+    """Sort by Unicode code point order.
+
+    Python's default string sort already uses code-point order; this named helper
+    keeps the parity contract visible and gives the TS port a function to mirror
+    with an explicit comparator instead of default UTF-16 sorting.
+    """
+    return sorted(values)
+
 
 def tokenize(text: str) -> list[str]:
     """NFC-normalize, lowercase, split into Unicode-alphanumeric runs, drop stop words.
@@ -27,6 +53,14 @@ def tokenize(text: str) -> list[str]:
     """
     normalized = unicodedata.normalize("NFC", text).lower()
     return [tok for tok in _TOKEN_RE.findall(normalized) if tok not in STOP_WORDS]
+
+
+@dataclass
+class SearchHit:
+    id: str
+    uid: str
+    score: float
+    matched_terms: list[str]
 
 
 class SearchIndex:
@@ -78,6 +112,51 @@ class SearchIndex:
 
     def remove(self, uid: str) -> None:
         self._drop(uid)
+
+    def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0
+        ):
+            raise ValueError(f"limit must be a positive int or None, got {limit!r}")
+        terms = _codepoint_sorted(set(tokenize(query)))  # dedup; Python str sort is code-point order
+        if not terms:
+            return []
+
+        n = self.n
+        avg_title = self._total_title / n if n else 0.0
+        avg_body = self._total_body / n if n else 0.0
+
+        scores: dict[str, float] = {}
+        matched: dict[str, list[str]] = {}
+        for term in terms:
+            docs = self.postings.get(term)
+            if not docs:
+                continue
+            df = len(docs)
+            idf = math.log(1 + (n - df + 0.5) / (df + 0.5))
+            for uid, (title_tf, body_tf) in docs.items():
+                title_len, body_len = self.lengths[uid]
+                tf_prime = 0.0
+                if title_tf:
+                    denom = (1 - B + B * (title_len / avg_title)) if avg_title else 1.0
+                    tf_prime += TITLE_BOOST * title_tf / denom
+                if body_tf:
+                    denom = (1 - B + B * (body_len / avg_body)) if avg_body else 1.0
+                    tf_prime += BODY_BOOST * body_tf / denom
+                scores[uid] = scores.get(uid, 0.0) + idf * (K1 + 1) * tf_prime / (K1 + tf_prime)
+                matched.setdefault(uid, []).append(term)
+
+        hits = [
+            SearchHit(
+                id=self.id_by_uid[uid],
+                uid=uid,
+                score=scores[uid],
+                matched_terms=_codepoint_sorted(matched[uid]),
+            )
+            for uid in scores
+        ]
+        hits.sort(key=lambda h: (-score_key(h.score), h.id))
+        return hits if limit is None else hits[:limit]
 
     def _drop(self, uid: str) -> None:
         lengths = self.lengths.pop(uid, None)
