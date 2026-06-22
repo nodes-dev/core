@@ -123,7 +123,9 @@ already-seen content.
     model's vector.
   - `<text_hash>` = `sha256(embed_text.encode("utf-8"))` hex. Identical bytes →
     identical key in both languages; two nodes with identical `embed_text`
-    dedupe to one entry.
+    dedupe to one entry. Both path segments are validated before use — the
+    namespace per §3 and the `text_hash` as exactly 64 lowercase hex chars — so
+    the public `get`/`put` API cannot be used to escape the cache directory.
   - The whole `.nodes-index/` tree is git-ignored and disposable; deleting it
     just forces re-embedding.
 - **File format** — one JSON object per key, storing the **raw** (un-normalized)
@@ -251,10 +253,14 @@ class SimilarHit:
 - **`embedder` supplied** — `Corpus` owns the embedder and a `VectorCache(root)`,
   builds the `VectorIndex` at construction (cache-accelerated), and keeps it
   current:
-  - `add` → `vector_index.upsert(node, embedder, cache)`
+  - `add` → `prepare` before any disk/structural write, `commit` last (see
+    Mutation ordering below)
   - `delete` → `vector_index.remove(uid)`
-  - `rename` → `vector_index.upsert(node, embedder, cache)` (same `text_hash` ⇒
-    cache hit, no re-embed; `id_by_uid` refreshed for the new id)
+  - `rename` → `prepare` the renamed node's vector (after the in-memory ref
+    rewrite + registry validation, before `store.write_file`), `commit` last
+    (same `text_hash` ⇒ cache hit, no re-embed; `id_by_uid` refreshed for the new
+    id). The prepare/commit split keeps the ordering guarantee even though a
+    normal rename never re-embeds.
   - `similar(ref, k)` resolves `ref → uid` via `self.index` (honoring
     `deprecated_ids`); a ref that resolves to nothing raises `RefError`. It then
     calls `vector_index.similar(uid, k)` — which would raise `KeyError` on an

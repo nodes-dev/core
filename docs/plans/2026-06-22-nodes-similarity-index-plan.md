@@ -23,7 +23,7 @@
 - **`k` contract (identical to search's `limit`):** `None` = unbounded; otherwise a positive `int` (`bool` rejected as non-int, non-`int` rejected, `<= 0` rejected) → `ValueError`.
 - **Query surface:** `query_vector(vec, k=None)`, `similar(uid, k=None)` (excludes `uid` itself; unknown uid → `KeyError`), `similar_text(text, embedder, k=None)`. On an **empty index** queries still validate the query vector (finite/length/non-zero) but skip the dimension match and return `[]`.
 - **`VectorIndex.build` rejects a duplicate `uid`** with `CollisionError` (from `nodes.kernel.errors`), mirroring `Index.build` / `SearchIndex.build`.
-- **`Corpus` integration:** `Corpus(root, registry=None, embedder=None)`. The vector index is built only when `embedder` is supplied. With `embedder=None`, `similar` / `query_vector` / `similar_text` raise `EmbedderRequiredError` **before** any ref resolution. `add` resolves+validates the vector (`prepare`) **before** any disk/structural-index write and commits it **last** (`commit`); `delete` calls `remove`; `rename` calls `upsert` after its existing commit (content unchanged ⇒ id-only refresh, no re-embed). All existing `Corpus` behavior and the existing test suite stay unchanged/green.
+- **`Corpus` integration:** `Corpus(root, registry=None, embedder=None)`. The vector index is built only when `embedder` is supplied. With `embedder=None`, `similar` / `query_vector` / `similar_text` raise `EmbedderRequiredError` **before** any ref resolution. `add` and `rename` resolve+validate the renamed/added node's vector (`prepare`) **before** any disk/structural-index write and commit it **last** (`commit`) — `rename`'s prepare runs after the in-memory ref rewrite + registry validation and before `store.write_file`; `delete` calls `remove`. (A normal rename leaves title/body unchanged ⇒ id-only refresh, no re-embed; the ordering still guarantees no partial corpus state if the vector step fails.) All existing `Corpus` behavior and the existing test suite stay unchanged/green.
 - **Per-task gates, all clean before commit:** `rtk uv run pytest -q`, `rtk uv run ruff check src tests`, `rtk uv run pyright src`.
 - **Working directories:** run all `rtk uv run …` from `~/d/nodes/python/`; run all `rtk git …` from `~/d/nodes/`. Paths in `Files:` blocks are repo-root-relative.
 
@@ -154,7 +154,7 @@ The pure, I/O-free primitives every later task consumes.
 
 **Interfaces:**
 - Consumes: `Node` (`nodes.kernel.node`).
-- Produces: `Vector = tuple[float, ...]`; `class Embedder(Protocol)` with `cache_namespace: str` and `embed(texts: list[str]) -> list[Vector]`; `embed_text(node: Node) -> str`; `text_hash(text: str) -> str`; `validate_namespace(namespace: str) -> None`; `_validate_finite(vec: Vector) -> None`; `_normalize(vec: Vector) -> Vector`.
+- Produces: `Vector = tuple[float, ...]`; `class Embedder(Protocol)` with `cache_namespace: str` and `embed(texts: list[str]) -> list[Vector]`; `embed_text(node: Node) -> str`; `text_hash(text: str) -> str`; `validate_namespace(namespace: str) -> None`; `validate_text_hash(text_hash: str) -> None`; `_validate_finite(vec: Vector) -> None`; `_normalize(vec: Vector) -> Vector`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -169,11 +169,12 @@ import pytest
 
 from nodes.kernel.node import Node
 from nodes.kernel.similarity import (
+    _normalize,
+    _validate_finite,
     embed_text,
     text_hash,
     validate_namespace,
-    _normalize,
-    _validate_finite,
+    validate_text_hash,
 )
 
 
@@ -197,6 +198,19 @@ def test_validate_namespace_accepts_safe(ns):
 def test_validate_namespace_rejects_unsafe(ns):
     with pytest.raises(ValueError):
         validate_namespace(ns)
+
+
+@pytest.mark.parametrize("h", ["a" * 64, "0123456789abcdef" * 4])
+def test_validate_text_hash_accepts_64_lower_hex(h):
+    validate_text_hash(h)  # no raise
+
+
+@pytest.mark.parametrize(
+    "h", ["", "abc", "A" * 64, "g" * 64, "a" * 63, "a" * 65, "../" + "a" * 61]
+)
+def test_validate_text_hash_rejects_bad(h):
+    with pytest.raises(ValueError):
+        validate_text_hash(h)
 
 
 def test_validate_finite_rejects_empty_and_nonfinite():
@@ -263,6 +277,15 @@ def validate_namespace(namespace: str) -> None:
         raise ValueError(f"invalid cache_namespace {namespace!r}")
 
 
+_TEXT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def validate_text_hash(text_hash: str) -> None:
+    """A cache key must be exactly 64 lowercase hex chars (a SHA-256 hexdigest)."""
+    if _TEXT_HASH_RE.match(text_hash) is None:
+        raise ValueError(f"invalid text_hash {text_hash!r}")
+
+
 def _validate_finite(vec: Vector) -> None:
     if len(vec) < 1:
         raise ValueError("vector must have length >= 1")
@@ -323,56 +346,74 @@ import pytest
 
 from nodes.kernel.similarity import VectorCache
 
+H = "a" * 64   # a valid 64-char lowercase-hex cache key
+H2 = "b" * 64
+
 
 def test_put_then_get_roundtrips_raw_vector(tmp_path):
     cache = VectorCache(tmp_path)
-    cache.put("model-v1", "abc", (0.5, -0.25, 2.0))
-    assert cache.get("model-v1", "abc") == (0.5, -0.25, 2.0)
+    cache.put("model-v1", H, (0.5, -0.25, 2.0))
+    assert cache.get("model-v1", H) == (0.5, -0.25, 2.0)
 
 
 def test_get_miss_returns_none(tmp_path):
-    assert VectorCache(tmp_path).get("model-v1", "missing") is None
+    assert VectorCache(tmp_path).get("model-v1", H2) is None
 
 
 def test_namespaces_are_isolated(tmp_path):
     cache = VectorCache(tmp_path)
-    cache.put("model-a", "abc", (1.0,))
-    assert cache.get("model-b", "abc") is None
+    cache.put("model-a", H, (1.0,))
+    assert cache.get("model-b", H) is None
 
 
 def test_put_writes_expected_json_with_dim(tmp_path):
     cache = VectorCache(tmp_path)
-    cache.put("model-v1", "abc", (1.0, 2.0))
-    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / "abc.json"
+    cache.put("model-v1", H, (1.0, 2.0))
+    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / f"{H}.json"
     assert json.loads(path.read_text(encoding="utf-8")) == {"dim": 2, "vector": [1.0, 2.0]}
 
 
 def test_invalid_namespace_rejected(tmp_path):
     with pytest.raises(ValueError):
-        VectorCache(tmp_path).get("../escape", "abc")
+        VectorCache(tmp_path).get("../escape", H)
+
+
+def test_path_traversal_key_rejected(tmp_path):
+    cache = VectorCache(tmp_path)
+    with pytest.raises(ValueError):
+        cache.get("model-v1", "../../etc/passwd")
+    with pytest.raises(ValueError):
+        cache.put("model-v1", "..", (1.0,))
+
+
+def test_non_hex_or_wrong_length_key_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        VectorCache(tmp_path).get("model-v1", "not-a-hash")
+    with pytest.raises(ValueError):
+        VectorCache(tmp_path).get("model-v1", "A" * 64)  # uppercase not allowed
 
 
 def test_corrupt_file_fails_early(tmp_path):
     cache = VectorCache(tmp_path)
-    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / "abc.json"
+    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / f"{H}.json"
     path.parent.mkdir(parents=True)
     path.write_text("{not json", encoding="utf-8")
     with pytest.raises(ValueError):
-        cache.get("model-v1", "abc")
+        cache.get("model-v1", H)
 
 
 def test_dim_length_mismatch_fails_early(tmp_path):
     cache = VectorCache(tmp_path)
-    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / "abc.json"
+    path = tmp_path / ".nodes-index" / "vectors" / "model-v1" / f"{H}.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps({"dim": 3, "vector": [1.0, 2.0]}), encoding="utf-8")
     with pytest.raises(ValueError):
-        cache.get("model-v1", "abc")
+        cache.get("model-v1", H)
 
 
 def test_put_rejects_nonfinite(tmp_path):
     with pytest.raises(ValueError):
-        VectorCache(tmp_path).put("model-v1", "abc", (float("nan"),))
+        VectorCache(tmp_path).put("model-v1", H, (float("nan"),))
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -405,6 +446,7 @@ class VectorCache:
 
     def _path(self, namespace: str, text_hash: str) -> Path:
         validate_namespace(namespace)
+        validate_text_hash(text_hash)
         return self.root / ".nodes-index" / "vectors" / namespace / f"{text_hash}.json"
 
     def get(self, namespace: str, text_hash: str) -> Vector | None:
@@ -583,6 +625,12 @@ def test_zero_norm_vector_rejected(tmp_path):
     emb = _embedder(nodes, [(0.0, 0.0)])
     with pytest.raises(ValueError):
         VectorIndex.build(nodes, emb, VectorCache(tmp_path))
+
+
+def test_empty_build_binds_namespace(tmp_path):
+    idx = VectorIndex.build([], DictEmbedder({}, namespace="model-x"), VectorCache(tmp_path))
+    assert idx.namespace == "model-x"
+    assert idx.dim is None
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -628,6 +676,8 @@ class VectorIndex:
     @classmethod
     def build(cls, nodes: Iterable[Node], embedder: Embedder, cache: VectorCache) -> "VectorIndex":
         idx = cls()
+        validate_namespace(embedder.cache_namespace)
+        idx.namespace = embedder.cache_namespace  # bind even for an empty corpus
         for node in nodes:
             if node.uid in idx.hash_by_uid:
                 raise CollisionError(f"duplicate uid {node.uid!r} in corpus")
@@ -781,6 +831,14 @@ def test_similar_text_embeds_then_ranks(tmp_path):
 def test_similar_text_namespace_mismatch_raises(tmp_path):
     nodes = [_node("topic:x", "x")]
     idx, _ = _index(tmp_path, nodes, [(1.0, 0.0)], namespace="model-a")
+    other = DictEmbedder({"q": (1.0, 0.0)}, namespace="model-b")
+    with pytest.raises(ValueError):
+        idx.similar_text("q", other)
+
+
+def test_similar_text_namespace_checked_on_empty_built_index(tmp_path):
+    # build([]) binds the namespace, so even an empty index rejects a foreign embedder
+    idx = VectorIndex.build([], DictEmbedder({}, namespace="model-a"), VectorCache(tmp_path))
     other = DictEmbedder({"q": (1.0, 0.0)}, namespace="model-b")
     with pytest.raises(ValueError):
         idx.similar_text("q", other)
@@ -1028,6 +1086,19 @@ def test_failed_embedding_leaves_corpus_unmutated(tmp_path):
     assert c.index.resolve_uid("topic:bad") is None
     assert c.search("bad") == []
     assert "topic:bad" not in [n.id for n in c.all()]
+
+
+def test_failed_rename_vector_leaves_corpus_unmutated(tmp_path):
+    c = Corpus(tmp_path, embedder=_embedder())
+    _seed(c)
+    # Force a namespace inconsistency so the vector prepare fails during rename —
+    # after the in-memory rewrite + registry validation, before any disk write.
+    c.embedder = DictEmbedder({}, namespace="other-model")
+    with pytest.raises(ValueError):
+        c.rename("topic:cat", "topic:kitten")
+    assert c.index.resolve_uid("topic:cat") is not None
+    assert c.index.resolve_uid("topic:kitten") is None
+    assert [n.id for n in c.all()].count("topic:cat") == 1
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -1097,13 +1168,24 @@ In `delete`, after `self.search_index.remove(uid)` add:
             self.vector_index.remove(uid)
 ```
 
-In `rename`, after the existing final `self.search_index.upsert(node)` (and before `return node`) add:
+In `rename`, honor the fail-before-mutation guarantee. Insert the vector **prepare** after the `# --- validate ---` block (registry validation of `node` + referrers) and immediately **before** `new_path = self.store.write_file(node)`:
 
 ```python
+        # --- prepare similarity vector (fail before any disk write) ---
+        prepared = None
         if self.vector_index is not None:
             assert self.embedder is not None and self.vector_cache is not None
-            self.vector_index.upsert(node, self.embedder, self.vector_cache)
+            prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
 ```
+
+Then, after the existing final `self.search_index.upsert(node)` (and before `return node`), **commit** it last:
+
+```python
+        if self.vector_index is not None and prepared is not None:
+            self.vector_index.commit(node, prepared)
+```
+
+(Referrer nodes only have their refs rewritten — title/body unchanged — so their vectors never change and need no update.)
 
 Add the three query methods (e.g. just after the existing `search` method):
 
