@@ -1,4 +1,4 @@
-import { CollisionError } from "./errors.js";
+import { CollisionError, RefError } from "./errors.js";
 import type { Node } from "./node.js";
 import type { Relation } from "./relations.js";
 import { MEMBERSHIP } from "./shapes.js";
@@ -153,5 +153,58 @@ export class Index {
       if (kept.length > 0) this.inRefs.set(ref, kept);
       else this.inRefs.delete(ref);
     }
+  }
+
+  private refsForUid(uid: string): string[] {
+    const entry = this.byUid.get(uid);
+    if (entry === undefined) throw new RefError(`uid ${JSON.stringify(uid)} not in index`);
+    return [entry.id, ...[...entry.deprecatedIds].sort()];
+  }
+
+  private resolveEdge(rel: Relation): ResolvedEdge {
+    return { relation: rel, sourceUid: this.resolveUid(rel.source), targetUid: this.resolveUid(rel.target) };
+  }
+
+  // Public graph queries are defined over distinct `Relation` OBJECTS (reference identity —
+  // the TS analog of Python's `id(relation)` dedup), relations-only. A relation never
+  // appears twice, and a relation whose source is a non-container node still attributes
+  // correctly because we key on `relation_source` / `relation_target` roles.
+  private relationsByRole(uid: string, role: Role): ResolvedEdge[] {
+    const seen = new Set<Relation>();
+    const edges: ResolvedEdge[] = [];
+    for (const ref of this.refsForUid(uid)) {
+      for (const inref of this.inRefs.get(ref) ?? []) {
+        const oref = inref.outRef;
+        if (oref.role !== role || oref.relation === undefined) continue;
+        if (seen.has(oref.relation)) continue;
+        seen.add(oref.relation);
+        edges.push(this.resolveEdge(oref.relation));
+      }
+    }
+    return edges;
+  }
+
+  outboundEdges(uid: string): ResolvedEdge[] {
+    return this.relationsByRole(uid, "relation_source");
+  }
+
+  inboundEdges(uid: string): ResolvedEdge[] {
+    return this.relationsByRole(uid, "relation_target");
+  }
+
+  danglingEdges(): ResolvedEdge[] {
+    const seen = new Set<Relation>();
+    const edges: ResolvedEdge[] = [];
+    for (const entry of this.byUid.values()) {
+      for (const oref of entry.outRefs) {
+        if (oref.role !== "relation_target" || oref.relation === undefined) continue;
+        if (seen.has(oref.relation)) continue;
+        if (this.resolveUid(oref.ref) === null) {
+          seen.add(oref.relation);
+          edges.push(this.resolveEdge(oref.relation));
+        }
+      }
+    }
+    return edges;
   }
 }

@@ -93,3 +93,81 @@ describe("Index — upsert & remove", () => {
     expect((idx.inRefs.get("topic:t") ?? []).some((r) => r.sourceUid === referrer.uid)).toBe(true);
   });
 });
+
+describe("Index — graph queries", () => {
+  it("outbound returns the node's source relations, resolved", () => {
+    const a = makeNode({ id: "topic:a", kind: "topic", title: "A", relations: [relatesTo("topic:a", "topic:b")] });
+    const b = makeNode({ id: "topic:b", kind: "topic", title: "B" });
+    const idx = Index.build([a, b]);
+    const edges = idx.outboundEdges(a.uid);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].relation.target).toBe("topic:b");
+    expect(edges[0].sourceUid).toBe(a.uid);
+    expect(edges[0].targetUid).toBe(b.uid);
+  });
+
+  it("inbound returns the node's target relations, resolved", () => {
+    const a = makeNode({ id: "topic:a", kind: "topic", title: "A", relations: [relatesTo("topic:a", "topic:b")] });
+    const b = makeNode({ id: "topic:b", kind: "topic", title: "B" });
+    const idx = Index.build([a, b]);
+    const edges = idx.inboundEdges(b.uid);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].sourceUid).toBe(a.uid);
+    expect(edges[0].targetUid).toBe(b.uid);
+  });
+
+  it("inbound merges across a deprecated target ref", () => {
+    const b = makeNode({ id: "topic:new", kind: "topic", title: "B", deprecatedIds: ["topic:old"] });
+    const a = makeNode({ id: "topic:a", kind: "topic", title: "A", relations: [relatesTo("topic:a", "topic:old")] });
+    const idx = Index.build([a, b]);
+    const edges = idx.inboundEdges(b.uid);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].sourceUid).toBe(a.uid);
+  });
+
+  it("a relation with a non-container source attributes to the source node, not the file's node", () => {
+    const a = makeNode({ id: "topic:a", kind: "topic", title: "A" });
+    const b = makeNode({
+      id: "topic:b",
+      kind: "topic",
+      title: "B",
+      relations: [{ source: "topic:a", predicate: "cites", target: "topic:c" }],
+    });
+    const c = makeNode({ id: "topic:c", kind: "topic", title: "C" });
+    const idx = Index.build([a, b, c]);
+    const outA = idx.outboundEdges(a.uid);
+    expect(outA).toHaveLength(1);
+    expect(outA[0].relation.target).toBe("topic:c");
+    expect(idx.outboundEdges(b.uid)).toEqual([]); // B is not the source of any relation
+  });
+
+  it("membership members/edges are tracked but are NOT public graph edges", () => {
+    const g = makeNode({
+      id: "graph:g",
+      kind: "graph",
+      title: "G",
+      facets: {
+        membership: {
+          shape: "graph",
+          members: ["topic:x"],
+          edges: [{ source: "topic:x", predicate: "to", target: "topic:y" }],
+        },
+      },
+    });
+    const x = makeNode({ id: "topic:x", kind: "topic", title: "X" });
+    const y = makeNode({ id: "topic:y", kind: "topic", title: "Y" });
+    const idx = Index.build([g, x, y]);
+    expect(idx.outboundEdges(g.uid)).toEqual([]);
+    expect(idx.inboundEdges(y.uid)).toEqual([]);
+    expect(idx.danglingEdges()).toEqual([]);
+  });
+
+  it("dangling lists relations whose target resolves to no uid", () => {
+    const a = makeNode({ id: "topic:a", kind: "topic", title: "A", relations: [relatesTo("topic:a", "topic:gone")] });
+    const idx = Index.build([a]);
+    const dangling = idx.danglingEdges();
+    expect(dangling).toHaveLength(1);
+    expect(dangling[0].relation.target).toBe("topic:gone");
+    expect(dangling[0].targetUid).toBeNull();
+  });
+});
