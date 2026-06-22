@@ -42,6 +42,10 @@ Python `main`. This distinction is load-bearing:
 
 - At `f3e6ee4` there was **no `Corpus` and no `Index`**. `Store` itself was the complete CRUD
   surface, doing O(n) file-scan collision detection, resolution, and rename.
+- **`f3e6ee4` is the *post-hardening* Plan-1 merge.** Plan 1's final hardening pass
+  (`b56a055..f3e6ee4`) already fixed rename crash-atomicity to **write-new-then-delete-old**
+  (earlier, mid-Plan-1 task code deleted the old file first). The pin is to `f3e6ee4`, so the TS
+  rename ordering in §6.8 is *exact* mirroring of the pinned commit — not a divergence from it.
 - On current `main`, Plan 2 introduced `Corpus` + `Index` and **moved** collision/resolution/
   rename out of `Store`; today's `Store` is slim file mechanics and `docs/format.md` calls
   `Corpus` the primary API.
@@ -169,9 +173,20 @@ Two shared files at root `fixtures/`:
    `parse(serialize(parse(md)))` equals `parse(md)` in canonical JSON (not byte-for-byte).
 
 Checks 3 and 4 are the cross-emitter guarantee; they pass even though the two emitters produce
-different bytes. (Operationally, the per-language suites assert 1/2/5 directly; 3/4 are covered by
-a small cross-language harness — a Python-emitted sample committed as a fixture for TS to parse,
-and vice versa — so neither suite needs the other language's runtime at test time.)
+different bytes. Operationally, the per-language suites assert 1/2/5 directly; 3/4 are covered by
+**committed cross-emitted fixtures** — a Python-emitted sample (`fixtures/gene_phf19.py-emit.md`)
+that TS parses, and a TS-emitted sample (`fixtures/gene_phf19.ts-emit.md`) that Python parses — so
+neither suite needs the other language's runtime at test time.
+
+**Stale-fixture guard (required).** A committed cross-emitted fixture can silently rot: if an
+emitter later regresses, the *other* language still parses the stale committed file and passes.
+To prevent this, each emitted fixture is **regenerated-and-diffed by its own language's gate**:
+the emitting language re-emits from its *current* emitter and asserts the result equals the
+committed fixture (canonical-JSON equality; on emitter drift the test **fails** and the fixture
+must be regenerated and re-reviewed). Thus check 3 = (TS gate proves `ts-emit.md` is current) +
+(Python parses it → oracle); check 4 is symmetric. A live dual-runtime CI harness that re-emits in
+both languages on every run is an acceptable stronger alternative if CI later runs both toolchains,
+but is not required given the in-suite regenerate-and-diff guard.
 
 ## 6. Module-by-module port
 
@@ -203,10 +218,16 @@ lowercased, throws `RefError` on miss).
 
 ### 6.4 `node.ts`
 `newUid()` = `crypto.randomUUID()` with dashes stripped → 32 lowercase hex chars, matching
-Python's `uuid4().hex`. `NodeMetadata` Zod schema `{ created: dateStr|null, updated: dateStr|null,
-version=1 }` where `dateStr` is a `YYYY-MM-DD`-validated string. `Node` Zod schema
-`{ id, uid=newUid(), kind, title, body="", metadata, relations=[], facets={}, deprecatedIds=[] }`
-with an after-validator: `NodeId.parse(id)` (wrap `IdError` → `ValidationError`) and assert
+Python's `uuid4().hex`. `NodeMetadata` Zod schema `{ created: dateStr|null = null, updated:
+dateStr|null = null, version: number = 1 }` where `dateStr` is a `YYYY-MM-DD`-validated string —
+**every field carries a Zod default** so an absent or `{}` metadata parses to `{created:null,
+updated:null, version:1}`, matching Python's Pydantic defaults
+([`node.py:25`](../../python/src/nodes/kernel/node.py)). `Node` Zod schema `{ id, uid =
+newUid(), kind, title, body = "", metadata = {created:null,updated:null,version:1}, relations =
+[], facets = {}, deprecatedIds = [] }` — **all of `metadata`, `relations`, `facets`,
+`deprecatedIds` default via Zod** so minimal TS construction (`{id, kind, title}`) produces a
+node byte-for-byte equal in canonical JSON to minimal Python construction. The schema carries
+an after-validator: `NodeId.parse(id)` (wrap `IdError` → `ValidationError`) and assert
 `parsed.kind === kind` (else `ValidationError`). `facets` is loosely typed
 (`Record<string, Record<string, unknown>>`), validated on demand by registry/shapes — mirroring
 Python's `dict[str, dict]`.
@@ -235,8 +256,10 @@ unexpected facets (present − (required ∪ optional)) → `FacetError`; then r
 
 ### 6.7 `shapes.ts`
 `MEMBERSHIP = "membership"`. `Membership` Zod schema `{ shape, members: string[] | Record<string,
-string>, edges: Relation[] }`. `membershipOf(node)` (missing facet → `FacetError`; validate via
-schema). Invariants: `requireUniqueMembers`, `requireDictKeys`, `requireAcyclic` (DFS with
+string> = [], edges: Relation[] = [] }` — `members` and `edges` **carry Zod defaults** (`[]`),
+matching Python's `default_factory` ([`shapes.py:15`](../../python/src/nodes/kernel/shapes.py)),
+so a membership facet with only `shape` validates. `membershipOf(node)` (missing facet →
+`FacetError`; validate via schema). Invariants: `requireUniqueMembers`, `requireDictKeys`, `requireAcyclic` (DFS with
 visiting/done sets, `InvariantError` on back-edge), `requireSingleParent`. `registerBuiltinShapes`
 registers set/list/dict/graph/dag/tree with the same required-facet + invariant wiring as Python.
 
@@ -252,7 +275,8 @@ Constructed with a root path. Methods mirror `f3e6ee4` behavior:
 - `delete(id)` → unlink (missing → `RefError`).
 - `rename(oldId, newId)` → reject taken target (`CollisionError`); read node; set `id`/`kind`,
   append old id to `deprecatedIds`; **write new file FIRST, then unlink old** (crash-atomic,
-  no data-loss window); O(n) inbound rewrite of `relations` + `membership` (`members` list/dict
+  no data-loss window — this is the pinned `f3e6ee4` post-hardening order; see §2); O(n) inbound
+  rewrite of `relations` + `membership` (`members` list/dict
   and `edges`) across the corpus, re-writing each changed referrer.
 
 ### 6.9 `index.ts` (barrel)
@@ -300,5 +324,6 @@ suite still 112 / ruff + pyright clean from `python/`.
 
 - **Deferred to later TS plans:** `Index` + `Corpus` (Plan 2 equivalent); knowledge vocab
   (Plan 3 equivalent); the language-agnostic spec document (§6 of the substrate design).
-- **To settle during planning:** exact `tsconfig` lib/target details; whether the cross-language
-  checks 3/4 use committed cross-emitted fixtures (recommended) or a live dual-runtime harness.
+- **To settle during planning:** exact `tsconfig` lib/target details. (Cross-language checks 3/4
+  are resolved: committed cross-emitted fixtures kept current by a per-language regenerate-and-diff
+  gate — §5.3.)
