@@ -28,7 +28,7 @@ These bind every task. Values are copied verbatim from the spec (`docs/specs/202
 - **Parity, not bit-identity:** scores are not asserted bit-identical across languages. The contract is the two committed fixtures: identical ranked `id` order and scores equal at 6 decimal places. When comparing oracle scores, parse them as numbers and compare the `scoreKey`-rounded value — do **not** string-compare (the oracle prints `0.34081`, a JSON trailing-zero truncation of `0.340810`).
 - **TS conventions:** camelCase fields/methods (`idByUid`, `matchedTerms`, `scoreKey`, `codepointSorted`), SCREAMING_CASE module constants, `.js` import extensions, `type`-only imports for types, biome line width 120. No `cd &&` chains needed in the plan — commands below assume the implementer runs from `~/d/nodes/ts`.
 
-**Gate for every task:** from `~/d/nodes/ts`, `npm test` (vitest) green, `npm run typecheck` (`tsc --noEmit`) clean, `npm run check` (biome) clean.
+**Gate for every task:** from `~/d/nodes/ts`, `rtk npm test` (vitest) green, `rtk npm run typecheck` (`tsc --noEmit`) clean, `rtk npm run check` (biome) clean.
 
 ---
 
@@ -48,7 +48,6 @@ Create `ts/tests/search-tokenizer.test.ts`:
 
 ```ts
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { STOP_WORDS, codepointSorted, scoreKey, tokenize } from "../src/search.js";
@@ -122,15 +121,12 @@ describe("tokenizer oracle (cross-language freeze)", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run tests/search-tokenizer.test.ts`
+Run: `rtk npm test -- tests/search-tokenizer.test.ts`
 Expected: FAIL — cannot resolve `../src/search.js` (module does not exist yet).
 
 - [ ] **Step 3: Create `ts/src/search.ts` with the tokenizer and helpers**
 
 ```ts
-import { CollisionError } from "./errors.js";
-import type { Node } from "./node.js";
-
 /** Fixed English stop-word list (33 words), frozen by the tokenizer oracle. */
 export const STOP_WORDS: ReadonlySet<string> = new Set([
   "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if",
@@ -178,19 +174,15 @@ export function tokenize(text: string): string[] {
 }
 ```
 
-(`CollisionError` and `Node` are imported now so the import block is stable for Task 2; biome will flag them as unused until Task 2 uses them. If biome's `noUnusedImports` fails the gate at this step, add the imports in Task 2 instead — they are only consumed by `SearchIndex`.)
-
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx vitest run tests/search-tokenizer.test.ts`
+Run: `rtk npm test -- tests/search-tokenizer.test.ts`
 Expected: PASS (all cases, including the oracle).
 
 - [ ] **Step 5: Run the full gate**
 
-Run: `npm test` then `npm run typecheck` then `npm run check`
+Run: `rtk npm test` then `rtk npm run typecheck` then `rtk npm run check`
 Expected: all green/clean.
-
-If biome reports unused `CollisionError`/`Node` imports, remove them from `search.ts` for now (Task 2 re-adds them) and re-run the gate.
 
 - [ ] **Step 6: Commit**
 
@@ -307,7 +299,7 @@ describe("SearchIndex state", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run tests/search-index.test.ts`
+Run: `rtk npm test -- tests/search-index.test.ts`
 Expected: FAIL — `SearchIndex` is not exported from `../src/search.js`.
 
 - [ ] **Step 3: Add the constants, `SearchHit`, and `SearchIndex` to `ts/src/search.ts`**
@@ -407,12 +399,12 @@ export class SearchIndex {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx vitest run tests/search-index.test.ts`
+Run: `rtk npm test -- tests/search-index.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full gate**
 
-Run: `npm test` then `npm run typecheck` then `npm run check`
+Run: `rtk npm test` then `rtk npm run typecheck` then `rtk npm run check`
 Expected: all green/clean.
 
 - [ ] **Step 6: Commit**
@@ -522,7 +514,7 @@ describe("SearchIndex.search (BM25F)", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run tests/search-query.test.ts`
+Run: `rtk npm test -- tests/search-query.test.ts`
 Expected: FAIL — `idx.search is not a function` / type error (method not defined yet).
 
 - [ ] **Step 3: Add `search` to `SearchIndex` in `ts/src/search.ts`**
@@ -587,12 +579,12 @@ Insert this method into the `SearchIndex` class, after `remove` and before the p
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npx vitest run tests/search-query.test.ts`
+Run: `rtk npm test -- tests/search-query.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full gate**
 
-Run: `npm test` then `npm run typecheck` then `npm run check`
+Run: `rtk npm test` then `rtk npm run typecheck` then `rtk npm run check`
 Expected: all green/clean.
 
 - [ ] **Step 6: Commit**
@@ -676,7 +668,7 @@ describe("Corpus full-text search", () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npx vitest run tests/corpus-search.test.ts`
+Run: `rtk npm test -- tests/corpus-search.test.ts`
 Expected: FAIL — `c.search is not a function`.
 
 - [ ] **Step 3: Wire `SearchIndex` into `Corpus`**
@@ -742,12 +734,12 @@ export { SearchIndex, type SearchHit, scoreKey, tokenize } from "./search.js";
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `npx vitest run tests/corpus-search.test.ts`
+Run: `rtk npm test -- tests/corpus-search.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Run the full gate**
 
-Run: `npm test` then `npm run typecheck` then `npm run check`
+Run: `rtk npm test` then `rtk npm run typecheck` then `rtk npm run check`
 Expected: all green/clean — including the existing `index-rebuild-equivalence` and `corpus_parity` suites (the single-scan constructor change must not regress them).
 
 - [ ] **Step 7: Commit**
@@ -817,7 +809,7 @@ describe("cross-language ranking oracle", () => {
 
 - [ ] **Step 2: Run the test to verify it fails, then passes**
 
-Run: `npx vitest run tests/search-parity.test.ts`
+Run: `rtk npm test -- tests/search-parity.test.ts`
 Expected: PASS immediately (all production code already exists; this test only consumes committed fixtures). If it FAILS, the failure is a real Python↔TS ranking divergence — stop and report it; do not edit the fixtures (they are the Python-frozen oracle).
 
 - [ ] **Step 3: Update `docs/format.md`**
@@ -858,7 +850,7 @@ scores are compared numerically (not string-compared) to absorb JSON trailing-ze
 
 - [ ] **Step 4: Run the full gate**
 
-Run: `npm test` then `npm run typecheck` then `npm run check`
+Run: `rtk npm test` then `rtk npm run typecheck` then `rtk npm run check`
 Expected: all green/clean.
 
 - [ ] **Step 5: Commit**
