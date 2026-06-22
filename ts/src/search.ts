@@ -142,6 +142,60 @@ export class SearchIndex {
     this.drop(uid);
   }
 
+  search(query: string, limit?: number): SearchHit[] {
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+      throw new RangeError(`limit must be a positive integer or undefined, got ${JSON.stringify(limit)}`);
+    }
+    const terms = codepointSorted(new Set(tokenize(query))); // dedup + code-point order
+    if (terms.length === 0) return [];
+
+    const n = this.n;
+    const avgTitle = n > 0 ? this.totalTitle / n : 0;
+    const avgBody = n > 0 ? this.totalBody / n : 0;
+
+    const scores = new Map<string, number>();
+    const matched = new Map<string, string[]>();
+    for (const term of terms) {
+      const docs = this.postings.get(term);
+      if (docs === undefined) continue;
+      const df = docs.size;
+      const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5));
+      for (const [uid, [titleTf, bodyTf]] of docs) {
+        const [titleLen, bodyLen] = this.lengths.get(uid) as [number, number];
+        let tfPrime = 0;
+        if (titleTf > 0) {
+          const denom = avgTitle > 0 ? 1 - B + B * (titleLen / avgTitle) : 1;
+          tfPrime += (TITLE_BOOST * titleTf) / denom;
+        }
+        if (bodyTf > 0) {
+          const denom = avgBody > 0 ? 1 - B + B * (bodyLen / avgBody) : 1;
+          tfPrime += (BODY_BOOST * bodyTf) / denom;
+        }
+        scores.set(uid, (scores.get(uid) ?? 0) + (idf * (K1 + 1) * tfPrime) / (K1 + tfPrime));
+        const m = matched.get(uid);
+        if (m === undefined) matched.set(uid, [term]);
+        else m.push(term);
+      }
+    }
+
+    const hits: SearchHit[] = [];
+    for (const [uid, score] of scores) {
+      hits.push({
+        id: this.idByUid.get(uid) as string,
+        uid,
+        score,
+        matchedTerms: codepointSorted(matched.get(uid) as string[]),
+      });
+    }
+    hits.sort((a, b) => {
+      const ka = scoreKey(a.score);
+      const kb = scoreKey(b.score);
+      if (ka !== kb) return kb - ka; // scoreKey descending
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; // id ascending
+    });
+    return limit === undefined ? hits : hits.slice(0, limit);
+  }
+
   private drop(uid: string): void {
     const lengths = this.lengths.get(uid);
     if (lengths === undefined) return;
