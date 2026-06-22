@@ -165,22 +165,33 @@ resolveUid(ref: string): string | null
 
 ### Collision
 
-On `upsert`, every claimed id (the live `id` plus each `deprecatedId`) must belong to exactly one
-uid. Violations raise `CollisionError`, via O(1) map lookups:
+`assertAddable` is the **collision gate** — `upsert` is mechanical and never raises. Every claimed
+id (the live `id` plus each `deprecatedId`) of an *added* node must belong to exactly one uid;
+`assertAddable` enforces this via O(1) map lookups:
 
 - a claimed id already mapped to a *different* uid → `CollisionError`;
 - a uid already mapped to a *different* live id (the rename-misuse case) → `CollisionError`.
 
+This split matches Python (`assert_addable` is the gate; `upsert` is mechanical/non-raising) and
+is **load-bearing for `rename`**: `Corpus.rename` changes a uid's live id and then calls
+`index.upsert(node)` *after* disk writes have begun. If `upsert` itself enforced "uid already
+mapped to a different live id", rename would raise mid-commit. So the gate lives only in
+`assertAddable`, which `build` and `Corpus.add` call *before* `upsert`; rename never calls it
+(it has already collision-checked `newId` against the index in step 1).
+
 ### Maintenance ops
 
 ```typescript
-static build(nodes: Iterable<Node>): Index   // raises CollisionError on a duplicate uid
-upsert(node: Node): void                      // add or replace; updates all maps + reverse refs
+static build(nodes: Iterable<Node>): Index   // assertAddable then upsert per node; raises CollisionError on a duplicate uid
+assertAddable(node: Node): void               // collision gate (see above); raises CollisionError. Does NOT mutate
+upsert(node: Node): void                      // mechanical add-or-replace; updates all maps + reverse refs; never raises
 remove(uid: string): void                     // drop the node's OWN contributions only
 ```
 
-`upsert` is replace-safe: re-indexing an existing uid first removes its old ref contributions,
-then adds the new ones, so the maps never leak stale entries.
+`build` calls `assertAddable(node)` before `upsert(node)` for each node (a duplicate uid is caught
+by `assertAddable`'s second clause). `Corpus.add` does the same. `upsert` is replace-safe:
+re-indexing an existing uid first removes its old ref contributions, then adds the new ones, so the
+maps never leak stale entries.
 
 `remove(uid)` deletes only what the removed node itself contributed: its `byUid` entry, its
 `idToUid` / `deprecatedToUid` identity claims, and the `inRefs` entries it contributed as a
@@ -205,7 +216,7 @@ written as a deprecated id is included in the inbound set of the live uid.
 class Corpus {
   constructor(root: string, registry?: Registry)   // build Store, scan corpus, build Index
 
-  add(node: Node): Node             // registry?.validate; index collision-check; writeFile; index.upsert
+  add(node: Node): Node             // registry?.validate; index.assertAddable; store.writeFile; index.upsert
   get(ref: string): Node            // resolveUid → live id → store.readFile
   resolve(ref: string): Node        // alias of get; RefError if unresolved
   delete(id: string): void          // store.deleteFile + index.remove; live-id-only
@@ -277,9 +288,19 @@ The spec's promise is "incremental updates == fully rebuildable from the files."
 Equality is defined over all four maps (`byUid`, `idToUid`, `deprecatedToUid`, `inRefs`). The
 scalar maps compare directly; the **list-valued** structures (`outRefs`, `inRefs`) compare as
 **normalized multisets** — incremental insertion order differs from rebuild scan order even when
-the index is semantically identical, so the property test sorts each ref list by a stable key
-(`(ref, role, sourceUid)`) before comparing. This directly catches incremental-maintenance bugs —
-the main risk of the in-memory+incremental choice.
+the index is semantically identical, so the property test normalizes each ref list to a sorted
+multiset of stable keys before comparing.
+
+The key **must include the relation payload**, not just `(ref, role, sourceUid)`. The bare triple
+omits the `Relation` fields, so a stale `predicate` / `directed` / `weight` / `attrs` left behind
+by a buggy incremental rewrite would pass undetected; and comparing the `Relation` *objects*
+directly gives false negatives, because live vs freshly-rebuilt indexes hold distinct object
+references. So, mirroring the Python plan, the key embeds a **`relationSignature`** — a
+canonicalized tuple of `(source, predicate, target, directed, weight, canonicalized attrs)` (the
+same shape the Plan-4 canonical oracle uses for a relation, with `attrs` key-sorted) — or `null`
+for non-relation roles. The full key is therefore `(ref, role, sourceUid, relationSignature)`.
+This directly catches incremental-maintenance bugs — the main risk of the in-memory+incremental
+choice.
 
 ## 7. Cross-language rename parity
 
