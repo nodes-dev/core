@@ -63,6 +63,12 @@ def test_validate_finite_rejects_empty_and_nonfinite():
             _validate_finite((1.0, bad))
 
 
+def test_validate_finite_rejects_out_of_range_int():
+    # Out-of-range int (> float max) should raise ValueError, not OverflowError
+    with pytest.raises(ValueError):
+        _validate_finite((10**309, 1.0))
+
+
 def test_normalize_unit_length_and_rejects_zero():
     nv = _normalize((3.0, 4.0))
     assert nv == pytest.approx((0.6, 0.8))

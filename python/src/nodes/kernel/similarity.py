@@ -57,7 +57,13 @@ def _validate_finite(vec: tuple[object, ...]) -> None:
     if len(vec) < 1:
         raise ValueError("vector must have length >= 1")
     for x in vec:
-        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            raise ValueError(f"vector contains non-finite or non-numeric value {x!r}")
+        try:
+            finite = math.isfinite(x)
+        except OverflowError:
+            finite = False
+        if not finite:
             raise ValueError(f"vector contains non-finite or non-numeric value {x!r}")
 
 
