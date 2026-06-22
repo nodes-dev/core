@@ -31,7 +31,7 @@ def test_validate_namespace_accepts_safe(ns):
     validate_namespace(ns)  # no raise
 
 
-@pytest.mark.parametrize("ns", ["", ".", "..", "a/b", "a b", "a\0b", "naïve"])
+@pytest.mark.parametrize("ns", ["", ".", "..", "a/b", "a b", "a\0b", "naïve", "abc\n", "abc\t"])
 def test_validate_namespace_rejects_unsafe(ns):
     with pytest.raises(ValueError):
         validate_namespace(ns)
@@ -43,7 +43,7 @@ def test_validate_text_hash_accepts_64_lower_hex(h):
 
 
 @pytest.mark.parametrize(
-    "h", ["", "abc", "A" * 64, "g" * 64, "a" * 63, "a" * 65, "../" + "a" * 61]
+    "h", ["", "abc", "A" * 64, "g" * 64, "a" * 63, "a" * 65, "../" + "a" * 61, ("a" * 64) + "\n"]
 )
 def test_validate_text_hash_rejects_bad(h):
     with pytest.raises(ValueError):

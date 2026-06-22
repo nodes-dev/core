@@ -16,7 +16,7 @@ from nodes.kernel.ranking import score_key
 
 Vector = tuple[float, ...]
 
-_NAMESPACE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_NAMESPACE_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 
 class Embedder(Protocol):
@@ -40,16 +40,16 @@ def text_hash(text: str) -> str:
 
 def validate_namespace(namespace: str) -> None:
     """A cache_namespace must be a safe single path segment."""
-    if not namespace or namespace in (".", "..") or _NAMESPACE_RE.match(namespace) is None:
+    if not namespace or namespace in (".", "..") or _NAMESPACE_RE.fullmatch(namespace) is None:
         raise ValueError(f"invalid cache_namespace {namespace!r}")
 
 
-_TEXT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_TEXT_HASH_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def validate_text_hash(text_hash: str) -> None:
     """A cache key must be exactly 64 lowercase hex chars (a SHA-256 hexdigest)."""
-    if _TEXT_HASH_RE.match(text_hash) is None:
+    if _TEXT_HASH_RE.fullmatch(text_hash) is None:
         raise ValueError(f"invalid text_hash {text_hash!r}")
 
 
