@@ -31,3 +31,7 @@ class InvariantError(NodesError):
 
 class ValidationError(NodesError):
     """Raised when a node fails validation against its kind."""
+
+
+class EmbedderRequiredError(NodesError):
+    """Raised when a similarity API is used on a Corpus built without an embedder."""

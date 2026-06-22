@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nodes.kernel.errors import CollisionError, RefError
+from nodes.kernel.errors import CollisionError, EmbedderRequiredError, RefError
+from nodes.kernel.similarity import Embedder, SimilarHit, Vector, VectorCache, VectorIndex
 from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
@@ -39,20 +40,33 @@ def _rewrite_refs(node: Node, old: str, new: str) -> None:
 class Corpus:
     """Coordinator over a `Store` + an in-memory `Index`. The primary kernel API."""
 
-    def __init__(self, root: Path, registry: Registry | None = None) -> None:
+    def __init__(self, root: Path, registry: Registry | None = None, embedder: Embedder | None = None) -> None:
         self.store = Store(root)
         self.registry = registry
+        self.embedder = embedder
         nodes = self.store.all_nodes()
         self.index = Index.build(nodes)
         self.search_index = SearchIndex.build(nodes)
+        if embedder is not None:
+            self.vector_cache: VectorCache | None = VectorCache(root)
+            self.vector_index: VectorIndex | None = VectorIndex.build(nodes, embedder, self.vector_cache)
+        else:
+            self.vector_cache = None
+            self.vector_index = None
 
     def add(self, node: Node) -> Node:
         if self.registry is not None:
             self.registry.validate(node)
         self.index.assert_addable(node)
+        prepared = None
+        if self.vector_index is not None:
+            assert self.embedder is not None and self.vector_cache is not None
+            prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
         self.store.write_file(node)
         self.index.upsert(node)
         self.search_index.upsert(node)
+        if self.vector_index is not None and prepared is not None:
+            self.vector_index.commit(node, prepared)
         return node
 
     def get(self, ref: str) -> Node:
@@ -71,6 +85,8 @@ class Corpus:
         self.store.delete_file(node_id)
         self.index.remove(uid)
         self.search_index.remove(uid)
+        if self.vector_index is not None:
+            self.vector_index.remove(uid)
 
     def all(self) -> list[Node]:
         return self.store.all_nodes()
@@ -105,6 +121,22 @@ class Corpus:
     def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
         return self.search_index.search(query, limit)
 
+    def similar(self, ref: str, k: int | None = None) -> list[SimilarHit]:
+        if self.vector_index is None:
+            raise EmbedderRequiredError("similarity requires Corpus(embedder=...)")
+        return self.vector_index.similar(self._require_uid(ref), k)
+
+    def query_vector(self, vec: Vector, k: int | None = None) -> list[SimilarHit]:
+        if self.vector_index is None:
+            raise EmbedderRequiredError("similarity requires Corpus(embedder=...)")
+        return self.vector_index.query_vector(vec, k)
+
+    def similar_text(self, text: str, k: int | None = None) -> list[SimilarHit]:
+        if self.vector_index is None:
+            raise EmbedderRequiredError("similarity requires Corpus(embedder=...)")
+        assert self.embedder is not None
+        return self.vector_index.similar_text(text, self.embedder, k)
+
     def rename(self, old_id: str, new_id: str) -> Node:
         if old_id not in self.index.id_to_uid:
             raise RefError(f"rename source {old_id!r} is not a live id")
@@ -137,6 +169,12 @@ class Corpus:
             for referrer in referrers:
                 self.registry.validate(referrer)
 
+        # --- prepare similarity vector (fail before any disk write) ---
+        prepared = None
+        if self.vector_index is not None:
+            assert self.embedder is not None and self.vector_cache is not None
+            prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
+
         # --- commit: renamed node first (crash-atomic), then referrers ---
         new_path = self.store.write_file(node)
         if old_path != new_path:
@@ -147,4 +185,6 @@ class Corpus:
             self.index.upsert(referrer)
 
         self.search_index.upsert(node)
+        if self.vector_index is not None and prepared is not None:
+            self.vector_index.commit(node, prepared)
         return node
