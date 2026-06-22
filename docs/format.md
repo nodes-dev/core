@@ -43,7 +43,9 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
 
 ### Known kernel limitations (resolved in later plans)
 - The index is in-memory and rebuilt on `Corpus(root)` construction; no on-disk persistence yet.
-- No full-text search or embeddings/similarity index yet.
+- No embeddings/similarity index yet. (Full-text search is now implemented in the
+  Python kernel — see "Full-text search (derived index)" below; the TypeScript port
+  is a later plan.)
 - No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
   are tracked internally for rename but are not exposed as graph edges.
 
@@ -120,3 +122,26 @@ from the kernel modules; the kernel never imports it, and it is **not** part of 
   exposed as the `predicates` namespace. Free-string only; never enforced by the kernel.
 - **Enforcement.** `new Corpus(root, reg)` with a vocab-registered `Registry` validates on `add`
   and `rename` before any disk write — same fail-early contract as the Python `Corpus`.
+
+## Full-text search (derived index)
+
+The Python kernel ships a second derived index beside the structural `Index`: an
+in-memory BM25F full-text search index (`nodes.kernel.search`). `Corpus` builds it
+from the same `all_nodes()` scan, keeps it current on `add`/`delete`/`rename`, and
+exposes `Corpus.search(query, limit=None) -> list[SearchHit]`.
+
+- **Tokenizer.** NFC-normalize → lowercase → split into Unicode-alphanumeric runs
+  → drop a fixed 33-word stop list; no stemming. Pinned across languages by
+  `fixtures/search.tokenizer.json`.
+- **Scoring.** BM25F over two fields (`title` boosted above `body`) with the
+  standard `(K1 + 1)` numerator and a non-negative Lucene IDF. Constants `K1=1.5`,
+  `B=0.75`, `TITLE_BOOST=2.0`, `BODY_BOOST=1.0`.
+- **Results.** Ranked `SearchHit`s (`id`, `uid`, `score`, `matched_terms`), sorted
+  by a 6-decimal half-up `score_key` then `id`. The caller hydrates the `Node` via
+  `Corpus.get` when it needs the text.
+- **Parity.** A fixture corpus (`fixtures/search-corpus/`) plus a ranking oracle
+  (`fixtures/search.oracle.json`) pin ranked ids and 6-dp scores; both languages
+  build the index and assert equality. Scores are not claimed bit-identical.
+
+This is in-memory and rebuilt on `Corpus` construction; on-disk persistence is a
+later plan.

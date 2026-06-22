@@ -1,0 +1,53 @@
+[
+  {
+    "query": "search",
+    "hits": [
+      {
+        "id": "topic:search",
+        "score": 0.607085
+      },
+      {
+        "id": "topic:relevance",
+        "score": 0.386676
+      },
+      {
+        "id": "topic:index",
+        "score": 0.34081
+      }
+    ]
+  },
+  {
+    "query": "documents ranking",
+    "hits": [
+      {
+        "id": "topic:relevance",
+        "score": 2.003228
+      },
+      {
+        "id": "topic:graph",
+        "score": 0.114223
+      },
+      {
+        "id": "topic:index",
+        "score": 0.100674
+      },
+      {
+        "id": "topic:search",
+        "score": 0.095037
+      }
+    ]
+  },
+  {
+    "query": "relevance",
+    "hits": [
+      {
+        "id": "topic:relevance",
+        "score": 1.087532
+      },
+      {
+        "id": "topic:search",
+        "score": 0.625234
+      }
+    ]
+  }
+]
