@@ -58,8 +58,17 @@ parity-clean. It contributes three units plus one new error:
 embedder + a `VectorCache` and keeps the `VectorIndex` current on
 `add`/`delete`/`rename`, mirroring how it maintains `SearchIndex`.
 
+**Prerequisite refactor — shared ranking primitive.** `score_key` (the
+parity-critical half-up-to-6-dp rounding) is extracted from `search.py` into a
+new `python/src/nodes/kernel/ranking.py`, imported by **both** `search.py` and
+`similarity.py`. This gives the two derived-index facets one source of truth for
+the rounding without coupling the vector index to full-text search. The barrel
+export and the existing search tests are updated to import from `ranking`; the
+later TypeScript port mirrors the extraction (`ranking.ts`).
+
 The dependency direction is unchanged: `similarity.py` depends only on
-`node.py` and `errors.py`; nothing domain-specific leaks in.
+`node.py`, `errors.py`, and the shared `ranking.py`; nothing domain-specific
+leaks in, and it does **not** depend on `search.py`.
 
 ## 3. Embedder seam & the Vector type
 
@@ -145,29 +154,43 @@ Pure data; the only I/O it performs is delegated to the injected `VectorCache`.
 | `id_by_uid: dict[str, str]` | uid → current canonical id (for hit construction). |
 | `hash_by_uid: dict[str, str]` | uid → `text_hash` last embedded (to detect content change on upsert). |
 | `dim: int \| None` | Established dimension (§5.3). |
+| `namespace: str \| None` | The embedder `cache_namespace` this index is bound to (§5.3). |
 
 ### 5.2 Mutators
 
-- `build(nodes, embedder, cache) -> VectorIndex` — for each node:
+- `build(nodes, embedder, cache) -> VectorIndex` — binds the index to
+  `embedder.cache_namespace` (§5.3), then for each node:
   `embed_text → text_hash → cache hit loads raw vector, miss calls
   embedder.embed([text]) and writes the cache`; validate; normalize; store.
   A duplicate uid raises `CollisionError` (mirrors `SearchIndex.build`).
-- `upsert(node, embedder, cache)` — if the node's current `text_hash` equals the
-  stored `hash_by_uid[uid]`, **no re-embedding**: only `id_by_uid` is refreshed
-  (this is the rename case — title/body unchanged, id changed). Otherwise resolve
-  the vector (cache-or-embed), validate, normalize, and replace.
+- `upsert(node, embedder, cache)` — first enforce the namespace binding (§5.3).
+  Then, if the node's current `text_hash` equals the stored `hash_by_uid[uid]`
+  **and** the index is already bound to this embedder's namespace,
+  **no re-embedding**: only `id_by_uid` is refreshed (this is the rename case —
+  title/body unchanged, id changed). Otherwise resolve the vector
+  (cache-or-embed), validate, normalize, and replace. Because the index is bound
+  to a single namespace, the skip decision is effectively keyed on the full
+  `(namespace, text_hash)` — a different namespace can never silently reuse a
+  stale vector.
 - `remove(uid)` — drop all state for the uid.
 
 `build`/`upsert` resolve-and-validate the vector **before** mutating index state,
 so a failure leaves the index unchanged (and composes with the corpus-level
 ordering guarantee in §6).
 
-### 5.3 Dimension lifecycle
+### 5.3 Dimension & namespace lifecycle
 
-- An empty index has `dim = None`.
-- The first vector stored establishes `dim` (its length, ≥ 1).
-- Every later stored vector, and every query vector, must have length `dim`,
-  else `ValueError`.
+Both are established on first use and immutable thereafter, because an index
+mixes neither dimensions nor models (cosine across vectors from two different
+embedders is meaningless):
+
+- **Dimension:** empty index has `dim = None`; the first stored vector
+  establishes `dim` (its length, ≥ 1); every later stored vector, and every
+  query vector, must have length `dim`, else `ValueError`.
+- **Namespace:** empty index has `namespace = None`; the first `build`/`upsert`
+  binds it to that embedder's `cache_namespace`; any later `build`/`upsert` whose
+  embedder reports a different `cache_namespace` raises `ValueError`. Query paths
+  take no embedder and so never re-check the namespace.
 
 ### 5.4 Query entry points & ranking contract
 
@@ -175,9 +198,10 @@ ordering guarantee in §6).
   (zero-norm or non-finite or dim-mismatch → `ValueError`), dot-product against
   every stored vector, rank, return top `k`.
 - `similar(uid, k) -> list[SimilarHit]` — rank the stored vector for `uid`,
-  **excluding `uid` itself**; raises `KeyError`/`RefError` semantics upward if
-  the uid is unknown (resolution is the caller's job — see §6). Implemented via a
-  private `_rank(query_vec, k, *, exclude_uid=None)`; `query_vector` passes
+  **excluding `uid` itself**. It is a pure lookup over uids and raises a concrete
+  `KeyError` if the uid is unknown; ref resolution and the `RefError` translation
+  are the caller's job (`Corpus.similar`, §6). Implemented via a private
+  `_rank(query_vec, k, *, exclude_uid=None)`; `query_vector` passes
   `exclude_uid=None`, `similar` passes the node's own uid.
 - `similar_text(text, embedder, k) -> list[SimilarHit]` — `embedder.embed([text])`
   then `query_vector`. The only query path that needs a live embedder. It uses
@@ -187,17 +211,19 @@ ordering guarantee in §6).
 **Ranking key — identical to full-text search:** sort by
 `(-score_key(score), id)` ascending on id, where `score` is cosine similarity and
 `score_key` is the shared half-up-to-6-dp function
-(`math.floor(score * 1_000_000 + 0.5) / 1_000_000`). It is correct over cosine's
-`[-1, 1]` range because `math.floor` / `Math.floor` agree on negative operands
-across both languages. `score_key` is reused from the search module (single
-source of truth).
+(`math.floor(score * 1_000_000 + 0.5) / 1_000_000`) from the new `ranking.py`
+(§2). It is correct over cosine's `[-1, 1]` range because `math.floor` /
+`Math.floor` agree on negative operands across both languages.
 
 **`k` contract — identical to search's `limit`:** a positive int, or `None` for
 unbounded; anything else (including `bool`, non-int, or `<= 0`) raises
 `ValueError`.
 
 **Empty index:** `query_vector` / `similar_text` on an index with no vectors
-return `[]` (no candidates; no dimension to validate against).
+still validate the query vector — finite elements, length ≥ 1, non-zero norm all
+apply and raise `ValueError` on violation. Only the **dimension match** is
+skipped (there is no established `dim` yet). A valid query then returns `[]` (no
+candidates).
 
 ### 5.5 Hit type
 
@@ -226,8 +252,11 @@ class SimilarHit:
   - `rename` → `vector_index.upsert(node, embedder, cache)` (same `text_hash` ⇒
     cache hit, no re-embed; `id_by_uid` refreshed for the new id)
   - `similar(ref, k)` resolves `ref → uid` via `self.index` (honoring
-    `deprecated_ids`), then calls `vector_index.similar(uid, k)`; a ref that
-    resolves to nothing raises `RefError`.
+    `deprecated_ids`); a ref that resolves to nothing raises `RefError`. It then
+    calls `vector_index.similar(uid, k)` — which would raise `KeyError` on an
+    unknown uid, but `Corpus` only ever passes a uid it just resolved, so that
+    `KeyError` is not reachable through `Corpus`. `Corpus` is the sole layer that
+    translates unresolved refs into `RefError`.
   - `query_vector` / `similar_text` delegate directly to the `VectorIndex`.
 
 ### Mutation ordering (fail-early, no partial corpus state)
@@ -283,9 +312,11 @@ identical ranked ids and 6-dp scores against the oracle.
 |-----------|--------|
 | `embedder=None` + any similarity API | `EmbedderRequiredError` (before ref resolution) |
 | Unknown ref in `Corpus.similar` | `RefError` |
+| Unknown uid in `VectorIndex.similar` | `KeyError` (not reachable via `Corpus`) |
 | Zero-norm vector (insert or query) | `ValueError` |
 | Non-finite element (embedder / cache / query) | `ValueError` |
 | Dimension mismatch (insert or query) | `ValueError` |
+| `build`/`upsert` embedder namespace ≠ index's bound namespace | `ValueError` |
 | Invalid `cache_namespace` | `ValueError` |
 | Duplicate uid in `build` | `CollisionError` |
 | `k` not a positive int and not `None` | `ValueError` |
@@ -294,10 +325,13 @@ identical ranked ids and 6-dp scores against the oracle.
 
 ## 9. Testing
 
+- **Ranking extraction:** `score_key` lives in `ranking.py`; the existing search
+  tests still pass importing it from there.
 - **VectorIndex unit:** normalization (unit norm), cosine ranking with
-  `(-score_key, id)` tiebreak, self-exclusion in `similar`, `k` validation,
-  dimension lifecycle + mismatch, zero-norm and non-finite rejection, duplicate
-  uid in `build`.
+  `(-score_key, id)` tiebreak, self-exclusion in `similar`, unknown-uid `KeyError`
+  in `similar`, `k` validation, dimension lifecycle + mismatch, namespace binding
+  (first use binds; mismatched `cache_namespace` on later build/upsert →
+  `ValueError`), zero-norm and non-finite rejection, duplicate uid in `build`.
 - **VectorCache unit:** hit/miss, namespace isolation, `cache_namespace`
   validation, raw-vector round-trip, atomic write, corrupt/dim-mismatch
   fail-early.
@@ -317,8 +351,9 @@ identical ranked ids and 6-dp scores against the oracle.
    namespaced per embedder; disposable; atomic writes.
 3. **Embedded text:** one vector per node from `title + "\n\n" + body`.
 4. **Metric:** exact brute-force cosine over L2-normalized vectors; no ANN.
-5. **Ranking key:** shared `score_key` (half-up 6-dp) + `id` tiebreak, reused
-   from search.
+5. **Ranking key:** shared `score_key` (half-up 6-dp) + `id` tiebreak, extracted
+   into a new `ranking.py` and imported by both `search.py` and `similarity.py`
+   (so neither facet depends on the other).
 6. **Query surface:** `similar(ref, k)` (self-excluded), `query_vector(vec, k)`,
    `similar_text(text, embedder, k)`.
 7. **Integration:** opt-in via `Corpus(embedder=...)`; `EmbedderRequiredError`
