@@ -20,7 +20,7 @@
 - **Explicit YAML parse-error handling:** the frontmatter parser uses `parseDocument` and inspects `.errors`; it never assumes malformed YAML throws.
 - **Zod validation errors are wrapped into the kernel error hierarchy** (`ValidationError`/`FacetError`), never leaked raw.
 - **Tooling:** ESM (`"type":"module"`), `strict:true`, target ES2022, `NodeNext` resolution; relative imports use the `.js` extension. `engines.node` `>=20`, `packageManager` `npm@11.11.0` (refines the spec's illustrative `npm@10` to the installed npm).
-- **Commands are `rtk`-prefixed** (the hook rewrites transparently). Python commands run from `python/`; TS commands run from `ts/`.
+- **Tool commands (`git`, `npm`, `npx`, `uv`, `node`, `grep`) are shown `rtk`-prefixed**; the Claude Code hook also rewrites bare commands transparently, so plain filesystem primitives (`mkdir`, `mv`, `rmdir`) are shown bare. Gate commands are listed **one per line**, never chained with `&&`. Python commands run from `python/`; TS commands run from `ts/`.
 - **Docs use `~/d/` paths**, never `/home/keith/...` or `/mnt/ssd/...`.
 - **Final gate:** TS — `vitest run` green, `tsc --noEmit` clean, `biome check` clean. Python — full suite green (≥112), `ruff check` clean, `pyright` clean, both run from `python/`.
 
@@ -67,9 +67,9 @@
 ```bash
 cd ~/d/nodes
 mkdir -p python
-git mv src python/src
-git mv tests python/tests
-git mv pyproject.toml python/pyproject.toml
+rtk git mv src python/src
+rtk git mv tests python/tests
+rtk git mv pyproject.toml python/pyproject.toml
 mv uv.lock python/uv.lock          # uv.lock is git-ignored — plain mv
 ```
 
@@ -77,7 +77,7 @@ mv uv.lock python/uv.lock          # uv.lock is git-ignored — plain mv
 
 ```bash
 mkdir -p fixtures
-git mv python/tests/fixtures/gene_phf19.md fixtures/gene_phf19.md
+rtk git mv python/tests/fixtures/gene_phf19.md fixtures/gene_phf19.md
 rmdir python/tests/fixtures 2>/dev/null || true
 ```
 
@@ -87,7 +87,7 @@ In `python/tests/test_format_golden.py`, change the fixture path (the file moved
 FIXTURE = Path(__file__).parent.parent.parent / "fixtures" / "gene_phf19.md"
 ```
 
-(Confirm no other test references the fixture: `grep -rln fixtures python/tests --include=*.py` should list only `test_format_golden.py`.)
+(Confirm no other test references the fixture: `rtk grep -rln fixtures python/tests --include=*.py` should list only `test_format_golden.py`.)
 
 - [ ] **Step 3: Recreate the Python venv and run the migration gate**
 
@@ -207,8 +207,8 @@ Expected: typecheck clean; **1 test passed**; biome clean. (`biome check` may re
 
 ```bash
 cd ~/d/nodes
-git add -A
-git commit -m "chore: restructure into python/ + ts/; scaffold TS toolchain"
+rtk git add -A
+rtk git commit -m "chore: restructure into python/ + ts/; scaffold TS toolchain"
 ```
 
 ---
@@ -369,8 +369,8 @@ Expected: **3 passed**.
 
 ```bash
 cd ~/d/nodes
-git add fixtures/ python/tests/_canonical.py python/tests/test_parity.py
-git commit -m "test(parity): canonical-JSON oracle + Python-emitted fixture with currency guard"
+rtk git add fixtures/ python/tests/_canonical.py python/tests/test_parity.py
+rtk git commit -m "test(parity): canonical-JSON oracle + Python-emitted fixture with currency guard"
 ```
 
 ---
@@ -520,7 +520,8 @@ export class NodeId {
 cd ~/d/nodes/ts
 rtk npm test
 rtk npm run typecheck
-rtk npx biome check --write . && rtk npm run check
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all tests pass; typecheck + biome clean.
@@ -529,8 +530,8 @@ Expected: all tests pass; typecheck + biome clean.
 
 ```bash
 cd ~/d/nodes
-git add ts/src/errors.ts ts/src/ids.ts ts/tests/errors.test.ts ts/tests/ids.test.ts
-git commit -m "feat(ts): port errors hierarchy + NodeId"
+rtk git add ts/src/errors.ts ts/src/ids.ts ts/tests/errors.test.ts ts/tests/ids.test.ts
+rtk git commit -m "feat(ts): port errors hierarchy + NodeId"
 ```
 
 ---
@@ -668,7 +669,11 @@ export function tagToRelation(source: string, tag: string, aliasMap: Record<stri
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all green.
@@ -677,8 +682,8 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-git add ts/src/relations.ts ts/tests/relations.test.ts
-git commit -m "feat(ts): port Relation primitive + serialization sugar"
+rtk git add ts/src/relations.ts ts/tests/relations.test.ts
+rtk git commit -m "feat(ts): port Relation primitive + serialization sugar"
 ```
 
 ---
@@ -736,6 +741,20 @@ describe("node", () => {
       ValidationError,
     );
   });
+
+  it("rejects impossible calendar dates (bad month/day, non-leap Feb 29)", () => {
+    for (const bad of ["2026-99-99", "2026-13-01", "2026-02-30", "2026-00-10", "2025-02-29"]) {
+      expect(() => makeNode({ id: "topic:x", kind: "topic", title: "X", metadata: { created: bad } })).toThrow(
+        ValidationError,
+      );
+    }
+  });
+
+  it("accepts a valid leap day", () => {
+    expect(
+      makeNode({ id: "topic:x", kind: "topic", title: "X", metadata: { created: "2024-02-29" } }).metadata.created,
+    ).toBe("2024-02-29");
+  });
 });
 ```
 
@@ -763,7 +782,15 @@ export function newUid(): string {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const dateStr = z.string().regex(DATE_RE, "expected a YYYY-MM-DD date string");
+const dateStr = z
+  .string()
+  .regex(DATE_RE, "expected a YYYY-MM-DD date string")
+  .refine((s) => {
+    // Real-calendar validity (Python's `date` rejects e.g. 2026-99-99, 2026-02-30, non-leap 02-29).
+    const [y, m, d] = s.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }, "not a valid calendar date");
 
 export const NodeMetadataSchema = z.object({
   created: dateStr.nullable().default(null),
@@ -815,7 +842,11 @@ export function makeNode(input: NodeInput): Node {
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all green.
@@ -824,8 +855,8 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-git add ts/src/node.ts ts/tests/node.test.ts
-git commit -m "feat(ts): port Node + NodeMetadata with Pydantic-parity defaults"
+rtk git add ts/src/node.ts ts/tests/node.test.ts
+rtk git commit -m "feat(ts): port Node + NodeMetadata with Pydantic-parity defaults"
 ```
 
 ---
@@ -923,6 +954,19 @@ describe("frontmatter", () => {
     const back = nodeFromMarkdown(nodeToMarkdown(n));
     expect(back.metadata).toEqual({ created: "2026-06-21", updated: null, version: 3 });
   });
+
+  it("wraps a malformed typed relation as ValidationError (no raw ZodError)", () => {
+    // relations: entry missing the required target
+    expect(() =>
+      nodeFromMarkdown("---\nid: a:1\nuid: u\nkind: a\ntitle: A\nrelations:\n- predicate: cites\n---\nx\n"),
+    ).toThrow(ValidationError);
+  });
+
+  it("wraps a non-string related entry as ValidationError", () => {
+    expect(() => nodeFromMarkdown("---\nid: a:1\nuid: u\nkind: a\ntitle: A\nrelated:\n- 123\n---\nx\n")).toThrow(
+      ValidationError,
+    );
+  });
 });
 ```
 
@@ -931,11 +975,13 @@ describe("frontmatter", () => {
 ```typescript
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { nodeFromMarkdown, nodeToMarkdown } from "../src/frontmatter.js";
 import { toCanonical } from "./_canonical.js";
 
-const FIXTURES = join(import.meta.dirname, "..", "..", "fixtures");
+// new URL(..., import.meta.url) resolves on all supported Node (no import.meta.dirname dependency).
+const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
 const SOURCE = join(FIXTURES, "gene_phf19.md");
 const ORACLE = join(FIXTURES, "gene_phf19.canonical.json");
 const TS_EMIT = join(FIXTURES, "gene_phf19.ts-emit.md");
@@ -974,6 +1020,7 @@ Expected: FAIL (module + ts-emit fixture missing).
 
 ```typescript
 import { parseDocument, stringify } from "yaml";
+import { z } from "zod";
 import { ValidationError } from "./errors.js";
 import { type Node, makeNode } from "./node.js";
 import { RELATES_TO, fromSerialized, relatesTo, type Relation, toSerialized } from "./relations.js";
@@ -1005,12 +1052,20 @@ export function nodeFromMarkdown(text: string): Node {
   }
   const nodeId = fm.id as string;
 
+  // Wrap Zod errors at the on-disk ingestion boundary (spec §7 — never leak raw ZodError).
   const relations: Relation[] = [];
-  for (const ref of (fm.related as unknown[] | undefined) ?? []) {
-    relations.push(relatesTo(nodeId, ref as string));
-  }
-  for (const raw of (fm.relations as Record<string, unknown>[] | undefined) ?? []) {
-    relations.push(fromSerialized(raw, nodeId));
+  try {
+    for (const ref of (fm.related as unknown[] | undefined) ?? []) {
+      relations.push(relatesTo(nodeId, ref as string));
+    }
+    for (const raw of (fm.relations as Record<string, unknown>[] | undefined) ?? []) {
+      relations.push(fromSerialized(raw, nodeId));
+    }
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      throw new ValidationError(`invalid relation in ${JSON.stringify(nodeId)}: ${e.issues.map((i) => i.message).join("; ")}`);
+    }
+    throw e;
   }
 
   const metadata: Record<string, unknown> = {};
@@ -1077,7 +1132,11 @@ writeFileSync(fx + "gene_phf19.ts-emit.md", nodeToMarkdown(node));
 - [ ] **Step 6: Run to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all green (parse parity, idempotency, currency).
@@ -1086,8 +1145,8 @@ Expected: all green (parse parity, idempotency, currency).
 
 ```bash
 cd ~/d/nodes
-git add ts/src/frontmatter.ts ts/tests/_canonical.ts ts/tests/frontmatter.test.ts ts/tests/parity.test.ts fixtures/gene_phf19.ts-emit.md
-git commit -m "feat(ts): port frontmatter parse/serialize + TS parity oracle & currency guard"
+rtk git add ts/src/frontmatter.ts ts/tests/_canonical.ts ts/tests/frontmatter.test.ts ts/tests/parity.test.ts fixtures/gene_phf19.ts-emit.md
+rtk git commit -m "feat(ts): port frontmatter parse/serialize + TS parity oracle & currency guard"
 ```
 
 ---
@@ -1224,7 +1283,11 @@ export class Registry {
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all green.
@@ -1233,8 +1296,8 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-git add ts/src/registry.ts ts/tests/registry.test.ts
-git commit -m "feat(ts): port KindSpec + Registry validation"
+rtk git add ts/src/registry.ts ts/tests/registry.test.ts
+rtk git commit -m "feat(ts): port KindSpec + Registry validation"
 ```
 
 ---
@@ -1440,7 +1503,11 @@ export function registerBuiltinShapes(reg: Registry): void {
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all green.
@@ -1449,8 +1516,8 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-git add ts/src/shapes.ts ts/tests/shapes.test.ts
-git commit -m "feat(ts): port structural shapes (membership facet + invariants)"
+rtk git add ts/src/shapes.ts ts/tests/shapes.test.ts
+rtk git commit -m "feat(ts): port structural shapes (membership facet + invariants)"
 ```
 
 ---
@@ -1776,7 +1843,11 @@ export class Store {
 - [ ] **Step 4: Run to verify they pass**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
 ```
 
 Expected: all green.
@@ -1785,8 +1856,8 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-git add ts/src/store.ts ts/tests/store.test.ts
-git commit -m "feat(ts): port historical Plan-1 Store CRUD surface"
+rtk git add ts/src/store.ts ts/tests/store.test.ts
+rtk git commit -m "feat(ts): port historical Plan-1 Store CRUD surface"
 ```
 
 ---
@@ -1884,11 +1955,12 @@ Create `ts/tests/cross_parity.test.ts`:
 ```typescript
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { nodeFromMarkdown } from "../src/frontmatter.js";
 import { toCanonical } from "./_canonical.js";
 
-const FIXTURES = join(import.meta.dirname, "..", "..", "fixtures");
+const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
 
 describe("cross-language parity (check 4)", () => {
   it("TS parses the Python-emitted markdown to the oracle", () => {
@@ -1964,8 +2036,15 @@ vocab are not yet ported.
 - [ ] **Step 5: Final full-gate run**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npx biome check --write . && rtk npm run check
-cd ~/d/nodes/python && rtk uv run pytest -q && rtk uv run ruff check src tests && rtk uv run pyright src
+cd ~/d/nodes/ts
+rtk npm test
+rtk npm run typecheck
+rtk npx biome check --write .
+rtk npm run check
+cd ~/d/nodes/python
+rtk uv run pytest -q
+rtk uv run ruff check src tests
+rtk uv run pyright src
 ```
 
 Expected: TS — full Vitest suite green, typecheck + biome clean. Python — full suite green (≥112 + 4 parity), ruff + pyright clean.
@@ -1974,8 +2053,8 @@ Expected: TS — full Vitest suite green, typecheck + biome clean. Python — fu
 
 ```bash
 cd ~/d/nodes
-git add ts/src/index.ts ts/tests/smoke.test.ts ts/tests/cross_parity.test.ts ts/README.md python/tests/test_parity.py docs/format.md
-git commit -m "feat(ts): barrel exports + cross-language parity checks + docs"
+rtk git add ts/src/index.ts ts/tests/smoke.test.ts ts/tests/cross_parity.test.ts ts/README.md python/tests/test_parity.py docs/format.md
+rtk git commit -m "feat(ts): barrel exports + cross-language parity checks + docs"
 ```
 
 ---
@@ -1994,6 +2073,6 @@ git commit -m "feat(ts): barrel exports + cross-language parity checks + docs"
 
 **2. Placeholder scan:** No TBD/"handle errors"/"similar to"/uncoded steps. The fixture-generation steps (Task 2 Step 4, Task 6 Step 5) contain runnable commands; their committed outputs are enforced by currency tests.
 
-**3. Type consistency:** `makeNode`/`NodeInput`/`Node`, `nodeFromMarkdown`/`nodeToMarkdown`/`splitFrontmatter`, `relatesTo`/`fromSerialized`/`toSerialized`/`RELATES_TO`, `Registry`/`KindSpec`/`Invariant`, `membershipOf`/`MEMBERSHIP`/`registerBuiltinShapes`/the four `require*`, `Store` method names are identical across the Interfaces blocks, the barrel (Task 10), and every consumer. `deprecatedIds` (API) ↔ `deprecated_ids` (disk + canonical JSON) used consistently. `import.meta.dirname` (Node ≥20) used in TS test fixture paths.
+**3. Type consistency:** `makeNode`/`NodeInput`/`Node`, `nodeFromMarkdown`/`nodeToMarkdown`/`splitFrontmatter`, `relatesTo`/`fromSerialized`/`toSerialized`/`RELATES_TO`, `Registry`/`KindSpec`/`Invariant`, `membershipOf`/`MEMBERSHIP`/`registerBuiltinShapes`/the four `require*`, `Store` method names are identical across the Interfaces blocks, the barrel (Task 10), and every consumer. `deprecatedIds` (API) ↔ `deprecated_ids` (disk + canonical JSON) used consistently. TS test fixture paths use `fileURLToPath(new URL("../../fixtures/", import.meta.url))` (portable across all supported Node; no `import.meta.dirname` version dependency).
 
-**Note for executor:** `import.meta.dirname` requires Node ≥20 (satisfied: local is v25). If a fixture-generation one-liner (Task 2 Step 4 / Task 6 Step 5) can't run via the suggested invocation, any method that writes the committed fixture from the *current* emitter is acceptable — the currency tests are the real gate.
+**Note for executor:** If a fixture-generation one-liner (Task 2 Step 4 / Task 6 Step 5) can't run via the suggested invocation on the local Node, any method that writes the committed fixture from the *current* emitter is acceptable — the regenerate-and-diff currency tests are the real gate.
