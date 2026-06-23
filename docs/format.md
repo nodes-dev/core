@@ -217,7 +217,8 @@ hash** -- unchanged files (sha256 of on-disk bytes matches the snapshot manifest
 parsing; changed/added files are re-parsed and re-indexed; deleted files are dropped.
 Files remain the single source of truth: an absent, corrupt, wrong-`version`/`lang`, or
 (embedder-configured) namespace-mismatched snapshot silently triggers a full rebuild, and
-every load reconciles against current hashes, so the cache can never serve stale results.
+every load reconciles against current hashes, so a loaded snapshot is reconciled before use
+rather than trusted blindly.
 
 Writing is explicit: `Corpus.flush_index()` serializes the three indexes plus the
 manifest and writes atomically. Construction never writes the snapshot. Reconcile

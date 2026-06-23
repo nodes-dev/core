@@ -144,16 +144,25 @@ class SearchIndex:
             raise ValueError("search snapshot: lengths/id_by_uid uid sets differ")
         postings: dict[str, dict[str, tuple[int, int]]] = {}
         for term, docs in postings_raw.items():
+            if not isinstance(term, str):
+                raise ValueError("search snapshot: posting term must be a string")
             if not isinstance(docs, dict):
                 raise ValueError(f"search snapshot: postings bucket for term {term!r} must be a dict")
+            if not docs:
+                raise ValueError(f"search snapshot: postings bucket for term {term!r} must not be empty")
             bucket: dict[str, tuple[int, int]] = {}
             for uid, tf in docs.items():
                 if uid not in lengths:
                     raise ValueError(f"search snapshot: posting uid {uid!r} absent from lengths")
-                bucket[uid] = cls._non_negative_int_pair(
+                tf_pair = cls._non_negative_int_pair(
                     tf,
                     f"search snapshot: posting tf for term {term!r} uid {uid!r}",
                 )
+                if tf_pair == (0, 0):
+                    raise ValueError(
+                        f"search snapshot: posting tf for term {term!r} uid {uid!r} must not be all zero"
+                    )
+                bucket[uid] = tf_pair
             postings[term] = bucket
         idx.postings = postings
         idx.lengths = lengths

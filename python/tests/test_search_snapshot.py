@@ -95,6 +95,27 @@ def test_from_dict_rejects_stale_posting_uid():
         )
 
 
+def test_from_dict_rejects_non_string_posting_term():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict(
+            {"postings": {1: {"u1": [1, 0]}}, "lengths": {"u1": [1, 0]}, "id_by_uid": {"u1": "topic:a"}}
+        )
+
+
+def test_from_dict_rejects_empty_posting_bucket():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict(
+            {"postings": {"x": {}}, "lengths": {"u1": [1, 0]}, "id_by_uid": {"u1": "topic:a"}}
+        )
+
+
+def test_from_dict_rejects_zero_posting_tf_pair():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict(
+            {"postings": {"x": {"u1": [0, 0]}}, "lengths": {"u1": [1, 0]}, "id_by_uid": {"u1": "topic:a"}}
+        )
+
+
 @pytest.mark.parametrize("value", ([1.9, 0], ["1", 0], [True, 0], [-1, 0], [1], (1, 0)))
 def test_from_dict_rejects_malformed_length_values(value):
     with pytest.raises(ValueError):

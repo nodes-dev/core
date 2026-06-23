@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from nodes.kernel.corpus import Corpus
 from nodes.kernel.errors import RefError
 from nodes.kernel.node import Node
 from nodes.kernel.store import Store
@@ -50,3 +51,25 @@ def test_all_nodes_scans_corpus_sorted(tmp_path):
     store.write_file(Node(id="topic:a", kind="topic", title="A"))
     ids = [n.id for n in store.all_nodes()]
     assert ids == ["topic:a", "topic:b"]
+
+
+def test_all_nodes_ignores_private_nodes_index_tree(tmp_path):
+    store = Store(tmp_path)
+    store.write_file(Node(id="topic:a", kind="topic", title="A"))
+    (tmp_path / ".nodes-index").mkdir()
+    (tmp_path / ".nodes-index" / "cache.md").write_text("not a node", encoding="utf-8")
+
+    ids = [n.id for n in store.all_nodes()]
+
+    assert ids == ["topic:a"]
+
+
+def test_corpus_construction_ignores_private_nodes_index_tree(tmp_path):
+    store = Store(tmp_path)
+    store.write_file(Node(id="topic:a", kind="topic", title="A"))
+    (tmp_path / ".nodes-index").mkdir()
+    (tmp_path / ".nodes-index" / "cache.md").write_text("not a node", encoding="utf-8")
+
+    corpus = Corpus(tmp_path)
+
+    assert [n.id for n in corpus.all()] == ["topic:a"]

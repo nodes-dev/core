@@ -51,6 +51,14 @@ def test_iter_corpus_files_ignores_md_directories(tmp_path):
     assert files == [CorpusFile(path="real.md", data=b"real", sha256=hash_bytes(b"real"))]
 
 
+def test_iter_corpus_files_ignores_private_nodes_index_tree(tmp_path):
+    (tmp_path / ".nodes-index").mkdir()
+    (tmp_path / ".nodes-index" / "cache.md").write_bytes(b"not a node")
+    (tmp_path / "real.md").write_bytes(b"real")
+    files = iter_corpus_files(tmp_path)
+    assert files == [CorpusFile(path="real.md", data=b"real", sha256=hash_bytes(b"real"))]
+
+
 def test_iter_corpus_files_ignores_md_symlinks(tmp_path):
     target = tmp_path / "target.txt"
     target.write_bytes(b"target")

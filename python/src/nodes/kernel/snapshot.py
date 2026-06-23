@@ -37,10 +37,11 @@ def iter_corpus_files(root: Path | str) -> list[CorpusFile]:
     root = Path(root)
     files: list[CorpusFile] = []
     for p in sorted(root.rglob("*.md")):
-        if p.is_symlink() or not p.is_file():
+        rel = p.relative_to(root)
+        if rel.parts[0] == ".nodes-index" or p.is_symlink() or not p.is_file():
             continue
         data = p.read_bytes()
-        files.append(CorpusFile(path=p.relative_to(root).as_posix(), data=data, sha256=hash_bytes(data)))
+        files.append(CorpusFile(path=rel.as_posix(), data=data, sha256=hash_bytes(data)))
     return files
 
 

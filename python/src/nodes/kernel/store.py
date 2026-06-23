@@ -6,6 +6,7 @@ from nodes.kernel.errors import RefError
 from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
 from nodes.kernel.ids import NodeId
 from nodes.kernel.node import Node
+from nodes.kernel.snapshot import iter_corpus_files
 
 
 class Store:
@@ -40,4 +41,4 @@ class Store:
         path.unlink()
 
     def all_nodes(self) -> list[Node]:
-        return [node_from_markdown(p.read_text(encoding="utf-8")) for p in sorted(self.root.rglob("*.md"))]
+        return [node_from_markdown(f.data.decode("utf-8")) for f in iter_corpus_files(self.root)]
