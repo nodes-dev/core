@@ -118,7 +118,10 @@ class SearchIndex:
     @classmethod
     def from_dict(cls, d: dict) -> "SearchIndex":
         idx = cls()
-        lengths = {uid: (int(v[0]), int(v[1])) for uid, v in d["lengths"].items()}
+        lengths = {
+            uid: cls._non_negative_int_pair(v, f"search snapshot: length for uid {uid!r}")
+            for uid, v in d["lengths"].items()
+        }
         id_by_uid = dict(d["id_by_uid"])
         if set(lengths) != set(id_by_uid):
             raise ValueError("search snapshot: lengths/id_by_uid uid sets differ")
@@ -128,7 +131,10 @@ class SearchIndex:
             for uid, tf in docs.items():
                 if uid not in lengths:
                     raise ValueError(f"search snapshot: posting uid {uid!r} absent from lengths")
-                bucket[uid] = (int(tf[0]), int(tf[1]))
+                bucket[uid] = cls._non_negative_int_pair(
+                    tf,
+                    f"search snapshot: posting tf for term {term!r} uid {uid!r}",
+                )
             postings[term] = bucket
         idx.postings = postings
         idx.lengths = lengths
@@ -136,6 +142,22 @@ class SearchIndex:
         idx._total_title = sum(lens[0] for lens in lengths.values())
         idx._total_body = sum(lens[1] for lens in lengths.values())
         return idx
+
+    @staticmethod
+    def _non_negative_int_pair(value: object, label: str) -> tuple[int, int]:
+        if not isinstance(value, list) or len(value) != 2:
+            raise ValueError(f"{label} must be a 2-item list")
+        first, second = value
+        if (
+            isinstance(first, bool)
+            or isinstance(second, bool)
+            or not isinstance(first, int)
+            or not isinstance(second, int)
+            or first < 0
+            or second < 0
+        ):
+            raise ValueError(f"{label} must contain non-negative ints")
+        return first, second
 
     def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
         if limit is not None and (
