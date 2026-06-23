@@ -203,4 +203,20 @@ Because model embeddings are not portable across languages, parity is pinned by 
 fixtures Python committed: `fixtures/similarity-corpus/`, `fixtures/similarity.vectors.json`, and
 `fixtures/similarity.oracle.json`. Both languages inject a lookup embedder over the frozen vectors
 and assert identical ranked ids and 6-dp scores; scores are compared numerically (not
-string-compared). On-disk index persistence remains a later plan.
+string-compared).
+
+### Index persistence (Python)
+
+The three derived indexes are persisted to a **disposable, private, per-language
+snapshot** at `<root>/.nodes-index/snapshot.py.json` (git-ignored). Constructing a
+`Corpus` loads the snapshot and **reconciles it against the current files by content
+hash** -- unchanged files (sha256 of on-disk bytes matches the snapshot manifest) skip
+parsing; changed/added files are re-parsed and re-indexed; deleted files are dropped.
+Files remain the single source of truth: an absent, corrupt, wrong-`version`/`lang`, or
+(embedder-configured) namespace-mismatched snapshot silently triggers a full rebuild, and
+every load reconciles against current hashes, so the cache can never serve stale results.
+
+Writing is explicit: `Corpus.flush_index()` serializes the three indexes plus the
+manifest and writes atomically. Construction never writes the snapshot. Reconcile
+enforces the same collision contract as a from-scratch build. The TypeScript port writes
+`snapshot.ts.json`; neither language reads the other's snapshot.
