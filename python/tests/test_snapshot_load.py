@@ -341,6 +341,18 @@ def test_embedder_malformed_vectors_container_returns_none(tmp_path):
     assert load_snapshot(tmp_path, "model-v1") is None
 
 
+@pytest.mark.parametrize("vector", ([2.0, 0.0], [0.0, 0.0]))
+def test_embedder_non_unit_vector_returns_none(tmp_path, vector):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    manifest = doc["manifest"]
+    doc["vectors"] = _vector_section(manifest, "expected-ns")
+    doc["vectors"]["vectors"][manifest[0]["uid"]] = vector
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, "expected-ns") is None
+
+
 def test_embedder_vector_id_by_uid_mismatch_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)

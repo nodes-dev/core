@@ -114,6 +114,20 @@ def test_from_dict_rejects_dim_length_mismatch():
         )
 
 
+@pytest.mark.parametrize("vector", ([2.0, 0.0], [0.0, 0.0]))
+def test_from_dict_rejects_non_unit_stored_vectors(vector):
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": vector},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )
+
+
 def test_from_dict_rejects_non_null_dim_when_empty():
     with pytest.raises(ValueError):
         VectorIndex.from_dict(

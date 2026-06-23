@@ -203,6 +203,9 @@ class VectorIndex:
             vec = tuple(float(x) for x in vec_values)
             if len(vec) != dim:
                 raise ValueError("vector snapshot: vector length != dim")
+            norm = math.sqrt(sum(x * x for x in vec))
+            if not math.isclose(norm, 1.0, rel_tol=1e-9, abs_tol=1e-12):
+                raise ValueError("vector snapshot: stored vector must be L2-normalized")
             vectors[uid] = vec
         idx.namespace = namespace
         idx.vectors = vectors
