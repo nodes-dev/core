@@ -218,5 +218,6 @@ every load reconciles against current hashes, so the cache can never serve stale
 
 Writing is explicit: `Corpus.flush_index()` serializes the three indexes plus the
 manifest and writes atomically. Construction never writes the snapshot. Reconcile
-enforces the same collision contract as a from-scratch build. The TypeScript port writes
-`snapshot.ts.json`; neither language reads the other's snapshot.
+enforces the same collision contract as a from-scratch build. `snapshot.ts.json` is the
+reserved filename for future TypeScript snapshot persistence; the Python loader does not
+read TypeScript snapshots, and the filenames remain separate.

@@ -3,7 +3,7 @@ from __future__ import annotations
 from nodes.kernel.corpus import Corpus
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
-from nodes.kernel.snapshot import iter_corpus_files, read_json, snapshot_path
+from nodes.kernel.snapshot import iter_corpus_files, load_snapshot, read_json, snapshot_path
 
 
 class FixedEmbedder:
@@ -79,7 +79,7 @@ def test_flush_after_mutations_reloads_equivalently(tmp_path):
     c.delete("topic:a")
     c.flush_index()
     reloaded = Corpus(tmp_path)
-    Corpus(tmp_path)  # snapshot already consumed; both load the same snapshot
+    assert load_snapshot(tmp_path, None) is not None
     assert _results(reloaded) == _results(c)
     # And a from-scratch rebuild (no snapshot) agrees:
     snapshot_path(tmp_path).unlink()
