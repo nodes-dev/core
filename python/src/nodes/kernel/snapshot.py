@@ -29,7 +29,7 @@ def iter_corpus_files(root: Path | str) -> list[CorpusFile]:
     root = Path(root)
     files: list[CorpusFile] = []
     for p in sorted(root.rglob("*.md")):
-        if not p.is_file():
+        if p.is_symlink() or not p.is_file():
             continue
         data = p.read_bytes()
         files.append(CorpusFile(path=p.relative_to(root).as_posix(), data=data, sha256=hash_bytes(data)))
@@ -52,6 +52,6 @@ def write_json_atomic(path: Path, obj: dict) -> None:
 
 
 def read_json(path: Path) -> dict | None:
-    if not path.is_file():
+    if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))

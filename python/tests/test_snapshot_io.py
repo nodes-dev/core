@@ -51,6 +51,18 @@ def test_iter_corpus_files_ignores_md_directories(tmp_path):
     assert files == [CorpusFile(path="real.md", data=b"real", sha256=hash_bytes(b"real"))]
 
 
+def test_iter_corpus_files_ignores_md_symlinks(tmp_path):
+    target = tmp_path / "target.txt"
+    target.write_bytes(b"target")
+    link = tmp_path / "linked.md"
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
+
+    assert iter_corpus_files(tmp_path) == []
+
+
 def test_write_json_atomic_round_trip_and_no_tmp_left(tmp_path):
     p = snapshot_path(tmp_path)
     write_json_atomic(p, {"version": 1, "x": [1, 2]})
@@ -68,6 +80,13 @@ def test_write_json_atomic_rejects_non_finite_values_without_snapshot(tmp_path):
 
 def test_read_json_missing_returns_none(tmp_path):
     assert read_json(snapshot_path(tmp_path)) is None
+
+
+def test_read_json_directory_raises(tmp_path):
+    p = snapshot_path(tmp_path)
+    p.mkdir(parents=True)
+    with pytest.raises(OSError):
+        read_json(p)
 
 
 def test_read_json_invalid_json_raises(tmp_path):
