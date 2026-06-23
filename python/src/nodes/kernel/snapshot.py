@@ -134,6 +134,7 @@ def _validate_manifest_path(path: str) -> None:
         or "\\" in path
         or path.endswith("/")
         or not path.endswith(".md")
+        or path.split("/", 1)[0] == ".nodes-index"
         or any(part in ("", ".", "..") for part in path.split("/"))
     ):
         raise ValueError("snapshot manifest row path must be a root-relative POSIX .md path")

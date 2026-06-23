@@ -7,7 +7,8 @@ from typing import Literal
 
 from pydantic import ValidationError as PydanticValidationError
 
-from nodes.kernel.errors import CollisionError
+from nodes.kernel.errors import CollisionError, IdError
+from nodes.kernel.ids import NodeId
 from nodes.kernel.node import Node
 from nodes.kernel.relations import Relation
 from nodes.kernel.shapes import MEMBERSHIP
@@ -260,6 +261,12 @@ class Index:
                 raise ValueError("structural snapshot: entry id must be a string")
             if not isinstance(kind, str):
                 raise ValueError("structural snapshot: entry kind must be a string")
+            try:
+                parsed_id = NodeId.parse(entry_id)
+            except IdError as exc:
+                raise ValueError("structural snapshot: entry id must be a valid node id") from exc
+            if parsed_id.kind != kind:
+                raise ValueError("structural snapshot: entry id kind must match entry kind")
             if not isinstance(relations_raw, list):
                 raise ValueError("structural snapshot: entry relations must be a list")
             if uid in idx.by_uid:

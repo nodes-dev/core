@@ -177,6 +177,15 @@ def test_malformed_manifest_path_returns_none(tmp_path, path):
     assert load_snapshot(tmp_path, None) is None
 
 
+def test_manifest_path_under_nodes_index_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][0]["path"] = ".nodes-index/foo.md"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
 def test_manifest_section_bijection_violation_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
@@ -201,6 +210,29 @@ def test_malformed_structural_entry_id_returns_none(tmp_path):
     first_uid = doc["manifest"][0]["uid"]
     doc["structural"]["entries"][0]["id"] = 123
     doc["search"]["id_by_uid"][first_uid] = 123
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_entry_invalid_id_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    first_uid = doc["manifest"][0]["uid"]
+    doc["structural"]["entries"][0]["id"] = "not-a-node-id"
+    doc["search"]["id_by_uid"][first_uid] = "not-a-node-id"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_entry_id_kind_mismatch_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    first_uid = doc["manifest"][0]["uid"]
+    doc["structural"]["entries"][0]["id"] = "note:a"
+    doc["structural"]["entries"][0]["kind"] = "topic"
+    doc["search"]["id_by_uid"][first_uid] = "note:a"
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None

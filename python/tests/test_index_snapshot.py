@@ -99,6 +99,23 @@ def test_from_dict_rejects_non_string_entry_fields(field):
         Index.from_dict(d)
 
 
+def test_from_dict_rejects_invalid_entry_id():
+    d = _single_entry_snapshot()
+    d["entries"][0]["id"] = "not-a-node-id"
+
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_entry_id_kind_mismatch():
+    d = _single_entry_snapshot()
+    d["entries"][0]["id"] = "note:a"
+    d["entries"][0]["kind"] = "topic"
+
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
 def test_from_dict_rejects_relations_not_list():
     d = _single_entry_snapshot()
     d["entries"][0]["relations"] = {}
