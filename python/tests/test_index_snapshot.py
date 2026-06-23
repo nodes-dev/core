@@ -63,6 +63,70 @@ def test_empty_index_round_trips():
     assert restored.by_uid == {}
 
 
+def _single_entry_snapshot() -> dict:
+    return Index.build([Node(id="topic:a", kind="topic", title="A")]).to_dict()
+
+
+def test_from_dict_rejects_non_dict_snapshot():
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict([])
+
+
+def test_from_dict_rejects_entries_not_list():
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict({"entries": {}})
+
+
+def test_from_dict_rejects_entry_not_dict():
+    d = {"entries": ["not an entry"]}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+@pytest.mark.parametrize("field", ("uid", "id", "kind", "deprecated_ids", "relations", "membership"))
+def test_from_dict_rejects_missing_entry_keys(field):
+    d = _single_entry_snapshot()
+    del d["entries"][0][field]
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+@pytest.mark.parametrize("field", ("uid", "id", "kind"))
+def test_from_dict_rejects_non_string_entry_fields(field):
+    d = _single_entry_snapshot()
+    d["entries"][0][field] = 123
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_relations_not_list():
+    d = _single_entry_snapshot()
+    d["entries"][0]["relations"] = {}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_relation_row_not_dict():
+    d = _single_entry_snapshot()
+    d["entries"][0]["relations"] = ["not a relation"]
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_invalid_relation_schema():
+    d = _single_entry_snapshot()
+    d["entries"][0]["relations"] = [{"source": "topic:a", "predicate": "relatesTo"}]
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_invalid_membership_container():
+    d = _single_entry_snapshot()
+    d["entries"][0]["membership"] = []
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
 def test_from_dict_rejects_duplicate_uid():
     idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
     d = idx.to_dict()

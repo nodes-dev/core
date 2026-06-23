@@ -14,6 +14,8 @@ from nodes.kernel.similarity import VectorIndex
 SNAPSHOT_SCHEMA_VERSION = 1
 SNAPSHOT_LANG = "py"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_SNAPSHOT_KEYS = frozenset({"version", "lang", "manifest", "structural", "search", "vectors"})
+_MANIFEST_ROW_KEYS = frozenset({"path", "sha256", "uid"})
 
 
 def snapshot_path(root: Path | str) -> Path:
@@ -99,6 +101,9 @@ def _parse_manifest(raw: object) -> list[ManifestEntry]:
     for e in raw:
         if not isinstance(e, dict):
             raise ValueError("snapshot manifest row is not a dict")
+        missing = _MANIFEST_ROW_KEYS - e.keys()
+        if missing:
+            raise ValueError(f"snapshot manifest row missing {sorted(missing)[0]}")
         path = e["path"]
         sha256 = e["sha256"]
         uid = e["uid"]
@@ -127,6 +132,9 @@ def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot 
             return None
         if not isinstance(doc, dict):
             return None
+        missing = _SNAPSHOT_KEYS - doc.keys()
+        if missing:
+            raise ValueError(f"snapshot document missing {sorted(missing)[0]}")
         if doc.get("version") != SNAPSHOT_SCHEMA_VERSION or doc.get("lang") != SNAPSHOT_LANG:
             return None
 
@@ -163,5 +171,5 @@ def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot 
             search_index=search_index,
             vector_index=vector_index,
         )
-    except (OSError, ValueError, KeyError, TypeError, IndexError):
+    except (OSError, ValueError):
         return None

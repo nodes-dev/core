@@ -17,6 +17,7 @@ from nodes.kernel.ranking import score_key
 Vector = tuple[float, ...]
 
 _NAMESPACE_RE = re.compile(r"[A-Za-z0-9._-]+")
+_VECTOR_SNAPSHOT_KEYS = frozenset({"namespace", "dim", "vectors", "id_by_uid", "hash_by_uid"})
 
 
 class Embedder(Protocol):
@@ -163,6 +164,11 @@ class VectorIndex:
     @classmethod
     def from_dict(cls, d: dict) -> "VectorIndex":
         idx = cls()
+        if not isinstance(d, dict):
+            raise ValueError("vector snapshot: document must be a dict")
+        missing = _VECTOR_SNAPSHOT_KEYS - d.keys()
+        if missing:
+            raise ValueError(f"vector snapshot: missing {sorted(missing)[0]}")
         namespace = d["namespace"]
         vectors_raw = d["vectors"]
         id_by_uid_raw = d["id_by_uid"]

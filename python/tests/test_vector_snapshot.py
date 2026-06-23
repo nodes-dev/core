@@ -80,6 +80,19 @@ def test_from_dict_rejects_uid_map_mismatch():
         )
 
 
+def test_from_dict_rejects_non_dict_snapshot():
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict([])
+
+
+@pytest.mark.parametrize("field", ("namespace", "dim", "vectors", "id_by_uid", "hash_by_uid"))
+def test_from_dict_rejects_missing_top_level_keys(field):
+    snapshot = {"namespace": "n", "dim": None, "vectors": {}, "id_by_uid": {}, "hash_by_uid": {}}
+    del snapshot[field]
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(snapshot)
+
+
 @pytest.mark.parametrize("field", ("vectors", "id_by_uid", "hash_by_uid"))
 def test_from_dict_rejects_malformed_map_containers(field):
     snapshot = {"namespace": "n", "dim": None, "vectors": {}, "id_by_uid": {}, "hash_by_uid": {}}

@@ -25,6 +25,7 @@ K1 = 1.5
 B = 0.75
 TITLE_BOOST = 2.0
 BODY_BOOST = 1.0
+_SEARCH_SNAPSHOT_KEYS = frozenset({"postings", "lengths", "id_by_uid"})
 
 
 def _codepoint_sorted(values: set[str] | list[str]) -> list[str]:
@@ -118,6 +119,11 @@ class SearchIndex:
     @classmethod
     def from_dict(cls, d: dict) -> "SearchIndex":
         idx = cls()
+        if not isinstance(d, dict):
+            raise ValueError("search snapshot: document must be a dict")
+        missing = _SEARCH_SNAPSHOT_KEYS - d.keys()
+        if missing:
+            raise ValueError(f"search snapshot: missing {sorted(missing)[0]}")
         postings_raw = d["postings"]
         lengths_raw = d["lengths"]
         id_by_uid_raw = d["id_by_uid"]

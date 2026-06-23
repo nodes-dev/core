@@ -5,6 +5,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
+from pydantic import ValidationError as PydanticValidationError
+
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.node import Node
 from nodes.kernel.relations import Relation
@@ -17,6 +19,8 @@ Role = Literal[
     "membership_edge_source",
     "membership_edge_target",
 ]
+
+_STRUCTURAL_ENTRY_KEYS = frozenset({"uid", "id", "kind", "deprecated_ids", "relations", "membership"})
 
 
 @dataclass
@@ -178,23 +182,54 @@ class Index:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Index":
+        if not isinstance(d, dict):
+            raise ValueError("structural snapshot: document must be a dict")
+        if "entries" not in d:
+            raise ValueError("structural snapshot: missing entries")
+        entries_raw = d["entries"]
+        if not isinstance(entries_raw, list):
+            raise ValueError("structural snapshot: entries must be a list")
         idx = cls()
-        for raw in d["entries"]:
+        for raw in entries_raw:
+            if not isinstance(raw, dict):
+                raise ValueError("structural snapshot: entry must be a dict")
+            missing = _STRUCTURAL_ENTRY_KEYS - raw.keys()
+            if missing:
+                raise ValueError(f"structural snapshot: entry missing {sorted(missing)[0]}")
             uid = raw["uid"]
+            entry_id = raw["id"]
+            kind = raw["kind"]
+            relations_raw = raw["relations"]
+            membership_raw = raw["membership"]
+            if not isinstance(uid, str):
+                raise ValueError("structural snapshot: entry uid must be a string")
+            if not isinstance(entry_id, str):
+                raise ValueError("structural snapshot: entry id must be a string")
+            if not isinstance(kind, str):
+                raise ValueError("structural snapshot: entry kind must be a string")
+            if not isinstance(relations_raw, list):
+                raise ValueError("structural snapshot: entry relations must be a list")
+            if membership_raw is not None and not isinstance(membership_raw, dict):
+                raise ValueError("structural snapshot: entry membership must be a dict or null")
             if uid in idx.by_uid:
                 raise ValueError(f"structural snapshot: duplicate uid {uid!r}")
-            deprecated_ids = _validated_deprecated_ids(raw["deprecated_ids"], raw["id"])
+            deprecated_ids = _validated_deprecated_ids(raw["deprecated_ids"], entry_id)
             relations = []
-            for raw_relation in raw["relations"]:
+            for raw_relation in relations_raw:
+                if not isinstance(raw_relation, dict):
+                    raise ValueError("structural snapshot: relation row must be a dict")
                 relation_data = dict(raw_relation)
                 relation_data["attrs"] = deepcopy(relation_data.get("attrs", {}))
-                relations.append(Relation(**relation_data))
-            membership = deepcopy(raw["membership"])
+                try:
+                    relations.append(Relation(**relation_data))
+                except (PydanticValidationError, TypeError) as exc:
+                    raise ValueError("structural snapshot: invalid relation row") from exc
+            membership = deepcopy(membership_raw)
             out_refs = _out_refs_from(relations, membership)
             entry = IndexEntry(
                 uid=uid,
-                id=raw["id"],
-                kind=raw["kind"],
+                id=entry_id,
+                kind=kind,
                 deprecated_ids=frozenset(deprecated_ids),
                 out_refs=out_refs,
                 membership=membership,
