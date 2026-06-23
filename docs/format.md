@@ -41,8 +41,11 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
   alias never silently removes the renamed live node. Inbound references to a deleted node remain
   as dangling — retained in the live index and on disk — and are surfaced by `dangling()`.
 
-### Known kernel limitations (resolved in later plans)
-- The index is in-memory and rebuilt on `Corpus(root)` construction; no on-disk persistence yet.
+### Known kernel limitations
+- Python index persistence is a disposable cache: files remain the source of truth, and
+  `Corpus(root)` reconciles the snapshot against current file hashes before serving indexes.
+  TypeScript snapshot persistence is not implemented yet; future TypeScript persistence must
+  use the separate reserved `snapshot.ts.json` filename.
 - No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
   are tracked internally for rename but are not exposed as graph edges.
 
@@ -140,8 +143,8 @@ exposes `Corpus.search(query, limit=None) -> list[SearchHit]`.
   (`fixtures/search.oracle.json`) pin ranked ids and 6-dp scores; both languages
   build the index and assert equality. Scores are not claimed bit-identical.
 
-This is in-memory and rebuilt on `Corpus` construction; on-disk persistence is a
-later plan.
+Python persistence for the derived indexes is described below; TypeScript still rebuilds the
+full-text index in memory until future `snapshot.ts.json` persistence is implemented.
 
 ### TypeScript full-text search
 
