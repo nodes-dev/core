@@ -14,6 +14,7 @@ from nodes.kernel.similarity import Embedder, SimilarHit, Vector, VectorCache, V
 from nodes.kernel.snapshot import (
     ManifestEntry,
     Snapshot,
+    hash_bytes,
     iter_corpus_files,
     load_snapshot,
     write_snapshot,
@@ -121,19 +122,9 @@ class Corpus:
             new_manifest[path] = ManifestEntry(path=path, sha256=sha, uid=node.uid)
         self.manifest = new_manifest
 
-    def _current_manifest(self) -> list[ManifestEntry]:
-        by_uid = self.index.by_uid
-        manifest = []
-        for f in iter_corpus_files(self.store.root):
-            node = node_from_markdown(f.data.decode("utf-8"))
-            if node.uid in by_uid:
-                manifest.append(ManifestEntry(path=f.path, sha256=f.sha256, uid=node.uid))
-        return manifest
-
     def flush_index(self) -> None:
-        manifest = sorted(self._current_manifest(), key=lambda m: m.path)
+        manifest = sorted(self.manifest.values(), key=lambda m: m.path)
         write_snapshot(self.store.root, manifest, self.index, self.search_index, self.vector_index)
-        self.manifest = {m.path: m for m in manifest}
 
     def add(self, node: Node) -> Node:
         if self.registry is not None:
@@ -143,11 +134,13 @@ class Corpus:
         if self.vector_index is not None:
             assert self.embedder is not None and self.vector_cache is not None
             prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
-        self.store.write_file(node)
+        path = self.store.write_file(node)
         self.index.upsert(node)
         self.search_index.upsert(node)
         if self.vector_index is not None and prepared is not None:
             self.vector_index.commit(node, prepared)
+        rel_path = path.relative_to(self.store.root).as_posix()
+        self.manifest[rel_path] = ManifestEntry(path=rel_path, sha256=hash_bytes(path.read_bytes()), uid=node.uid)
         return node
 
     def get(self, ref: str) -> Node:

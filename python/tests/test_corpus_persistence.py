@@ -38,7 +38,8 @@ def test_round_trip_matches_fresh_rebuild(tmp_path):
     c.flush_index()
     assert snapshot_path(tmp_path).is_file()
     loaded = Corpus(tmp_path)  # loads + reconciles (no on-disk changes)
-    fresh = Corpus(tmp_path)  # also loads, identical
+    snapshot_path(tmp_path).unlink()
+    fresh = Corpus(tmp_path)  # full rebuild, identical
     assert _results(loaded) == _results(c)
     assert _results(loaded) == _results(fresh)
 
@@ -59,6 +60,18 @@ def test_reconcile_after_direct_disk_edit(tmp_path):
     c.store.path_for("topic:b").write_text(node_to_markdown(b_node), encoding="utf-8")
     reconciled = Corpus(tmp_path)
     assert [(h.id, h.uid) for h in reconciled.search("delta")] == [("topic:b", b_node.uid)]
+
+
+def test_flush_index_uses_live_manifest_not_disk_rebuild(tmp_path):
+    c = _seed(tmp_path)
+    c.flush_index()
+    # Edit topic/b.md directly on disk, then flush the stale in-memory corpus.
+    b_node = c.store.read_file("topic:b")
+    b_node.body = "beta zeta"
+    c.store.path_for("topic:b").write_text(node_to_markdown(b_node), encoding="utf-8")
+    c.flush_index()
+    reloaded = Corpus(tmp_path)
+    assert [(h.id, h.uid) for h in reloaded.search("zeta")] == [("topic:b", b_node.uid)]
 
 
 def test_reconcile_added_and_deleted_files(tmp_path):
