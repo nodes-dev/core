@@ -189,7 +189,7 @@ similarity APIs raise `EmbedderRequiredError`.
   (`fixtures/similarity.oracle.json`) pin ranked ids and 6-dp scores. Because
   model embeddings are not portable across languages, the *vectors* are frozen
   (not computed); both languages inject a lookup embedder over the frozen vectors
-  and assert identical rankings. On-disk index persistence is a later plan.
+  and assert identical rankings.
 
 ### TypeScript similarity index
 
