@@ -77,6 +77,15 @@ describe("VectorIndex snapshot", () => {
     expect(() => VectorIndex.fromDict(d)).toThrow();
   });
 
+  it("rejects a numeric namespace when there are no vectors", () => {
+    // Guards the `typeof namespace !== "string"` check in the no-vectors branch: a numeric
+    // namespace would otherwise slip through validateNamespace via RegExp string coercion
+    // (42 -> "42" matches NAMESPACE_RE) and be stored as a non-string.
+    const d = new VectorIndex().toDict();
+    (d as { namespace: unknown }).namespace = 42;
+    expect(() => VectorIndex.fromDict(d)).toThrow();
+  });
+
   it("rejects an invalid hashByUid value", () => {
     const d = seed().toDict();
     const uid = Object.keys(d.hashByUid)[0];

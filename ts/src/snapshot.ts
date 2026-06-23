@@ -235,8 +235,13 @@ export function loadSnapshot(root: string, embedderNamespace: string | null): Sn
     }
 
     return { manifest, index, searchIndex, vectorIndex };
-  } catch {
-    // loadSnapshot only ever reads the cache file, so any failure is a cache problem -> rebuild.
+  } catch (e) {
+    // loadSnapshot only ever reads the cache file, so any thrown Error is a cache problem
+    // (absent/locked file, malformed JSON, failed integrity check) -> rebuild. This is the
+    // closest faithful mirror of Python's `except (OSError, ValueError)`: every cache-unusable
+    // signal here surfaces as an Error subclass, while JS's error taxonomy gives no class-based
+    // way to separate them further. A non-Error throw is not a cache signal — rethrow it.
+    if (!(e instanceof Error)) throw e;
     return null;
   }
 }
