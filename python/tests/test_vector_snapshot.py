@@ -95,4 +95,85 @@ def test_from_dict_rejects_dim_length_mismatch():
 
 def test_from_dict_rejects_non_null_dim_when_empty():
     with pytest.raises(ValueError):
-        VectorIndex.from_dict({"namespace": "n", "dim": 2, "vectors": {}, "id_by_uid": {}, "hash_by_uid": {}})
+        VectorIndex.from_dict(
+            {"namespace": "n", "dim": 2, "vectors": {}, "id_by_uid": {}, "hash_by_uid": {}}
+        )
+
+
+def test_from_dict_rejects_zero_dim_with_vector():
+    with pytest.raises(ValueError):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 0,
+                "vectors": {"u1": []},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )
+
+
+def test_from_dict_rejects_bool_vector_entry():
+    with pytest.raises(ValueError):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": [True, 0.0]},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf")])
+def test_from_dict_rejects_non_finite_vector_entry(bad_value: float):
+    with pytest.raises(ValueError):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": [bad_value, 0.0]},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )
+
+
+def test_from_dict_rejects_non_list_vector_container():
+    with pytest.raises(ValueError):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": (1.0, 0.0)},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )
+
+
+def test_from_dict_rejects_null_namespace_when_vectors_present():
+    with pytest.raises(ValueError):
+        VectorIndex.from_dict(
+            {
+                "namespace": None,
+                "dim": 2,
+                "vectors": {"u1": [1.0, 0.0]},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )
+
+
+def test_from_dict_rejects_invalid_non_null_namespace():
+    with pytest.raises(ValueError):
+        VectorIndex.from_dict(
+            {
+                "namespace": "../bad",
+                "dim": 2,
+                "vectors": {"u1": [1.0, 0.0]},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": "h"},
+            }
+        )

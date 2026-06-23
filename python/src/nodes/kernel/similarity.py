@@ -163,21 +163,34 @@ class VectorIndex:
     @classmethod
     def from_dict(cls, d: dict) -> "VectorIndex":
         idx = cls()
-        idx.namespace = d["namespace"]
-        vectors = {uid: tuple(float(x) for x in vec) for uid, vec in d["vectors"].items()}
+        namespace = d["namespace"]
+        vectors_raw = d["vectors"]
         id_by_uid = dict(d["id_by_uid"])
         hash_by_uid = dict(d["hash_by_uid"])
-        if not (set(vectors) == set(id_by_uid) == set(hash_by_uid)):
+        if not (set(vectors_raw) == set(id_by_uid) == set(hash_by_uid)):
             raise ValueError("vector snapshot: vectors/id_by_uid/hash_by_uid uid sets differ")
         dim = d["dim"]
-        if vectors:
-            if not isinstance(dim, int) or isinstance(dim, bool):
-                raise ValueError("vector snapshot: dim must be an int when vectors are present")
-            for vec in vectors.values():
-                if len(vec) != dim:
-                    raise ValueError("vector snapshot: vector length != dim")
+        if vectors_raw:
+            if not isinstance(namespace, str):
+                raise ValueError("vector snapshot: namespace must be a string when vectors are present")
+            validate_namespace(namespace)
+            if not isinstance(dim, int) or isinstance(dim, bool) or dim <= 0:
+                raise ValueError("vector snapshot: dim must be a positive int when vectors are present")
         elif dim is not None:
             raise ValueError("vector snapshot: dim must be null when there are no vectors")
+        elif namespace is not None:
+            validate_namespace(namespace)
+        vectors: dict[str, Vector] = {}
+        for uid, raw_vec in vectors_raw.items():
+            if not isinstance(raw_vec, list):
+                raise ValueError("vector snapshot: vector must be a list")
+            vec_values = tuple(raw_vec)
+            _validate_finite(vec_values)
+            vec = tuple(float(x) for x in vec_values)
+            if len(vec) != dim:
+                raise ValueError("vector snapshot: vector length != dim")
+            vectors[uid] = vec
+        idx.namespace = namespace
         idx.vectors = vectors
         idx.id_by_uid = id_by_uid
         idx.hash_by_uid = hash_by_uid
