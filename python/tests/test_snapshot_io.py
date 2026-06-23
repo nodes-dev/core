@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import FrozenInstanceError
+
+import pytest
 
 from nodes.kernel.snapshot import (
     SNAPSHOT_LANG,
@@ -54,3 +57,5 @@ def test_read_json_missing_returns_none(tmp_path):
 def test_manifest_entry_is_frozen():
     e = ManifestEntry(path="a.md", sha256="0" * 64, uid="u1")
     assert (e.path, e.sha256, e.uid) == ("a.md", "0" * 64, "u1")
+    with pytest.raises(FrozenInstanceError):
+        setattr(e, "path", "b.md")
