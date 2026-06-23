@@ -186,5 +186,21 @@ similarity APIs raise `EmbedderRequiredError`.
   (`fixtures/similarity.oracle.json`) pin ranked ids and 6-dp scores. Because
   model embeddings are not portable across languages, the *vectors* are frozen
   (not computed); both languages inject a lookup embedder over the frozen vectors
-  and assert identical rankings. On-disk index persistence and the TypeScript
-  port are later plans.
+  and assert identical rankings. On-disk index persistence is a later plan.
+
+### TypeScript similarity index
+
+The TypeScript kernel (`ts/src/similarity.ts`) is a semantic port of `nodes.kernel.similarity`:
+the same `Embedder` seam (`cacheNamespace`, `embed`), `embedText` contract, content-addressed
+raw-vector cache (`<root>/.nodes-index/vectors/<namespace>/<sha256>.json`, atomic writes), and an
+in-memory `VectorIndex` of L2-normalized vectors with exact brute-force cosine. It is opt-in via
+`new Corpus(root, registry?, embedder?)`; without an embedder the similarity APIs throw
+`EmbedderRequiredError`. Queries are `Corpus.similar(ref, k?)` (excludes the node itself),
+`Corpus.queryVector(vec, k?)`, and `Corpus.similarText(text, k?)`, returning `SimilarHit[]`
+sorted by the shared 6-decimal `scoreKey` (in `ts/src/ranking.ts`) then `id`.
+
+Because model embeddings are not portable across languages, parity is pinned by the same frozen
+fixtures Python committed: `fixtures/similarity-corpus/`, `fixtures/similarity.vectors.json`, and
+`fixtures/similarity.oracle.json`. Both languages inject a lookup embedder over the frozen vectors
+and assert identical ranked ids and 6-dp scores; scores are compared numerically (not
+string-compared). On-disk index persistence remains a later plan.
