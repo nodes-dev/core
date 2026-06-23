@@ -107,6 +107,10 @@ def _validated_membership(raw: object) -> dict | None:
     if not isinstance(raw, dict):
         raise ValueError("structural snapshot: entry membership must be a dict or null")
 
+    shape = raw.get("shape")
+    if not isinstance(shape, str):
+        raise ValueError("structural snapshot: membership shape must be a string")
+
     members = raw.get("members")
     if members is not None:
         if isinstance(members, list):
@@ -125,12 +129,27 @@ def _validated_membership(raw: object) -> dict | None:
         for edge in edges:
             if not isinstance(edge, dict):
                 raise ValueError("structural snapshot: membership edge must be a dict")
-            source = edge.get("source")
-            target = edge.get("target")
-            if source is not None and not isinstance(source, str):
+            if not isinstance(edge.get("source"), str):
                 raise ValueError("structural snapshot: membership edge source must be a string")
-            if target is not None and not isinstance(target, str):
+            if not isinstance(edge.get("predicate"), str):
+                raise ValueError("structural snapshot: membership edge predicate must be a string")
+            if not isinstance(edge.get("target"), str):
                 raise ValueError("structural snapshot: membership edge target must be a string")
+            directed = edge.get("directed")
+            if "directed" in edge and not isinstance(directed, bool):
+                raise ValueError("structural snapshot: membership edge directed must be a bool")
+            weight = edge.get("weight")
+            if "weight" in edge and (
+                isinstance(weight, bool) or not isinstance(weight, (int, float))
+            ):
+                raise ValueError("structural snapshot: membership edge weight must be numeric")
+            attrs = edge.get("attrs")
+            if "attrs" in edge and not isinstance(attrs, dict):
+                raise ValueError("structural snapshot: membership edge attrs must be a dict")
+            try:
+                Relation(**edge)
+            except (PydanticValidationError, TypeError) as exc:
+                raise ValueError("structural snapshot: invalid membership edge") from exc
 
     return deepcopy(raw)
 

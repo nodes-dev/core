@@ -199,7 +199,7 @@ def test_malformed_structural_entry_id_returns_none(tmp_path):
 def test_malformed_structural_membership_members_string_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
-    doc["structural"]["entries"][0]["membership"] = {"members": "topic:a"}
+    doc["structural"]["entries"][0]["membership"] = {"shape": "graph", "members": "topic:a"}
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None
@@ -209,7 +209,8 @@ def test_malformed_structural_membership_edges_dict_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
     doc["structural"]["entries"][0]["membership"] = {
-        "edges": {"source": "topic:a", "target": "topic:b"}
+        "shape": "graph",
+        "edges": {"source": "topic:a", "predicate": "to", "target": "topic:b"},
     }
     write_json_atomic(snapshot_path(tmp_path), doc)
 
@@ -220,8 +221,36 @@ def test_malformed_structural_membership_edge_source_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
     doc["structural"]["entries"][0]["membership"] = {
-        "edges": [{"source": 123, "target": "topic:b"}]
+        "shape": "graph",
+        "edges": [{"source": 123, "predicate": "to", "target": "topic:b"}],
     }
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_membership_missing_shape_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["structural"]["entries"][0]["membership"] = {"members": []}
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+@pytest.mark.parametrize(
+    "edge",
+    [
+        {"predicate": "to", "target": "topic:b"},
+        {"source": "topic:a", "target": "topic:b"},
+        {"source": None, "predicate": "to", "target": "topic:b"},
+        {"source": "topic:a", "predicate": 123, "target": "topic:b"},
+    ],
+)
+def test_malformed_structural_membership_edge_schema_returns_none(tmp_path, edge):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["structural"]["entries"][0]["membership"] = {"shape": "graph", "edges": [edge]}
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None

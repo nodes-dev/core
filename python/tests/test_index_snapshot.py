@@ -137,7 +137,7 @@ def test_from_dict_rejects_invalid_membership_container():
 )
 def test_from_dict_rejects_invalid_membership_members(members):
     d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {"members": members}
+    d["entries"][0]["membership"] = {"shape": "graph", "members": members}
     with pytest.raises(ValueError, match="structural snapshot:"):
         Index.from_dict(d)
 
@@ -147,13 +147,39 @@ def test_from_dict_rejects_invalid_membership_members(members):
     [
         {"source": "topic:a", "target": "topic:b"},
         ["not an edge"],
-        [{"source": 123, "target": "topic:b"}],
-        [{"source": "topic:a", "target": 123}],
+        [{"source": 123, "predicate": "to", "target": "topic:b"}],
+        [{"source": "topic:a", "predicate": "to", "target": 123}],
     ],
 )
 def test_from_dict_rejects_invalid_membership_edges(edges):
     d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {"edges": edges}
+    d["entries"][0]["membership"] = {"shape": "graph", "edges": edges}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_membership_missing_shape():
+    d = _single_entry_snapshot()
+    d["entries"][0]["membership"] = {"members": []}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+@pytest.mark.parametrize(
+    "edge",
+    [
+        {"predicate": "to", "target": "topic:b"},
+        {"source": "topic:a", "target": "topic:b"},
+        {"source": None, "predicate": "to", "target": "topic:b"},
+        {"source": "topic:a", "predicate": 123, "target": "topic:b"},
+        {"source": "topic:a", "predicate": "to", "target": "topic:b", "directed": "yes"},
+        {"source": "topic:a", "predicate": "to", "target": "topic:b", "weight": True},
+        {"source": "topic:a", "predicate": "to", "target": "topic:b", "attrs": []},
+    ],
+)
+def test_from_dict_rejects_invalid_membership_edge_schema(edge):
+    d = _single_entry_snapshot()
+    d["entries"][0]["membership"] = {"shape": "graph", "edges": [edge]}
     with pytest.raises(ValueError, match="structural snapshot:"):
         Index.from_dict(d)
 
@@ -227,6 +253,7 @@ def test_to_dict_deep_copies_relation_attrs_and_membership():
                 ],
                 facets={
                     "membership": {
+                        "shape": "graph",
                         "members": ["topic:b"],
                         "edges": [
                             {
@@ -271,6 +298,7 @@ def test_from_dict_deep_copies_relation_attrs_and_membership():
                 ],
                 facets={
                     "membership": {
+                        "shape": "graph",
                         "members": ["topic:b"],
                         "edges": [
                             {
