@@ -116,6 +116,20 @@ def test_from_dict_rejects_zero_posting_tf_pair():
         )
 
 
+def test_from_dict_rejects_title_tf_greater_than_title_length():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict(
+            {"postings": {"x": {"u1": [2, 0]}}, "lengths": {"u1": [1, 0]}, "id_by_uid": {"u1": "topic:a"}}
+        )
+
+
+def test_from_dict_rejects_body_tf_greater_than_body_length():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict(
+            {"postings": {"x": {"u1": [0, 2]}}, "lengths": {"u1": [0, 1]}, "id_by_uid": {"u1": "topic:a"}}
+        )
+
+
 @pytest.mark.parametrize("value", ([1.9, 0], ["1", 0], [True, 0], [-1, 0], [1], (1, 0)))
 def test_from_dict_rejects_malformed_length_values(value):
     with pytest.raises(ValueError):

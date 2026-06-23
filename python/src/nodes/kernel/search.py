@@ -162,6 +162,11 @@ class SearchIndex:
                     raise ValueError(
                         f"search snapshot: posting tf for term {term!r} uid {uid!r} must not be all zero"
                     )
+                title_len, body_len = lengths[uid]
+                if tf_pair[0] > title_len or tf_pair[1] > body_len:
+                    raise ValueError(
+                        f"search snapshot: posting tf for term {term!r} uid {uid!r} exceeds field length"
+                    )
                 bucket[uid] = tf_pair
             postings[term] = bucket
         idx.postings = postings

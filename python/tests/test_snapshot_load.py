@@ -303,6 +303,16 @@ def test_malformed_search_empty_posting_bucket_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None
 
 
+def test_malformed_search_tf_greater_than_length_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    first_uid = doc["manifest"][0]["uid"]
+    doc["search"]["postings"]["ghost"] = {first_uid: [2, 0]}
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
 def test_no_embedder_ignores_corrupt_vectors_section(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
