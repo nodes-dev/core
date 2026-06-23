@@ -137,6 +137,16 @@ def test_from_dict_rejects_invalid_relation_schema():
         Index.from_dict(d)
 
 
+@pytest.mark.parametrize("weight", [True, float("nan"), float("inf"), "1.0"])
+def test_from_dict_rejects_invalid_relation_weight(weight):
+    d = _single_entry_snapshot()
+    d["entries"][0]["relations"] = [
+        {"source": "topic:a", "predicate": "relatesTo", "target": "topic:b", "weight": weight}
+    ]
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
 def test_from_dict_rejects_invalid_membership_container():
     d = _single_entry_snapshot()
     d["entries"][0]["membership"] = []

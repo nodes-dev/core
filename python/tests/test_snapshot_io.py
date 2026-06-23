@@ -117,6 +117,15 @@ def test_read_json_invalid_json_raises(tmp_path):
         read_json(p)
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_read_json_rejects_non_finite_constants(tmp_path, constant):
+    p = snapshot_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_text(f'{{"x": {constant}}}', encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid JSON constant"):
+        read_json(p)
+
+
 def test_corpus_file_is_frozen():
     e = CorpusFile(path="a.md", data=b"A", sha256=hash_bytes(b"A"))
     assert (e.path, e.data, e.sha256) == ("a.md", b"A", hash_bytes(b"A"))

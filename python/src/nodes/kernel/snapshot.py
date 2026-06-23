@@ -60,9 +60,13 @@ def write_json_atomic(path: Path, obj: dict) -> None:
     os.replace(tmp, path)
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant {value}")
+
+
 def read_json(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"), parse_constant=_reject_json_constant)
     except FileNotFoundError:
         if path.is_symlink():
             raise

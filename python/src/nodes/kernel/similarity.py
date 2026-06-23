@@ -206,6 +206,8 @@ class VectorIndex:
         elif dim is not None:
             raise ValueError("vector snapshot: dim must be null when there are no vectors")
         elif namespace is not None:
+            if not isinstance(namespace, str):
+                raise ValueError("vector snapshot: namespace must be a string when non-null")
             validate_namespace(namespace)
         vectors: dict[str, Vector] = {}
         for uid, raw_vec in vectors_raw.items():

@@ -278,3 +278,10 @@ def test_from_dict_rejects_invalid_non_null_namespace():
                 "hash_by_uid": {"u1": "h"},
             }
         )
+
+
+def test_from_dict_rejects_non_string_empty_namespace_with_value_error():
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {"namespace": 123, "dim": None, "vectors": {}, "id_by_uid": {}, "hash_by_uid": {}}
+        )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -155,6 +156,18 @@ def _validated_membership(raw: object) -> dict | None:
     return deepcopy(raw)
 
 
+def _validate_snapshot_weight(raw: dict, label: str) -> None:
+    if "weight" not in raw:
+        return
+    weight = raw["weight"]
+    if (
+        isinstance(weight, bool)
+        or not isinstance(weight, (int, float))
+        or not math.isfinite(weight)
+    ):
+        raise ValueError(f"structural snapshot: {label} weight must be a finite number")
+
+
 class Index:
     """In-memory structural index. Pure data; no file I/O."""
 
@@ -210,18 +223,20 @@ class Index:
     def to_dict(self) -> dict:
         entries = []
         for entry in self.by_uid.values():
-            relations = [
-                {
+            relations = []
+            for o in entry.out_refs:
+                if o.role != "relation_source" or o.relation is None:
+                    continue
+                relation = {
                     "source": o.relation.source,
                     "predicate": o.relation.predicate,
                     "target": o.relation.target,
                     "directed": o.relation.directed,
-                    "weight": o.relation.weight,
                     "attrs": deepcopy(o.relation.attrs),
                 }
-                for o in entry.out_refs
-                if o.role == "relation_source" and o.relation is not None
-            ]
+                if o.relation.weight is not None:
+                    relation["weight"] = o.relation.weight
+                relations.append(relation)
             entries.append(
                 {
                     "uid": entry.uid,
@@ -276,6 +291,7 @@ class Index:
             for raw_relation in relations_raw:
                 if not isinstance(raw_relation, dict):
                     raise ValueError("structural snapshot: relation row must be a dict")
+                _validate_snapshot_weight(raw_relation, "relation row")
                 relation_data = dict(raw_relation)
                 relation_data["attrs"] = deepcopy(relation_data.get("attrs", {}))
                 try:
