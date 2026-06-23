@@ -164,6 +164,11 @@ def _validate_snapshot_weight(raw: dict, label: str) -> None:
         raise ValueError(f"structural snapshot: {label} weight must be a finite number")
 
 
+def _validate_snapshot_directed(raw: dict, label: str) -> None:
+    if "directed" in raw and not isinstance(raw["directed"], bool):
+        raise ValueError(f"structural snapshot: {label} directed must be a bool")
+
+
 class Index:
     """In-memory structural index. Pure data; no file I/O."""
 
@@ -287,6 +292,7 @@ class Index:
             for raw_relation in relations_raw:
                 if not isinstance(raw_relation, dict):
                     raise ValueError("structural snapshot: relation row must be a dict")
+                _validate_snapshot_directed(raw_relation, "relation row")
                 _validate_snapshot_weight(raw_relation, "relation row")
                 relation_data = dict(raw_relation)
                 relation_data["attrs"] = deepcopy(relation_data.get("attrs", {}))

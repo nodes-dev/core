@@ -5,9 +5,11 @@ import pytest
 from nodes.kernel.corpus import Corpus
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.frontmatter import node_to_markdown
+from nodes.kernel.index import Index
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
-from nodes.kernel.snapshot import ManifestEntry, hash_bytes, load_snapshot, snapshot_path
+from nodes.kernel.search import SearchIndex
+from nodes.kernel.snapshot import ManifestEntry, hash_bytes, load_snapshot, snapshot_path, write_snapshot
 
 
 class TermEmbedder:
@@ -181,6 +183,31 @@ def test_corrupt_snapshot_silently_rebuilds(tmp_path):
     snapshot_path(tmp_path).write_text("{garbage", encoding="utf-8")
     rebuilt = Corpus(tmp_path)  # must not raise
     assert _results(rebuilt) == _results(c)
+
+
+def test_manifest_path_identity_mismatch_silently_rebuilds(tmp_path):
+    c = Corpus(tmp_path)
+    node = c.add(Node(id="topic:a", kind="topic", title="A", body="alpha"))
+    ghost = Node(id="topic:b", kind="topic", uid="b" * 32, title="B", body="beta")
+    write_snapshot(
+        tmp_path,
+        [
+            ManifestEntry(
+                path="topic/a.md",
+                sha256=hash_bytes(c.store.path_for("topic:a").read_bytes()),
+                uid=ghost.uid,
+            )
+        ],
+        Index.build([ghost]),
+        SearchIndex.build([ghost]),
+        None,
+    )
+
+    rebuilt = Corpus(tmp_path)
+
+    assert [(h.id, h.uid) for h in rebuilt.search("alpha")] == [("topic:a", node.uid)]
+    assert rebuilt.search("beta") == []
+    assert [n.id for n in rebuilt.all()] == ["topic:a"]
 
 
 def test_malformed_corpus_file_propagates(tmp_path):

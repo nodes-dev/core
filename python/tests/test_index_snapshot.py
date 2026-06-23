@@ -147,6 +147,15 @@ def test_from_dict_rejects_invalid_relation_weight(weight):
         Index.from_dict(d)
 
 
+def test_from_dict_rejects_invalid_relation_directed():
+    d = _single_entry_snapshot()
+    d["entries"][0]["relations"] = [
+        {"source": "topic:a", "predicate": "relatesTo", "target": "topic:b", "directed": "false"}
+    ]
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
 def test_from_dict_rejects_invalid_membership_container():
     d = _single_entry_snapshot()
     d["entries"][0]["membership"] = []

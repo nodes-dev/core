@@ -197,6 +197,15 @@ def test_manifest_section_bijection_violation_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None
 
 
+def test_manifest_path_must_match_structural_id_for_uid(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][0]["path"] = "topic/wrong.md"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
 def test_malformed_structural_entries_container_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
@@ -246,6 +255,15 @@ def test_malformed_structural_relation_weight_returns_none(tmp_path, weight):
     doc = _snapshot_doc(tmp_path)
     doc["structural"]["entries"][0]["relations"][0]["weight"] = weight
     snapshot_path(tmp_path).write_text(json.dumps(doc), encoding="utf-8")
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_relation_directed_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["structural"]["entries"][0]["relations"][0]["directed"] = "false"
+    write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None
 

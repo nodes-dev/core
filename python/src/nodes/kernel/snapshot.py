@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index
 from nodes.kernel.search import SearchIndex
 from nodes.kernel.similarity import VectorIndex
@@ -144,6 +145,11 @@ def _validate_manifest_path(path: str) -> None:
         raise ValueError("snapshot manifest row path must be a root-relative POSIX .md path")
 
 
+def _path_for_node_id(node_id: str) -> str:
+    parsed = NodeId.parse(node_id)
+    return f"{parsed.kind}/{parsed.slug.replace(':', '__')}.md"
+
+
 def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot | None:
     try:
         doc = read_json(snapshot_path(root))
@@ -164,6 +170,9 @@ def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot 
         if set(index.by_uid) != manifest_uids:
             return None
         expected_ids = {uid: entry.id for uid, entry in index.by_uid.items()}
+        for m in manifest:
+            if m.path != _path_for_node_id(expected_ids[m.uid]):
+                raise ValueError("snapshot manifest path does not match structural id")
 
         search_index = SearchIndex.from_dict(doc["search"])
         if set(search_index.lengths) != manifest_uids:
