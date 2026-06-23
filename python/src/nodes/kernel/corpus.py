@@ -252,18 +252,24 @@ class Corpus:
 
         # --- prepare similarity vector (fail before any disk write) ---
         prepared = None
+        prepared_referrers = []
         if self.vector_index is not None:
             assert self.embedder is not None and self.vector_cache is not None
             prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
+            for referrer in referrers:
+                prepared_referrers.append(self.vector_index.prepare(referrer, self.embedder, self.vector_cache))
 
         # --- commit: renamed node first (crash-atomic), then referrers ---
         new_path = self.store.write_file(node)
         if old_path != new_path:
             self.store.delete_file(old_id)
         self.index.upsert(node)
-        for referrer in referrers:
+        for i, referrer in enumerate(referrers):
             self.store.write_file(referrer)
             self.index.upsert(referrer)
+            self.search_index.upsert(referrer)
+            if self.vector_index is not None:
+                self.vector_index.commit(referrer, prepared_referrers[i])
 
         self.search_index.upsert(node)
         if self.vector_index is not None and prepared is not None:

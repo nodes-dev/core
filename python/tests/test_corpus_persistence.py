@@ -10,6 +10,13 @@ from nodes.kernel.relations import relates_to
 from nodes.kernel.snapshot import ManifestEntry, hash_bytes, load_snapshot, snapshot_path
 
 
+class TermEmbedder:
+    cache_namespace = "term-v1"
+
+    def embed(self, texts: list[str]) -> list[tuple[float, float]]:
+        return [(1.0, 0.0) if "omega" in text else (0.0, 1.0) for text in texts]
+
+
 def _seed(root) -> Corpus:
     c = Corpus(root)
     c.add(
@@ -33,9 +40,9 @@ def _results(c: Corpus) -> dict:
     }
 
 
-def _fresh_rebuild(root) -> Corpus:
+def _fresh_rebuild(root, embedder=None) -> Corpus:
     snapshot_path(root).unlink()
-    return Corpus(root)
+    return Corpus(root, embedder=embedder)
 
 
 def _loaded_manifest(root) -> dict[str, ManifestEntry]:
@@ -110,6 +117,51 @@ def test_rename_flush_writes_updated_manifest_matching_fresh_rebuild(tmp_path):
     ]
     fresh = _fresh_rebuild(tmp_path)
     assert _results(loaded) == _results(fresh)
+
+
+def test_rename_refreshes_search_for_externally_edited_referrer_before_manifest_record(tmp_path):
+    c = _seed(tmp_path)
+    c.flush_index()
+    loaded = Corpus(tmp_path)
+    referrer = loaded.store.read_file("topic:a")
+    referrer.body = "alpha gamma omega"
+    loaded.store.path_for("topic:a").write_text(node_to_markdown(referrer), encoding="utf-8")
+    loaded.rename("topic:b", "topic:c")
+    loaded.flush_index()
+    reloaded = Corpus(tmp_path)
+    fresh = _fresh_rebuild(tmp_path)
+    assert [(h.id, h.uid) for h in reloaded.search("omega")] == [
+        (h.id, h.uid) for h in fresh.search("omega")
+    ] == [("topic:a", referrer.uid)]
+
+
+def test_rename_refreshes_vectors_for_externally_edited_referrer_before_manifest_record(tmp_path):
+    embedder = TermEmbedder()
+    c = Corpus(tmp_path, embedder=embedder)
+    c.add(
+        Node(
+            id="topic:a",
+            kind="topic",
+            title="A",
+            body="alpha gamma",
+            relations=[relates_to("topic:a", "topic:b")],
+        )
+    )
+    c.add(Node(id="topic:b", kind="topic", title="B", body="beta gamma"))
+    c.flush_index()
+    loaded = Corpus(tmp_path, embedder=embedder)
+    referrer = loaded.store.read_file("topic:a")
+    referrer.body = "alpha gamma omega"
+    loaded.store.path_for("topic:a").write_text(node_to_markdown(referrer), encoding="utf-8")
+    loaded.rename("topic:b", "topic:c")
+    loaded.flush_index()
+    reloaded = Corpus(tmp_path, embedder=embedder)
+    fresh = _fresh_rebuild(tmp_path, embedder=embedder)
+    reloaded_hit = reloaded.query_vector((1.0, 0.0), k=1)[0]
+    fresh_hit = fresh.query_vector((1.0, 0.0), k=1)[0]
+    assert (reloaded_hit.id, reloaded_hit.uid) == (fresh_hit.id, fresh_hit.uid) == ("topic:a", referrer.uid)
+    assert reloaded_hit.score == pytest.approx(fresh_hit.score)
+    assert reloaded_hit.score == pytest.approx(1.0)
 
 
 def test_reconcile_added_and_deleted_files(tmp_path):
