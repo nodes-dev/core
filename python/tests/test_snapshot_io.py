@@ -89,6 +89,18 @@ def test_read_json_directory_raises(tmp_path):
         read_json(p)
 
 
+def test_read_json_broken_symlink_raises(tmp_path):
+    p = snapshot_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    try:
+        p.symlink_to(p.parent / "missing-target.json")
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported: {exc}")
+
+    with pytest.raises(FileNotFoundError):
+        read_json(p)
+
+
 def test_read_json_invalid_json_raises(tmp_path):
     p = snapshot_path(tmp_path)
     p.parent.mkdir(parents=True)

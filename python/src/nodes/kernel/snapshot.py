@@ -52,6 +52,9 @@ def write_json_atomic(path: Path, obj: dict) -> None:
 
 
 def read_json(path: Path) -> dict | None:
-    if not path.exists():
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if path.is_symlink():
+            raise
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
