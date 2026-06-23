@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { CollisionError } from "./errors.js";
 import type { Node } from "./node.js";
+import { scoreKey } from "./ranking.js";
 
 export type Vector = number[];
 
@@ -69,6 +70,12 @@ export interface SimilarHit {
   id: string;
   uid: string;
   score: number;
+}
+
+function validateK(k?: number): void {
+  if (k !== undefined && (!Number.isInteger(k) || k <= 0)) {
+    throw new RangeError(`k must be a positive integer or undefined, got ${JSON.stringify(k)}`);
+  }
 }
 
 /** Content-addressed on-disk cache of RAW embedder output, namespaced per embedder.
@@ -198,5 +205,56 @@ export class VectorIndex {
     this.vectors.delete(uid);
     this.idByUid.delete(uid);
     this.hashByUid.delete(uid);
+  }
+
+  queryVector(vec: Vector, k?: number): SimilarHit[] {
+    validateK(k);
+    return this.rank(this.prepareQuery(vec), k, null);
+  }
+
+  similar(uid: string, k?: number): SimilarHit[] {
+    validateK(k);
+    const vec = this.vectors.get(uid);
+    if (vec === undefined) throw new Error(`uid ${JSON.stringify(uid)} not in vector index`);
+    return this.rank(vec, k, uid);
+  }
+
+  similarText(text: string, embedder: Embedder, k?: number): SimilarHit[] {
+    validateK(k);
+    if (this.namespace !== null && embedder.cacheNamespace !== this.namespace) {
+      throw new RangeError(
+        `embedder namespace ${JSON.stringify(embedder.cacheNamespace)} != index namespace ${JSON.stringify(this.namespace)}`,
+      );
+    }
+    const embedded = embedder.embed([text]);
+    if (embedded.length !== 1) {
+      throw new RangeError(`embedder returned ${embedded.length} vectors for 1 input`);
+    }
+    return this.queryVector(embedded[0], k);
+  }
+
+  private prepareQuery(vec: Vector): Vector {
+    validateFinite(vec);
+    if (this.dim !== null && vec.length !== this.dim) {
+      throw new RangeError(`query dim ${vec.length} != index dim ${this.dim}`);
+    }
+    return normalize(vec);
+  }
+
+  private rank(queryVec: Vector, k: number | undefined, excludeUid: string | null): SimilarHit[] {
+    const hits: SimilarHit[] = [];
+    for (const [uid, vec] of this.vectors) {
+      if (uid === excludeUid) continue;
+      let dot = 0;
+      for (let i = 0; i < queryVec.length; i++) dot += queryVec[i] * vec[i];
+      hits.push({ id: this.idByUid.get(uid) as string, uid, score: dot });
+    }
+    hits.sort((a, b) => {
+      const ka = scoreKey(a.score);
+      const kb = scoreKey(b.score);
+      if (ka !== kb) return kb - ka; // scoreKey descending
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; // id ascending
+    });
+    return k === undefined ? hits : hits.slice(0, k);
   }
 }
