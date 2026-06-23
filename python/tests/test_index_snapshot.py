@@ -4,7 +4,7 @@ import pytest
 
 from nodes.kernel.index import Index
 from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
+from nodes.kernel.relations import Relation, relates_to
 
 # Reuse the equivalence normalizer that already pins structural state.
 from tests.test_index_rebuild_equivalence import _normalize
@@ -50,6 +50,9 @@ def test_round_trip_preserves_inbound_and_dangling_dedup():
     idx = Index.build(nodes)
     restored = Index.from_dict(idx.to_dict())
     a_uid = restored.id_to_uid["topic:a"]
+    source_ref = next(o for o in restored.by_uid[a_uid].out_refs if o.role == "relation_source")
+    target_ref = next(o for o in restored.by_uid[a_uid].out_refs if o.role == "relation_target")
+    assert source_ref.relation is target_ref.relation
     assert restored.outbound_edges(a_uid) == idx.outbound_edges(a_uid)
     assert len(restored.dangling_edges()) == len(idx.dangling_edges()) == 1
 
@@ -92,6 +95,112 @@ def test_from_dict_rejects_deprecated_id_collision():
     d["entries"][1]["deprecated_ids"] = [d["entries"][0]["id"]]
     with pytest.raises(ValueError):
         Index.from_dict(d)
+
+
+@pytest.mark.parametrize("deprecated_ids", ["topic:old", ["topic:old", 1]])
+def test_from_dict_rejects_invalid_deprecated_ids(deprecated_ids):
+    idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
+    d = idx.to_dict()
+    d["entries"][0]["deprecated_ids"] = deprecated_ids
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+@pytest.mark.parametrize("deprecated_ids", [["topic:a"], ["topic:old", "topic:old"]])
+def test_from_dict_rejects_same_entry_identity_collisions(deprecated_ids):
+    idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
+    d = idx.to_dict()
+    d["entries"][0]["deprecated_ids"] = deprecated_ids
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_to_dict_deep_copies_relation_attrs_and_membership():
+    idx = Index.build(
+        [
+            Node(
+                id="topic:a",
+                kind="topic",
+                title="A",
+                relations=[
+                    Relation(
+                        source="topic:a",
+                        predicate="relatesTo",
+                        target="topic:b",
+                        attrs={"meta": {"score": 1}},
+                    )
+                ],
+                facets={
+                    "membership": {
+                        "members": ["topic:b"],
+                        "edges": [
+                            {
+                                "source": "topic:a",
+                                "predicate": "to",
+                                "target": "topic:b",
+                                "attrs": {"label": "old"},
+                            }
+                        ],
+                    }
+                },
+            )
+        ]
+    )
+
+    d = idx.to_dict()
+    d["entries"][0]["relations"][0]["attrs"]["meta"]["score"] = 2
+    d["entries"][0]["membership"]["edges"][0]["attrs"]["label"] = "new"
+
+    entry = next(iter(idx.by_uid.values()))
+    relation = next(o.relation for o in entry.out_refs if o.role == "relation_source")
+    assert relation is not None
+    assert relation.attrs["meta"]["score"] == 1
+    assert entry.membership is not None
+    assert entry.membership["edges"][0]["attrs"]["label"] == "old"
+
+
+def test_from_dict_deep_copies_relation_attrs_and_membership():
+    d = Index.build(
+        [
+            Node(
+                id="topic:a",
+                kind="topic",
+                title="A",
+                relations=[
+                    Relation(
+                        source="topic:a",
+                        predicate="relatesTo",
+                        target="topic:b",
+                        attrs={"meta": {"score": 1}},
+                    )
+                ],
+                facets={
+                    "membership": {
+                        "members": ["topic:b"],
+                        "edges": [
+                            {
+                                "source": "topic:a",
+                                "predicate": "to",
+                                "target": "topic:b",
+                                "attrs": {"label": "old"},
+                            }
+                        ],
+                    }
+                },
+            )
+        ]
+    ).to_dict()
+
+    restored = Index.from_dict(d)
+    d["entries"][0]["relations"][0]["attrs"]["meta"]["score"] = 2
+    d["entries"][0]["membership"]["edges"][0]["attrs"]["label"] = "new"
+
+    entry = next(iter(restored.by_uid.values()))
+    relation = next(o.relation for o in entry.out_refs if o.role == "relation_source")
+    assert relation is not None
+    assert relation.attrs["meta"]["score"] == 1
+    assert entry.membership is not None
+    assert entry.membership["edges"][0]["attrs"]["label"] == "old"
 
 
 def test_extract_out_refs_still_works_after_refactor():

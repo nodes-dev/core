@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -74,6 +75,28 @@ def _extract_out_refs(node: Node) -> list[OutRef]:
     return _out_refs_from(node.relations, node.facets.get(MEMBERSHIP))
 
 
+def _validated_deprecated_ids(raw: object, entry_id: str) -> list[str]:
+    if not isinstance(raw, list):
+        raise ValueError("structural snapshot: deprecated_ids must be a list of strings")
+
+    deprecated_ids: list[str] = []
+    seen: set[str] = set()
+    for dep in raw:
+        if not isinstance(dep, str):
+            raise ValueError("structural snapshot: deprecated_ids must be a list of strings")
+        if dep == entry_id:
+            raise ValueError(
+                f"structural snapshot: identity claim {dep!r} is both live and deprecated in one entry"
+            )
+        if dep in seen:
+            raise ValueError(
+                f"structural snapshot: duplicate deprecated identity claim {dep!r} in one entry"
+            )
+        seen.add(dep)
+        deprecated_ids.append(dep)
+    return deprecated_ids
+
+
 class Index:
     """In-memory structural index. Pure data; no file I/O."""
 
@@ -136,7 +159,7 @@ class Index:
                     "target": o.relation.target,
                     "directed": o.relation.directed,
                     "weight": o.relation.weight,
-                    "attrs": o.relation.attrs,
+                    "attrs": deepcopy(o.relation.attrs),
                 }
                 for o in entry.out_refs
                 if o.role == "relation_source" and o.relation is not None
@@ -148,7 +171,7 @@ class Index:
                     "kind": entry.kind,
                     "deprecated_ids": sorted(entry.deprecated_ids),
                     "relations": relations,
-                    "membership": entry.membership,
+                    "membership": deepcopy(entry.membership),
                 }
             )
         return {"entries": entries}
@@ -160,14 +183,19 @@ class Index:
             uid = raw["uid"]
             if uid in idx.by_uid:
                 raise ValueError(f"structural snapshot: duplicate uid {uid!r}")
-            relations = [Relation(**r) for r in raw["relations"]]
-            membership = raw["membership"]
+            deprecated_ids = _validated_deprecated_ids(raw["deprecated_ids"], raw["id"])
+            relations = []
+            for raw_relation in raw["relations"]:
+                relation_data = dict(raw_relation)
+                relation_data["attrs"] = deepcopy(relation_data.get("attrs", {}))
+                relations.append(Relation(**relation_data))
+            membership = deepcopy(raw["membership"])
             out_refs = _out_refs_from(relations, membership)
             entry = IndexEntry(
                 uid=uid,
                 id=raw["id"],
                 kind=raw["kind"],
-                deprecated_ids=frozenset(raw["deprecated_ids"]),
+                deprecated_ids=frozenset(deprecated_ids),
                 out_refs=out_refs,
                 membership=membership,
             )
