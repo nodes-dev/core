@@ -225,3 +225,19 @@ manifest and writes atomically. Construction never writes the snapshot. Reconcil
 enforces the same collision contract as a from-scratch build. `snapshot.ts.json` is the
 reserved filename for future TypeScript snapshot persistence; the Python loader does not
 read TypeScript snapshots, and the filenames remain separate.
+
+### Index persistence (TypeScript)
+
+The TypeScript kernel persists its three derived indexes (structural `Index`, `SearchIndex`,
+`VectorIndex`) to a private, disposable, per-language cache so that constructing a `Corpus` over
+an unchanged corpus skips the full parse + re-index pass.
+
+- **Location:** `<root>/.nodes-index/snapshot.ts.json` (git-ignored). The Python kernel writes
+  `snapshot.py.json`; neither language reads the other's file.
+- **Writing is explicit:** call `corpus.flushIndex()`. Construction never writes the snapshot.
+- **Loading reconciles by content hash:** every `new Corpus(root)` walks the `*.md` files, hashes
+  their bytes, and diffs against the snapshot manifest — unchanged files are reused without parsing,
+  changed/added files are parsed and upserted, deleted files are dropped. A missing, stale, or
+  corrupt snapshot triggers a silent full rebuild (it is a cache, never the source of truth).
+- **Files remain authoritative.** The snapshot can be deleted at any time with no loss of
+  correctness — only the startup-speed benefit.

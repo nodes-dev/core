@@ -174,6 +174,7 @@ export class Corpus {
     if (this.vectorIndex !== undefined && prepared !== undefined) {
       this.vectorIndex.commit(node, prepared);
     }
+    this.recordManifest(node);
     return node;
   }
 
@@ -188,10 +189,12 @@ export class Corpus {
   delete(nodeId: string): void {
     const uid = this.index.idToUid.get(nodeId);
     if (uid === undefined) throw new RefError(`no live node at ${JSON.stringify(nodeId)}`);
+    const path = this.relPath(nodeId);
     this.store.deleteFile(nodeId);
     this.index.remove(uid);
     this.searchIndex.remove(uid);
     this.vectorIndex?.remove(uid);
+    this.manifest.delete(path);
   }
 
   all(): Node[] {
@@ -238,6 +241,7 @@ export class Corpus {
     // 3. Rewrite the renamed node itself (incl. its own oldId refs).
     const node = this.store.readFile(oldId);
     const oldPath = this.store.pathFor(oldId);
+    const oldRelPath = this.relPath(oldId);
     node.id = newId;
     node.kind = NodeId.parse(newId).kind;
     if (!node.deprecatedIds.includes(oldId)) node.deprecatedIds.push(oldId);
@@ -258,25 +262,39 @@ export class Corpus {
       for (const referrer of referrers) this.registry.validate(referrer);
     }
 
-    // 5b. Prepare the renamed node's vector (fail before any disk write).
+    // 5b. Prepare the renamed node's + referrers' vectors (fail before any disk write).
     const prepared =
       this.vectorIndex !== undefined
         ? this.vectorIndex.prepare(node, this.embedder as Embedder, this.vectorCache as VectorCache)
         : undefined;
+    const preparedReferrers =
+      this.vectorIndex !== undefined
+        ? referrers.map((r) =>
+            (this.vectorIndex as VectorIndex).prepare(r, this.embedder as Embedder, this.vectorCache as VectorCache),
+          )
+        : [];
 
     // 6. Commit: renamed node first (crash-atomic), then referrers. Each written once.
     const newPath = this.store.writeFile(node);
     if (oldPath !== newPath) this.store.deleteFile(oldId);
     this.index.upsert(node);
-    for (const referrer of referrers) {
+    for (let i = 0; i < referrers.length; i++) {
+      const referrer = referrers[i];
       this.store.writeFile(referrer);
       this.index.upsert(referrer);
+      this.searchIndex.upsert(referrer);
+      if (this.vectorIndex !== undefined) this.vectorIndex.commit(referrer, preparedReferrers[i]);
     }
 
     this.searchIndex.upsert(node);
     if (this.vectorIndex !== undefined && prepared !== undefined) {
       this.vectorIndex.commit(node, prepared);
     }
+
+    // 7. Manifest: remove old path on move; re-record the renamed node and every rewritten referrer.
+    if (oldPath !== newPath) this.manifest.delete(oldRelPath);
+    this.recordManifest(node);
+    for (const referrer of referrers) this.recordManifest(referrer);
     return node;
   }
 
