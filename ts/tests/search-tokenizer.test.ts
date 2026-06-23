@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { STOP_WORDS, codepointSorted, scoreKey, tokenize } from "../src/search.js";
+import { scoreKey } from "../src/ranking.js";
+import { STOP_WORDS, codepointSorted, tokenize } from "../src/search.js";
 
 const ORACLE = fileURLToPath(new URL("../../fixtures/search.tokenizer.json", import.meta.url));
 

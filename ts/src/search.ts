@@ -1,5 +1,6 @@
 import { CollisionError } from "./errors.js";
 import type { Node } from "./node.js";
+import { scoreKey } from "./ranking.js";
 
 /** Fixed English stop-word list (33 words), frozen by the tokenizer oracle. */
 export const STOP_WORDS: ReadonlySet<string> = new Set([
@@ -41,12 +42,6 @@ export const STOP_WORDS: ReadonlySet<string> = new Set([
 // Maximal runs of Unicode alphanumerics (\p{L} ∪ \p{N}); everything else separates.
 // This is the parity twin of Python's re.findall(r"[^\W_]+", s).
 const TOKEN_RE = /[\p{L}\p{N}]+/gu;
-
-/** Half-up rounding to 6 decimal places — the shared ranking/parity key. Scores are
- * non-negative, so this floor-based half-up is correct and identical to Python's. */
-export function scoreKey(score: number): number {
-  return Math.floor(score * 1_000_000 + 0.5) / 1_000_000;
-}
 
 // Compare by Unicode code point. Array.from iterates by code point (surrogate-pair aware),
 // so this is the explicit comparator the spec requires instead of default UTF-16 sort.

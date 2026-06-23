@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Corpus } from "../src/corpus.js";
-import { scoreKey } from "../src/search.js";
+import { scoreKey } from "../src/ranking.js";
 
 const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
 
