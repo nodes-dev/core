@@ -105,6 +105,38 @@ class SearchIndex:
     def remove(self, uid: str) -> None:
         self._drop(uid)
 
+    def to_dict(self) -> dict:
+        return {
+            "postings": {
+                term: {uid: [tf[0], tf[1]] for uid, tf in docs.items()}
+                for term, docs in self.postings.items()
+            },
+            "lengths": {uid: [lens[0], lens[1]] for uid, lens in self.lengths.items()},
+            "id_by_uid": dict(self.id_by_uid),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SearchIndex":
+        idx = cls()
+        lengths = {uid: (int(v[0]), int(v[1])) for uid, v in d["lengths"].items()}
+        id_by_uid = dict(d["id_by_uid"])
+        if set(lengths) != set(id_by_uid):
+            raise ValueError("search snapshot: lengths/id_by_uid uid sets differ")
+        postings: dict[str, dict[str, tuple[int, int]]] = {}
+        for term, docs in d["postings"].items():
+            bucket: dict[str, tuple[int, int]] = {}
+            for uid, tf in docs.items():
+                if uid not in lengths:
+                    raise ValueError(f"search snapshot: posting uid {uid!r} absent from lengths")
+                bucket[uid] = (int(tf[0]), int(tf[1]))
+            postings[term] = bucket
+        idx.postings = postings
+        idx.lengths = lengths
+        idx.id_by_uid = id_by_uid
+        idx._total_title = sum(lens[0] for lens in lengths.values())
+        idx._total_body = sum(lens[1] for lens in lengths.values())
+        return idx
+
     def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0
