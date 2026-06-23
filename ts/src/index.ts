@@ -52,7 +52,7 @@ export {
   type Role,
 } from "./structural-index.js";
 export { scoreKey } from "./ranking.js";
-export { SearchIndex, type SearchHit, tokenize } from "./search.js";
+export { SearchIndex, type SearchHit, type SearchSnapshot, tokenize } from "./search.js";
 export {
   type Embedder,
   type SimilarHit,
