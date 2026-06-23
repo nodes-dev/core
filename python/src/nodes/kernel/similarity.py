@@ -151,6 +151,39 @@ class VectorIndex:
         self.dim: int | None = None
         self.namespace: str | None = None
 
+    def to_dict(self) -> dict:
+        return {
+            "namespace": self.namespace,
+            "dim": self.dim if self.vectors else None,
+            "vectors": {uid: list(vec) for uid, vec in self.vectors.items()},
+            "id_by_uid": dict(self.id_by_uid),
+            "hash_by_uid": dict(self.hash_by_uid),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "VectorIndex":
+        idx = cls()
+        idx.namespace = d["namespace"]
+        vectors = {uid: tuple(float(x) for x in vec) for uid, vec in d["vectors"].items()}
+        id_by_uid = dict(d["id_by_uid"])
+        hash_by_uid = dict(d["hash_by_uid"])
+        if not (set(vectors) == set(id_by_uid) == set(hash_by_uid)):
+            raise ValueError("vector snapshot: vectors/id_by_uid/hash_by_uid uid sets differ")
+        dim = d["dim"]
+        if vectors:
+            if not isinstance(dim, int) or isinstance(dim, bool):
+                raise ValueError("vector snapshot: dim must be an int when vectors are present")
+            for vec in vectors.values():
+                if len(vec) != dim:
+                    raise ValueError("vector snapshot: vector length != dim")
+        elif dim is not None:
+            raise ValueError("vector snapshot: dim must be null when there are no vectors")
+        idx.vectors = vectors
+        idx.id_by_uid = id_by_uid
+        idx.hash_by_uid = hash_by_uid
+        idx.dim = dim
+        return idx
+
     @classmethod
     def build(cls, nodes: Iterable[Node], embedder: Embedder, cache: VectorCache) -> "VectorIndex":
         idx = cls()
