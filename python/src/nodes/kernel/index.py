@@ -38,6 +38,7 @@ class IndexEntry:
     kind: str
     deprecated_ids: frozenset[str]
     out_refs: list[OutRef]
+    membership: dict | None = None
 
 
 @dataclass
@@ -47,27 +48,30 @@ class ResolvedEdge:
     target_uid: str | None
 
 
-def _extract_out_refs(node: Node) -> list[OutRef]:
+def _out_refs_from(relations: list[Relation], membership: object) -> list[OutRef]:
     refs: list[OutRef] = []
-    for rel in node.relations:
+    for rel in relations:
         refs.append(OutRef(ref=rel.source, role="relation_source", relation=rel))
         refs.append(OutRef(ref=rel.target, role="relation_target", relation=rel))
-    mem = node.facets.get(MEMBERSHIP)
-    if isinstance(mem, dict):
-        members = mem.get("members")
+    if isinstance(membership, dict):
+        members = membership.get("members")
         if isinstance(members, list):
             for m in members:
                 refs.append(OutRef(ref=m, role="membership_member"))
         elif isinstance(members, dict):
             for v in members.values():
                 refs.append(OutRef(ref=v, role="membership_member"))
-        for edge in mem.get("edges", []) or []:
+        for edge in membership.get("edges", []) or []:
             if isinstance(edge, dict):
                 if "source" in edge:
                     refs.append(OutRef(ref=edge["source"], role="membership_edge_source"))
                 if "target" in edge:
                     refs.append(OutRef(ref=edge["target"], role="membership_edge_target"))
     return refs
+
+
+def _extract_out_refs(node: Node) -> list[OutRef]:
+    return _out_refs_from(node.relations, node.facets.get(MEMBERSHIP))
 
 
 class Index:
@@ -106,12 +110,14 @@ class Index:
     def upsert(self, node: Node) -> None:
         if node.uid in self.by_uid:
             self._drop(node.uid)
+        membership = node.facets.get(MEMBERSHIP)
         entry = IndexEntry(
             uid=node.uid,
             id=node.id,
             kind=node.kind,
             deprecated_ids=frozenset(node.deprecated_ids),
             out_refs=_extract_out_refs(node),
+            membership=membership,
         )
         self.by_uid[node.uid] = entry
         self.id_to_uid[node.id] = node.uid
@@ -119,6 +125,65 @@ class Index:
             self.deprecated_to_uid[dep] = node.uid
         for oref in entry.out_refs:
             self.in_refs.setdefault(oref.ref, []).append(InRef(source_uid=node.uid, out_ref=oref))
+
+    def to_dict(self) -> dict:
+        entries = []
+        for entry in self.by_uid.values():
+            relations = [
+                {
+                    "source": o.relation.source,
+                    "predicate": o.relation.predicate,
+                    "target": o.relation.target,
+                    "directed": o.relation.directed,
+                    "weight": o.relation.weight,
+                    "attrs": o.relation.attrs,
+                }
+                for o in entry.out_refs
+                if o.role == "relation_source" and o.relation is not None
+            ]
+            entries.append(
+                {
+                    "uid": entry.uid,
+                    "id": entry.id,
+                    "kind": entry.kind,
+                    "deprecated_ids": sorted(entry.deprecated_ids),
+                    "relations": relations,
+                    "membership": entry.membership,
+                }
+            )
+        return {"entries": entries}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Index":
+        idx = cls()
+        for raw in d["entries"]:
+            uid = raw["uid"]
+            if uid in idx.by_uid:
+                raise ValueError(f"structural snapshot: duplicate uid {uid!r}")
+            relations = [Relation(**r) for r in raw["relations"]]
+            membership = raw["membership"]
+            out_refs = _out_refs_from(relations, membership)
+            entry = IndexEntry(
+                uid=uid,
+                id=raw["id"],
+                kind=raw["kind"],
+                deprecated_ids=frozenset(raw["deprecated_ids"]),
+                out_refs=out_refs,
+                membership=membership,
+            )
+            for claim in (entry.id, *entry.deprecated_ids):
+                owner = idx.resolve_uid(claim)
+                if owner is not None:
+                    raise ValueError(
+                        f"structural snapshot: identity claim {claim!r} already in use by uid {owner!r}"
+                    )
+            idx.by_uid[uid] = entry
+            idx.id_to_uid[entry.id] = uid
+            for dep in entry.deprecated_ids:
+                idx.deprecated_to_uid[dep] = uid
+            for oref in out_refs:
+                idx.in_refs.setdefault(oref.ref, []).append(InRef(source_uid=uid, out_ref=oref))
+        return idx
 
     def remove(self, uid: str) -> None:
         self._drop(uid)
