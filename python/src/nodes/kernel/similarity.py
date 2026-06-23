@@ -165,8 +165,16 @@ class VectorIndex:
         idx = cls()
         namespace = d["namespace"]
         vectors_raw = d["vectors"]
-        id_by_uid = dict(d["id_by_uid"])
-        hash_by_uid = dict(d["hash_by_uid"])
+        id_by_uid_raw = d["id_by_uid"]
+        hash_by_uid_raw = d["hash_by_uid"]
+        if not isinstance(vectors_raw, dict):
+            raise ValueError("vector snapshot: vectors must be a dict")
+        if not isinstance(id_by_uid_raw, dict):
+            raise ValueError("vector snapshot: id_by_uid must be a dict")
+        if not isinstance(hash_by_uid_raw, dict):
+            raise ValueError("vector snapshot: hash_by_uid must be a dict")
+        id_by_uid = dict(id_by_uid_raw)
+        hash_by_uid = dict(hash_by_uid_raw)
         if not (set(vectors_raw) == set(id_by_uid) == set(hash_by_uid)):
             raise ValueError("vector snapshot: vectors/id_by_uid/hash_by_uid uid sets differ")
         dim = d["dim"]

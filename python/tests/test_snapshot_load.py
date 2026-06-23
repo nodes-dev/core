@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from nodes.kernel.index import Index
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
@@ -40,6 +42,23 @@ def _snapshot_doc(tmp_path) -> dict:
     doc = read_json(snapshot_path(tmp_path))
     assert doc is not None
     return doc
+
+
+def _ids_by_uid(manifest: list[dict]) -> dict[str, str]:
+    return {
+        entry["uid"]: f"topic:{entry['path'].removeprefix('topic/').removesuffix('.md')}"
+        for entry in manifest
+    }
+
+
+def _vector_section(manifest: list[dict], namespace: str) -> dict:
+    return {
+        "namespace": namespace,
+        "dim": 2,
+        "vectors": {manifest[0]["uid"]: [1.0, 0.0], manifest[1]["uid"]: [0.0, 1.0]},
+        "id_by_uid": _ids_by_uid(manifest),
+        "hash_by_uid": {entry["uid"]: entry["sha256"] for entry in manifest},
+    }
 
 
 def test_write_then_load_round_trips_structural_and_search(tmp_path):
@@ -92,6 +111,34 @@ def test_duplicate_manifest_uid_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None
 
 
+def test_non_dict_manifest_row_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][0] = "not a manifest row"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+@pytest.mark.parametrize("field", ("path", "sha256", "uid"))
+def test_non_string_manifest_row_field_returns_none(tmp_path, field):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][0][field] = 123
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_manifest_sha_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][0]["sha256"] = "not-a-sha"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
 def test_manifest_section_bijection_violation_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
@@ -106,6 +153,24 @@ def test_search_id_by_uid_mismatch_returns_none(tmp_path):
     doc = _snapshot_doc(tmp_path)
     first_uid = doc["manifest"][0]["uid"]
     doc["search"]["id_by_uid"][first_uid] = "topic:wrong"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_search_lengths_container_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["search"]["lengths"] = []
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_search_postings_container_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["search"]["postings"] = []
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None
@@ -133,14 +198,36 @@ def test_embedder_namespace_mismatch_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
     manifest = doc["manifest"]
-    ids_by_uid = {entry["uid"]: f"topic:{entry['path'].removeprefix('topic/').removesuffix('.md')}" for entry in manifest}
-    doc["vectors"] = {
-        "namespace": "other-model",
-        "dim": 2,
-        "vectors": {manifest[0]["uid"]: [1.0, 0.0], manifest[1]["uid"]: [0.0, 1.0]},
-        "id_by_uid": ids_by_uid,
-        "hash_by_uid": {entry["uid"]: entry["sha256"] for entry in manifest},
-    }
+    doc["vectors"] = _vector_section(manifest, "other-model")
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, "model-v1") is None
+
+
+def test_embedder_loads_valid_vector_section(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    manifest = doc["manifest"]
+    doc["vectors"] = _vector_section(manifest, "expected-ns")
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    snapshot = load_snapshot(tmp_path, "expected-ns")
+
+    assert isinstance(snapshot, Snapshot)
+    assert snapshot.vector_index is not None
+    assert snapshot.vector_index.namespace == "expected-ns"
+    assert set(snapshot.vector_index.vectors) == {entry["uid"] for entry in manifest}
+
+
+def test_embedder_malformed_vectors_container_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    manifest = doc["manifest"]
+    doc["vectors"] = _vector_section(manifest, "model-v1")
+    doc["vectors"]["dim"] = None
+    doc["vectors"]["vectors"] = []
+    doc["vectors"]["id_by_uid"] = {}
+    doc["vectors"]["hash_by_uid"] = {}
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, "model-v1") is None
@@ -150,15 +237,8 @@ def test_embedder_vector_id_by_uid_mismatch_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
     manifest = doc["manifest"]
-    ids_by_uid = {entry["uid"]: f"topic:{entry['path'].removeprefix('topic/').removesuffix('.md')}" for entry in manifest}
-    ids_by_uid[manifest[0]["uid"]] = "topic:wrong"
-    doc["vectors"] = {
-        "namespace": "model-v1",
-        "dim": 2,
-        "vectors": {manifest[0]["uid"]: [1.0, 0.0], manifest[1]["uid"]: [0.0, 1.0]},
-        "id_by_uid": ids_by_uid,
-        "hash_by_uid": {entry["uid"]: entry["sha256"] for entry in manifest},
-    }
+    doc["vectors"] = _vector_section(manifest, "model-v1")
+    doc["vectors"]["id_by_uid"][manifest[0]["uid"]] = "topic:wrong"
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, "model-v1") is None

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from nodes.kernel.similarity import VectorIndex
 
 SNAPSHOT_SCHEMA_VERSION = 1
 SNAPSHOT_LANG = "py"
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def snapshot_path(root: Path | str) -> Path:
@@ -93,7 +95,22 @@ def write_snapshot(
 def _parse_manifest(raw: object) -> list[ManifestEntry]:
     if not isinstance(raw, list):
         raise ValueError("snapshot manifest is not a list")
-    entries = [ManifestEntry(path=e["path"], sha256=e["sha256"], uid=e["uid"]) for e in raw]
+    entries = []
+    for e in raw:
+        if not isinstance(e, dict):
+            raise ValueError("snapshot manifest row is not a dict")
+        path = e["path"]
+        sha256 = e["sha256"]
+        uid = e["uid"]
+        if not isinstance(path, str):
+            raise ValueError("snapshot manifest row path must be a string")
+        if not isinstance(sha256, str):
+            raise ValueError("snapshot manifest row sha256 must be a string")
+        if _SHA256_RE.fullmatch(sha256) is None:
+            raise ValueError("snapshot manifest row sha256 must be 64 lowercase hex chars")
+        if not isinstance(uid, str):
+            raise ValueError("snapshot manifest row uid must be a string")
+        entries.append(ManifestEntry(path=path, sha256=sha256, uid=uid))
     uids = [e.uid for e in entries]
     paths = [e.path for e in entries]
     if len(set(uids)) != len(uids):

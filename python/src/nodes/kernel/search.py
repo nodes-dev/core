@@ -118,15 +118,26 @@ class SearchIndex:
     @classmethod
     def from_dict(cls, d: dict) -> "SearchIndex":
         idx = cls()
+        postings_raw = d["postings"]
+        lengths_raw = d["lengths"]
+        id_by_uid_raw = d["id_by_uid"]
+        if not isinstance(postings_raw, dict):
+            raise ValueError("search snapshot: postings must be a dict")
+        if not isinstance(lengths_raw, dict):
+            raise ValueError("search snapshot: lengths must be a dict")
+        if not isinstance(id_by_uid_raw, dict):
+            raise ValueError("search snapshot: id_by_uid must be a dict")
         lengths = {
             uid: cls._non_negative_int_pair(v, f"search snapshot: length for uid {uid!r}")
-            for uid, v in d["lengths"].items()
+            for uid, v in lengths_raw.items()
         }
-        id_by_uid = dict(d["id_by_uid"])
+        id_by_uid = dict(id_by_uid_raw)
         if set(lengths) != set(id_by_uid):
             raise ValueError("search snapshot: lengths/id_by_uid uid sets differ")
         postings: dict[str, dict[str, tuple[int, int]]] = {}
-        for term, docs in d["postings"].items():
+        for term, docs in postings_raw.items():
+            if not isinstance(docs, dict):
+                raise ValueError(f"search snapshot: postings bucket for term {term!r} must be a dict")
             bucket: dict[str, tuple[int, int]] = {}
             for uid, tf in docs.items():
                 if uid not in lengths:

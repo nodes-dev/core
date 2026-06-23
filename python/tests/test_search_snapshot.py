@@ -57,6 +57,14 @@ def test_from_dict_rejects_length_id_mismatch():
         SearchIndex.from_dict({"postings": {}, "lengths": {"u1": [1, 0]}, "id_by_uid": {}})
 
 
+@pytest.mark.parametrize("field", ("postings", "lengths", "id_by_uid"))
+def test_from_dict_rejects_malformed_map_containers(field):
+    snapshot = {"postings": {}, "lengths": {}, "id_by_uid": {}}
+    snapshot[field] = []
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict(snapshot)
+
+
 def test_from_dict_rejects_stale_posting_uid():
     with pytest.raises(ValueError):
         SearchIndex.from_dict(
