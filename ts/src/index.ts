@@ -57,6 +57,7 @@ export {
   type Embedder,
   type SimilarHit,
   type Vector,
+  type VectorSnapshot,
   VectorCache,
   VectorIndex,
   embedText,

@@ -72,6 +72,14 @@ export interface SimilarHit {
   score: number;
 }
 
+export interface VectorSnapshot {
+  namespace: string | null;
+  dim: number | null;
+  vectors: Record<string, number[]>;
+  idByUid: Record<string, string>;
+  hashByUid: Record<string, string>;
+}
+
 function validateK(k?: number): void {
   if (k !== undefined && (!Number.isInteger(k) || k <= 0)) {
     throw new RangeError(`k must be a positive integer or undefined, got ${JSON.stringify(k)}`);
@@ -140,6 +148,86 @@ export class VectorIndex {
   hashByUid = new Map<string, string>();
   dim: number | null = null;
   namespace: string | null = null;
+
+  toDict(): VectorSnapshot {
+    return {
+      namespace: this.namespace,
+      dim: this.vectors.size > 0 ? this.dim : null,
+      vectors: Object.fromEntries([...this.vectors].map(([uid, vec]) => [uid, [...vec]])),
+      idByUid: Object.fromEntries(this.idByUid),
+      hashByUid: Object.fromEntries(this.hashByUid),
+    };
+  }
+
+  static fromDict(d: unknown): VectorIndex {
+    if (typeof d !== "object" || d === null) throw new Error("vector snapshot: document must be an object");
+    const raw = d as Record<string, unknown>;
+    for (const key of ["namespace", "dim", "vectors", "idByUid", "hashByUid"]) {
+      if (!(key in raw)) throw new Error(`vector snapshot: missing ${key}`);
+    }
+    const { namespace, dim } = raw;
+    if (typeof raw.vectors !== "object" || raw.vectors === null)
+      throw new Error("vector snapshot: vectors must be an object");
+    if (typeof raw.idByUid !== "object" || raw.idByUid === null)
+      throw new Error("vector snapshot: idByUid must be an object");
+    if (typeof raw.hashByUid !== "object" || raw.hashByUid === null)
+      throw new Error("vector snapshot: hashByUid must be an object");
+    const vectorsRaw = raw.vectors as Record<string, unknown>;
+    const idByUid = new Map<string, string>();
+    for (const [uid, id] of Object.entries(raw.idByUid as Record<string, unknown>)) {
+      if (typeof id !== "string") throw new Error("vector snapshot: idByUid must map string uids to string ids");
+      idByUid.set(uid, id);
+    }
+    const hashByUid = new Map<string, string>();
+    for (const [uid, h] of Object.entries(raw.hashByUid as Record<string, unknown>)) {
+      if (typeof h !== "string") throw new Error("vector snapshot: hashByUid values must be strings");
+      validateTextHash(h);
+      hashByUid.set(uid, h);
+    }
+    const vectorUids = Object.keys(vectorsRaw);
+    const sameSet =
+      vectorUids.length === idByUid.size &&
+      vectorUids.length === hashByUid.size &&
+      vectorUids.every((uid) => idByUid.has(uid) && hashByUid.has(uid));
+    if (!sameSet) throw new Error("vector snapshot: vectors/idByUid/hashByUid uid sets differ");
+
+    const hasVectors = vectorUids.length > 0;
+    if (hasVectors) {
+      if (typeof namespace !== "string")
+        throw new Error("vector snapshot: namespace must be a string when vectors are present");
+      validateNamespace(namespace);
+      if (typeof dim !== "number" || !Number.isInteger(dim) || dim <= 0) {
+        throw new Error("vector snapshot: dim must be a positive integer when vectors are present");
+      }
+    } else if (dim !== null) {
+      throw new Error("vector snapshot: dim must be null when there are no vectors");
+    } else if (namespace !== null) {
+      if (typeof namespace !== "string") throw new Error("vector snapshot: namespace must be a string when non-null");
+      validateNamespace(namespace);
+    }
+
+    const vectors = new Map<string, Vector>();
+    for (const [uid, rawVec] of Object.entries(vectorsRaw)) {
+      if (!Array.isArray(rawVec)) throw new Error("vector snapshot: vector must be an array");
+      for (const x of rawVec) {
+        if (typeof x !== "number" || !Number.isFinite(x))
+          throw new Error("vector snapshot: vector contains a non-finite value");
+      }
+      const vec = rawVec as number[];
+      if (vec.length !== dim) throw new Error("vector snapshot: vector length != dim");
+      const norm = Math.sqrt(vec.reduce((s, x) => s + x * x, 0));
+      if (Math.abs(norm - 1) > 1e-9) throw new Error("vector snapshot: stored vector must be L2-normalized");
+      vectors.set(uid, [...vec]);
+    }
+
+    const idx = new VectorIndex();
+    idx.namespace = (namespace as string | null) ?? null;
+    idx.vectors = vectors;
+    idx.idByUid = idByUid;
+    idx.hashByUid = hashByUid;
+    idx.dim = (dim as number | null) ?? null;
+    return idx;
+  }
 
   static build(nodes: Iterable<Node>, embedder: Embedder, cache: VectorCache): VectorIndex {
     const idx = new VectorIndex();
