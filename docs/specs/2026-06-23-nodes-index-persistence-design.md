@@ -142,8 +142,14 @@ mismatched `vectors` section (§6).
    - **added** (path absent from manifest): parse from the read bytes; upsert.
    - **deleted** (manifest path absent on disk): drop its uid from all indexes.
 3. Apply all **drops before upserts** (so a uid that moves files is handled cleanly).
-   Upserts run the existing collision contract (`assert_addable`); a corpus that
-   collides on reconcile raises `CollisionError`, exactly as `build()` does.
+   Reconcile enforces the **full `build()` collision contract**, not just
+   `assert_addable`: `build()` first rejects a duplicate uid outright (`node.uid in
+   by_uid → CollisionError`) and only then calls `assert_addable`. `assert_addable`
+   alone does *not* reject an added/changed node whose uid duplicates an unchanged entry
+   with the same `uid` *and* `id` — it would silently replace it. So, after the planned
+   drops are applied, reconcile requires every changed/added parsed node's uid to be
+   **absent** before insertion, and duplicate uids among the parsed upserts themselves
+   raise `CollisionError` — matching `build()` exactly.
 4. Rebuild the in-memory manifest from this walk (root-relative path, freshly computed
    hash, node uid), satisfying the §3 byte-level invariant.
 
@@ -168,12 +174,18 @@ match" alone proves only that files are unchanged, not that the cached index sta
 corresponds to them — so:
 
 - **Duplicate manifest uids** → unusable.
-- **Bijection (structural & search):** the set of manifest uids equals the set of uids
-  in the structural section and equals the set in the search section. Any uid in an
-  index section but not the manifest, or vice versa → unusable.
-- **Vector section** (only when an embedder is configured, see §6): its uid set equals
-  the manifest uid set; `namespace` equals the configured embedder's
-  `cache_namespace`; every stored vector has length `dim`. Any violation → unusable.
+- **Structural bijection:** the set of manifest uids equals the set of `entries` uids
+  (one entry per uid; no duplicates). Any uid in the structural section but not the
+  manifest, or vice versa → unusable.
+- **Search bijection:** `lengths` keys, `id_by_uid` keys, and the manifest uid set are
+  all equal; and **every uid appearing in any postings bucket** is a member of that set
+  (no stale posting uids, no missing `id_by_uid` rows). Any divergence among the search
+  maps → unusable.
+- **Vector section** (only when an embedder is configured, see §6): `vectors`,
+  `id_by_uid`, and `hash_by_uid` keys are all equal and equal the manifest uid set;
+  `namespace` equals the configured embedder's `cache_namespace`; `dim` is `int | null`,
+  with `null` valid **only** when there are no stored vectors, and otherwise every stored
+  vector has length exactly `dim`. Any violation → unusable.
 - Malformed section shapes (missing keys, wrong types) → unusable.
 
 All of these resolve to `load_snapshot()` returning `None` → silent full rebuild.
@@ -206,8 +218,10 @@ Each index owns its `to_dict()` / `from_dict()`.
   `_total_body` by summing `lengths` on load (single source of truth; no stored-total
   drift).
 - **VectorIndex** — persist `vectors` (uid → normalized vector), `id_by_uid`,
-  `hash_by_uid`, `dim`, `namespace`. Avoids re-reading N raw-cache files and
-  re-normalizing on every startup.
+  `hash_by_uid`, `dim` (`int | null`; `null` only for an embedder-backed corpus with no
+  stored vectors yet, mirroring the live `VectorIndex.dim`), `namespace` (`str | null`).
+  Avoids re-reading N raw-cache files and re-normalizing on every startup. The three uid
+  maps stay equal (§5).
 - **Index (structural)** — persist per entry `{uid, id, kind, deprecated_ids,
   relations, membership_refs}` (the inputs `_extract_out_refs` consumes). On load,
   rebuild `id_to_uid`, `deprecated_to_uid`, `out_refs`, and `in_refs` by **replaying the
@@ -270,11 +284,19 @@ whose deletion merely forces re-embedding).
   `Corpus` from loading structural + search (§6).
 - **Error propagation:** a malformed corpus file raises on construction (not swallowed);
   a reconcile that introduces a uid collision raises `CollisionError`.
+- **Full collision contract on reconcile:** a changed/added file whose uid duplicates an
+  unchanged entry with the *same `uid` and `id`* raises `CollisionError` (not a silent
+  replace); and two parsed upserts sharing a uid raise `CollisionError` — matching
+  `build()`, not merely `assert_addable` (§4.1).
+- **Empty embedder corpus:** a corpus with an embedder but zero nodes (`dim = null`,
+  empty uid maps) round-trips through `flush_index()` + reload, and adding the first node
+  afterward establishes `dim` correctly.
 - **Relation identity:** inbound / dangling dedup is correct after a load (guards §7's
   shared-`Relation` invariant).
-- **Integrity guards:** a snapshot with a manifest uid missing from a required section,
-  an extra index uid absent from the manifest, or duplicate manifest uids → silent
-  rebuild.
+- **Integrity guards:** each → silent rebuild — a manifest uid missing from a required
+  section; an extra index uid absent from the manifest; duplicate manifest uids; a search
+  postings bucket naming a uid absent from `lengths`/`id_by_uid`; mismatched search maps;
+  a vector `dim`/`namespace`/uid-map violation (§5).
 - All existing parity tests and frozen fixtures continue to pass unchanged.
 
 ---
