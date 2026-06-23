@@ -78,6 +78,16 @@ def test_from_dict_rejects_malformed_map_containers(field):
         SearchIndex.from_dict(snapshot)
 
 
+def test_from_dict_rejects_non_string_id_by_uid_key():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict({"postings": {}, "lengths": {1: [1, 0]}, "id_by_uid": {1: "topic:a"}})
+
+
+def test_from_dict_rejects_non_string_id_by_uid_value():
+    with pytest.raises(ValueError, match="search snapshot:"):
+        SearchIndex.from_dict({"postings": {}, "lengths": {"u1": [1, 0]}, "id_by_uid": {"u1": 123}})
+
+
 def test_from_dict_rejects_stale_posting_uid():
     with pytest.raises(ValueError):
         SearchIndex.from_dict(

@@ -167,6 +167,16 @@ def test_malformed_manifest_sha_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None
 
 
+@pytest.mark.parametrize("path", ("/abs.md", "../x.md", "topic\\a.md", "", "topic/a.txt"))
+def test_malformed_manifest_path_returns_none(tmp_path, path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][0]["path"] = path
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
 def test_manifest_section_bijection_violation_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
@@ -348,6 +358,18 @@ def test_embedder_non_unit_vector_returns_none(tmp_path, vector):
     manifest = doc["manifest"]
     doc["vectors"] = _vector_section(manifest, "expected-ns")
     doc["vectors"]["vectors"][manifest[0]["uid"]] = vector
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, "expected-ns") is None
+
+
+@pytest.mark.parametrize("hash_value", (123, "not-a-sha"))
+def test_embedder_malformed_vector_hash_returns_none(tmp_path, hash_value):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    manifest = doc["manifest"]
+    doc["vectors"] = _vector_section(manifest, "expected-ns")
+    doc["vectors"]["hash_by_uid"][manifest[0]["uid"]] = hash_value
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, "expected-ns") is None

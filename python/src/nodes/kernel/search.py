@@ -133,6 +133,8 @@ class SearchIndex:
             raise ValueError("search snapshot: lengths must be a dict")
         if not isinstance(id_by_uid_raw, dict):
             raise ValueError("search snapshot: id_by_uid must be a dict")
+        if any(not isinstance(uid, str) or not isinstance(node_id, str) for uid, node_id in id_by_uid_raw.items()):
+            raise ValueError("search snapshot: id_by_uid must map string uids to string ids")
         lengths = {
             uid: cls._non_negative_int_pair(v, f"search snapshot: length for uid {uid!r}")
             for uid, v in lengths_raw.items()

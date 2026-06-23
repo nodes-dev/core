@@ -101,6 +101,72 @@ def test_from_dict_rejects_malformed_map_containers(field):
         VectorIndex.from_dict(snapshot)
 
 
+def test_from_dict_rejects_non_string_uid_keys():
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {1: [1.0, 0.0]},
+                "id_by_uid": {1: "topic:a"},
+                "hash_by_uid": {1: "0" * 64},
+            }
+        )
+
+
+def test_from_dict_rejects_non_string_id_by_uid_key():
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": [1.0, 0.0]},
+                "id_by_uid": {1: "topic:a"},
+                "hash_by_uid": {"u1": "0" * 64},
+            }
+        )
+
+
+def test_from_dict_rejects_non_string_id_by_uid_value():
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": [1.0, 0.0]},
+                "id_by_uid": {"u1": 123},
+                "hash_by_uid": {"u1": "0" * 64},
+            }
+        )
+
+
+def test_from_dict_rejects_non_string_hash_by_uid_key():
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": [1.0, 0.0]},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {1: "0" * 64},
+            }
+        )
+
+
+@pytest.mark.parametrize("hash_value", (123, "not-a-sha"))
+def test_from_dict_rejects_malformed_hash_by_uid_values(hash_value):
+    with pytest.raises(ValueError, match="vector snapshot:"):
+        VectorIndex.from_dict(
+            {
+                "namespace": "n",
+                "dim": 2,
+                "vectors": {"u1": [1.0, 0.0]},
+                "id_by_uid": {"u1": "topic:a"},
+                "hash_by_uid": {"u1": hash_value},
+            }
+        )
+
+
 def test_from_dict_rejects_dim_length_mismatch():
     with pytest.raises(ValueError):
         VectorIndex.from_dict(
@@ -123,7 +189,7 @@ def test_from_dict_rejects_non_unit_stored_vectors(vector):
                 "dim": 2,
                 "vectors": {"u1": vector},
                 "id_by_uid": {"u1": "topic:a"},
-                "hash_by_uid": {"u1": "h"},
+                "hash_by_uid": {"u1": "0" * 64},
             }
         )
 

@@ -109,6 +109,7 @@ def _parse_manifest(raw: object) -> list[ManifestEntry]:
         uid = e["uid"]
         if not isinstance(path, str):
             raise ValueError("snapshot manifest row path must be a string")
+        _validate_manifest_path(path)
         if not isinstance(sha256, str):
             raise ValueError("snapshot manifest row sha256 must be a string")
         if _SHA256_RE.fullmatch(sha256) is None:
@@ -123,6 +124,18 @@ def _parse_manifest(raw: object) -> list[ManifestEntry]:
     if len(set(paths)) != len(paths):
         raise ValueError("snapshot manifest: duplicate path")
     return entries
+
+
+def _validate_manifest_path(path: str) -> None:
+    if (
+        not path
+        or path.startswith("/")
+        or "\\" in path
+        or path.endswith("/")
+        or not path.endswith(".md")
+        or any(part in ("", ".", "..") for part in path.split("/"))
+    ):
+        raise ValueError("snapshot manifest row path must be a root-relative POSIX .md path")
 
 
 def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot | None:

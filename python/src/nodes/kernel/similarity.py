@@ -179,6 +179,19 @@ class VectorIndex:
             raise ValueError("vector snapshot: id_by_uid must be a dict")
         if not isinstance(hash_by_uid_raw, dict):
             raise ValueError("vector snapshot: hash_by_uid must be a dict")
+        if any(not isinstance(uid, str) for uid in vectors_raw):
+            raise ValueError("vector snapshot: vector uid keys must be strings")
+        if any(not isinstance(uid, str) or not isinstance(node_id, str) for uid, node_id in id_by_uid_raw.items()):
+            raise ValueError("vector snapshot: id_by_uid must map string uids to string ids")
+        for uid, text_hash_value in hash_by_uid_raw.items():
+            if not isinstance(uid, str):
+                raise ValueError("vector snapshot: hash_by_uid uid keys must be strings")
+            if not isinstance(text_hash_value, str):
+                raise ValueError("vector snapshot: hash_by_uid values must be strings")
+            try:
+                validate_text_hash(text_hash_value)
+            except ValueError as exc:
+                raise ValueError("vector snapshot: invalid hash_by_uid value") from exc
         id_by_uid = dict(id_by_uid_raw)
         hash_by_uid = dict(hash_by_uid_raw)
         if not (set(vectors_raw) == set(id_by_uid) == set(hash_by_uid)):
