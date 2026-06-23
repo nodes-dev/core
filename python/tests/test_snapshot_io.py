@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -43,6 +44,13 @@ def test_iter_corpus_files_sorted_relative_posix_with_hash(tmp_path):
     assert files[0] == CorpusFile(path="gene/a.md", data=b"AAA", sha256=hash_bytes(b"AAA"))
 
 
+def test_iter_corpus_files_ignores_md_directories(tmp_path):
+    (tmp_path / "notes.md").mkdir()
+    (tmp_path / "real.md").write_bytes(b"real")
+    files = iter_corpus_files(tmp_path)
+    assert files == [CorpusFile(path="real.md", data=b"real", sha256=hash_bytes(b"real"))]
+
+
 def test_write_json_atomic_round_trip_and_no_tmp_left(tmp_path):
     p = snapshot_path(tmp_path)
     write_json_atomic(p, {"version": 1, "x": [1, 2]})
@@ -50,8 +58,31 @@ def test_write_json_atomic_round_trip_and_no_tmp_left(tmp_path):
     assert not (p.parent / (p.name + ".tmp")).exists()
 
 
+def test_write_json_atomic_rejects_non_finite_values_without_snapshot(tmp_path):
+    p = snapshot_path(tmp_path)
+    with pytest.raises(ValueError):
+        write_json_atomic(p, {"x": float("nan")})
+    assert not p.exists()
+    assert not (p.parent / (p.name + ".tmp")).exists()
+
+
 def test_read_json_missing_returns_none(tmp_path):
     assert read_json(snapshot_path(tmp_path)) is None
+
+
+def test_read_json_invalid_json_raises(tmp_path):
+    p = snapshot_path(tmp_path)
+    p.parent.mkdir(parents=True)
+    p.write_text("{", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        read_json(p)
+
+
+def test_corpus_file_is_frozen():
+    e = CorpusFile(path="a.md", data=b"A", sha256=hash_bytes(b"A"))
+    assert (e.path, e.data, e.sha256) == ("a.md", b"A", hash_bytes(b"A"))
+    with pytest.raises(FrozenInstanceError):
+        setattr(e, "path", "b.md")
 
 
 def test_manifest_entry_is_frozen():

@@ -29,6 +29,8 @@ def iter_corpus_files(root: Path | str) -> list[CorpusFile]:
     root = Path(root)
     files: list[CorpusFile] = []
     for p in sorted(root.rglob("*.md")):
+        if not p.is_file():
+            continue
         data = p.read_bytes()
         files.append(CorpusFile(path=p.relative_to(root).as_posix(), data=data, sha256=hash_bytes(data)))
     return files
