@@ -17,7 +17,7 @@
 - **Construction never writes the snapshot.** (The raw `VectorCache` may still write under `.nodes-index/vectors/` during `VectorIndex.build`.)
 - **Silent fallback → full rebuild** is scoped strictly to snapshot-cache unusability detected inside `load_snapshot()`: missing file, invalid JSON, `version`/`lang` mismatch, integrity failure, or (embedder configured) a missing/mismatched `vectors` section. Any error from reading/parsing corpus files or from the collision contract — during either rebuild or reconcile — **propagates**. `flush_index()` I/O errors propagate.
 - **Reconcile enforces the full `build()` collision contract**, not just `assert_addable`: after planned drops, every changed/added uid must be absent before insertion, and duplicate uids among upserts raise `CollisionError`.
-- **Integrity (bijection) rules:** manifest has no duplicate uids/paths; structural `entries` uid-set == manifest uid-set; search `lengths` keys == `id_by_uid` keys == manifest uid-set, and every postings-bucket uid ∈ that set; vectors (only when an embedder is configured) `vectors` == `id_by_uid` == `hash_by_uid` keys == manifest uid-set, `namespace` == embedder's `cache_namespace`, `dim` is `int | null` (`null` only with zero stored vectors; otherwise every vector has length `dim`).
+- **Integrity (bijection) rules:** manifest has no duplicate uids/paths; structural `entries` uid-set == manifest uid-set and structural identity claims (`id` + `deprecated_ids`) have no cross-entry collisions; search `lengths` keys == `id_by_uid` keys == manifest uid-set, every postings-bucket uid ∈ that set, and `search.id_by_uid` exactly matches structural `{uid: id}`; vectors (only when an embedder is configured) `vectors` == `id_by_uid` == `hash_by_uid` keys == manifest uid-set, `vector.id_by_uid` exactly matches structural `{uid: id}`, `namespace` == embedder's `cache_namespace`, `dim` is `int | null` (`null` only with zero stored vectors; otherwise every vector has length `dim`).
 - **No-embedder mode** ignores the `vectors` section entirely — it is not deserialized or validated.
 - Atomic writes: write to `<path>.tmp`, then `os.replace`. Manifest paths are **root-relative POSIX** strings.
 - **Shared-`Relation` identity invariant (structural):** the source and target `OutRef`s of one relation must share a single `Relation` instance (`in_refs` dedup keys on `id(relation)`). Serialize each relation once per entry and replay extraction (`_out_refs_from`) on load.
@@ -339,7 +339,7 @@ rtk git commit -m "feat(persistence): SearchIndex to_dict/from_dict with self-co
 - Consumes: nothing from other tasks.
 - Produces:
   - `VectorIndex.to_dict(self) -> dict` → `{"namespace": str | None, "dim": int | None, "vectors": {uid: [float,...]}, "id_by_uid": {uid: id}, "hash_by_uid": {uid: hash}}`
-  - `VectorIndex.from_dict(cls, d: dict) -> VectorIndex` — rebuilds verbatim (stored vectors are already L2-normalized; no re-normalization). Raises `ValueError` if the three uid maps differ, if `dim` is non-int while vectors are present, if a vector's length ≠ `dim`, or if `dim` is non-null while there are zero vectors.
+  - `VectorIndex.from_dict(cls, d: dict) -> VectorIndex` — rebuilds verbatim (stored vectors are already L2-normalized; no re-normalization). Raises `ValueError` if the three uid maps differ, if `dim` is non-int while vectors are present, if a vector's length ≠ `dim`, or if `dim` is non-null while there are zero vectors. `to_dict()` emits `dim: None` whenever `vectors` is empty, even if the live index still remembers an old dimension after deletes.
 
 **Reference (current `VectorIndex` attributes, from `similarity.py`):** `vectors: dict[str, Vector]`, `id_by_uid: dict[str, str]`, `hash_by_uid: dict[str, str]`, `dim: int | None`, `namespace: str | None`. `Vector = tuple[float, ...]`.
 
@@ -402,6 +402,18 @@ def test_empty_embedder_index_dim_null_round_trips():
     assert restored.vectors == {}
 
 
+def test_to_dict_emits_dim_null_after_last_vector_removed(tmp_path):
+    idx = _index(tmp_path)
+    for uid in list(idx.vectors):
+        idx.remove(uid)
+    d = idx.to_dict()
+    assert d["vectors"] == {}
+    assert d["dim"] is None
+    restored = VectorIndex.from_dict(d)
+    assert restored.dim is None
+    assert restored.namespace == "test-ns"
+
+
 def test_from_dict_rejects_uid_map_mismatch():
     with pytest.raises(ValueError):
         VectorIndex.from_dict(
@@ -435,7 +447,7 @@ In `python/src/nodes/kernel/similarity.py`, add these two methods to `class Vect
     def to_dict(self) -> dict:
         return {
             "namespace": self.namespace,
-            "dim": self.dim,
+            "dim": self.dim if self.vectors else None,
             "vectors": {uid: list(vec) for uid, vec in self.vectors.items()},
             "id_by_uid": dict(self.id_by_uid),
             "hash_by_uid": dict(self.hash_by_uid),
@@ -469,7 +481,7 @@ In `python/src/nodes/kernel/similarity.py`, add these two methods to `class Vect
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `rtk uv run pytest tests/test_vector_snapshot.py -q`
-Expected: PASS (6 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Run gate and commit**
 
@@ -556,6 +568,22 @@ def test_from_dict_rejects_duplicate_uid():
     idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
     d = idx.to_dict()
     d["entries"].append(dict(d["entries"][0]))  # duplicate uid
+    with pytest.raises(ValueError):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_duplicate_live_id():
+    idx = Index.build([Node(id="topic:a", kind="topic", title="A"), Node(id="topic:b", kind="topic", title="B")])
+    d = idx.to_dict()
+    d["entries"][1]["id"] = d["entries"][0]["id"]
+    with pytest.raises(ValueError):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_deprecated_id_collision():
+    idx = Index.build([Node(id="topic:a", kind="topic", title="A"), Node(id="topic:b", kind="topic", title="B")])
+    d = idx.to_dict()
+    d["entries"][1]["deprecated_ids"] = [d["entries"][0]["id"]]
     with pytest.raises(ValueError):
         Index.from_dict(d)
 
@@ -709,6 +737,12 @@ Add these methods to `class Index` (e.g. after `remove`):
                 out_refs=out_refs,
                 membership=membership,
             )
+            for claim in (entry.id, *entry.deprecated_ids):
+                owner = idx.resolve_uid(claim)
+                if owner is not None:
+                    raise ValueError(
+                        f"structural snapshot: identity claim {claim!r} already in use by uid {owner!r}"
+                    )
             idx.by_uid[uid] = entry
             idx.id_to_uid[entry.id] = uid
             for dep in entry.deprecated_ids:
@@ -721,7 +755,7 @@ Add these methods to `class Index` (e.g. after `remove`):
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `rtk uv run pytest tests/test_index_snapshot.py tests/test_index_rebuild_equivalence.py tests/test_index.py -q`
-Expected: PASS (new file 5 tests; the existing index suites still green — guards the refactor).
+Expected: PASS (new file 7 tests; the existing index suites still green — guards the refactor).
 
 - [ ] **Step 5: Run gate and commit**
 
@@ -791,7 +825,7 @@ def _write(tmp_path, *, embedder=False):
 
 
 def test_write_then_load_round_trips_structural_and_search(tmp_path):
-    nodes, manifest = _write(tmp_path)
+    nodes, _manifest = _write(tmp_path)
     snap = load_snapshot(tmp_path, None)
     assert isinstance(snap, Snapshot)
     assert {m.uid for m in snap.manifest} == {n.uid for n in nodes}
@@ -842,6 +876,14 @@ def test_manifest_section_bijection_violation_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None  # manifest uid not in structural/search
 
 
+def test_search_id_by_uid_mismatch_returns_none(tmp_path):
+    nodes, _manifest = _write(tmp_path)
+    doc = read_json(snapshot_path(tmp_path))
+    doc["search"]["id_by_uid"][nodes[0].uid] = "topic:wrong"
+    write_json_atomic(snapshot_path(tmp_path), doc)
+    assert load_snapshot(tmp_path, None) is None
+
+
 def test_no_embedder_ignores_corrupt_vectors_section(tmp_path):
     _write(tmp_path)
     doc = read_json(snapshot_path(tmp_path))
@@ -864,6 +906,27 @@ def test_embedder_namespace_mismatch_returns_none(tmp_path):
     write_snapshot(tmp_path, manifest, index, search, None)
     doc = read_json(snapshot_path(tmp_path))
     doc["vectors"] = {"namespace": "other-ns", "dim": None, "vectors": {}, "id_by_uid": {}, "hash_by_uid": {}}
+    write_json_atomic(snapshot_path(tmp_path), doc)
+    assert load_snapshot(tmp_path, "expected-ns") is None
+
+
+def test_embedder_vector_id_by_uid_mismatch_returns_none(tmp_path):
+    nodes = _nodes()
+    manifest = _manifest(nodes)
+    index = Index.build(nodes)
+    search = SearchIndex.build(nodes)
+    write_snapshot(tmp_path, manifest, index, search, None)
+    doc = read_json(snapshot_path(tmp_path))
+    vectors = {node.uid: [1.0, 0.0] for node in nodes}
+    id_by_uid = {node.uid: node.id for node in nodes}
+    id_by_uid[nodes[0].uid] = "topic:wrong"
+    doc["vectors"] = {
+        "namespace": "expected-ns",
+        "dim": 2,
+        "vectors": vectors,
+        "id_by_uid": id_by_uid,
+        "hash_by_uid": {node.uid: f"{i:064d}" for i, node in enumerate(nodes)},
+    }
     write_json_atomic(snapshot_path(tmp_path), doc)
     assert load_snapshot(tmp_path, "expected-ns") is None
 ```
@@ -941,9 +1004,12 @@ def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot 
         index = Index.from_dict(doc["structural"])
         if set(index.by_uid) != manifest_uids:
             return None
+        expected_ids = {uid: entry.id for uid, entry in index.by_uid.items()}
 
         search_index = SearchIndex.from_dict(doc["search"])
         if set(search_index.lengths) != manifest_uids:
+            return None
+        if search_index.id_by_uid != expected_ids:
             return None
 
         vector_index: VectorIndex | None = None
@@ -956,6 +1022,8 @@ def load_snapshot(root: Path | str, embedder_namespace: str | None) -> Snapshot 
             vector_index = VectorIndex.from_dict(vec)
             if set(vector_index.vectors) != manifest_uids:
                 return None
+            if vector_index.id_by_uid != expected_ids:
+                return None
 
         return Snapshot(manifest=manifest, index=index, search_index=search_index, vector_index=vector_index)
     except (OSError, ValueError, KeyError, TypeError, IndexError):
@@ -967,7 +1035,7 @@ Note: `json.JSONDecodeError` is a subclass of `ValueError`, so the `except` clau
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `rtk uv run pytest tests/test_snapshot_load.py -q`
-Expected: PASS (10 tests).
+Expected: PASS (12 tests).
 
 - [ ] **Step 5: Run gate and commit**
 
@@ -1244,7 +1312,14 @@ from __future__ import annotations
 from nodes.kernel.corpus import Corpus
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
-from nodes.kernel.snapshot import hash_bytes, iter_corpus_files
+from nodes.kernel.snapshot import iter_corpus_files, read_json, snapshot_path
+
+
+class FixedEmbedder:
+    cache_namespace = "test-ns"
+
+    def embed(self, texts: list[str]) -> list[tuple[float, ...]]:
+        return [(1.0, 0.0) for _ in texts]
 
 
 def _manifest_matches_disk(c: Corpus) -> bool:
@@ -1305,6 +1380,21 @@ def test_flush_after_mutations_reloads_equivalently(tmp_path):
     from nodes.kernel.snapshot import snapshot_path
     snapshot_path(tmp_path).unlink()
     assert _results(Corpus(tmp_path)) == _results(c)
+
+
+def test_delete_last_embedder_node_flushes_self_usable_snapshot(tmp_path):
+    c = Corpus(tmp_path, embedder=FixedEmbedder())
+    c.add(Node(id="topic:a", kind="topic", title="A", body="gamma"))
+    c.delete("topic:a")
+    c.flush_index()
+    doc = read_json(snapshot_path(tmp_path))
+    assert doc["vectors"]["vectors"] == {}
+    assert doc["vectors"]["dim"] is None
+
+    reloaded = Corpus(tmp_path, embedder=FixedEmbedder())
+    assert reloaded.vector_index is not None
+    assert reloaded.vector_index.dim is None
+    assert reloaded.similar_text("query") == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1366,7 +1456,7 @@ In `rename`, after the existing final `self.search_index.upsert(node)` and vecto
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `rtk uv run pytest tests/test_corpus_persistence_rename.py -q`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 Run the full suite:
 Run: `rtk uv run pytest -q`
@@ -1415,8 +1505,8 @@ rtk git commit -m "feat(persistence): manifest maintenance across add/delete/ren
 - §3 rename referrers + old-path removal → Task 7 `rename` updates referrers and pops old path on move. ✓
 - §4 load/reconcile algorithm, drops-before-upserts, error scoping → Task 6 `_reconcile`; `load_snapshot` (Task 5) never parses corpus files so corpus errors propagate. ✓
 - §4.1 full `build()` collision contract → Task 6 `node.uid in self.index.by_uid` check before `assert_addable`; covered by `test_reconcile_uid_collision_raises`. ✓
-- §5 integrity/bijection → Task 5 `load_snapshot` cross-section checks + Tasks 2/3/4 per-section self-consistency. ✓
-- §6 embedder/vector rules + no-embedder tolerance → Task 5 (`embedder_namespace` gate; vectors ignored when `None`); `test_no_embedder_ignores_corrupt_vectors_section`. ✓
+- §5 integrity/bijection → Task 5 `load_snapshot` cross-section checks + Tasks 2/3/4 per-section self-consistency; structural identity collisions and search/vector `id_by_uid` mismatches are rejected. ✓
+- §6 embedder/vector rules + no-embedder tolerance → Task 5 (`embedder_namespace` gate; vectors ignored when `None`); `test_no_embedder_ignores_corrupt_vectors_section`; empty vector indexes serialize with `dim: None`, including after deleting the last vector-backed node. ✓
 - §7 per-index serialization + shared-`Relation` invariant → Tasks 2/3/4; Task 4 replays `_out_refs_from`; `test_round_trip_preserves_inbound_and_dangling_dedup`. ✓
 - §8 `flush_index` explicit + atomic; construction never writes → Task 6; `test_construction_never_writes_snapshot`. ✓
 - §9 error handling table → Task 5 silent-`None` cases + Task 6 propagation tests. ✓
