@@ -101,6 +101,40 @@ def _validated_deprecated_ids(raw: object, entry_id: str) -> list[str]:
     return deprecated_ids
 
 
+def _validated_membership(raw: object) -> dict | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("structural snapshot: entry membership must be a dict or null")
+
+    members = raw.get("members")
+    if members is not None:
+        if isinstance(members, list):
+            if any(not isinstance(member, str) for member in members):
+                raise ValueError("structural snapshot: membership members must be strings")
+        elif isinstance(members, dict):
+            if any(not isinstance(member, str) for member in members.values()):
+                raise ValueError("structural snapshot: membership member values must be strings")
+        else:
+            raise ValueError("structural snapshot: membership members must be a list or dict")
+
+    edges = raw.get("edges")
+    if edges is not None:
+        if not isinstance(edges, list):
+            raise ValueError("structural snapshot: membership edges must be a list")
+        for edge in edges:
+            if not isinstance(edge, dict):
+                raise ValueError("structural snapshot: membership edge must be a dict")
+            source = edge.get("source")
+            target = edge.get("target")
+            if source is not None and not isinstance(source, str):
+                raise ValueError("structural snapshot: membership edge source must be a string")
+            if target is not None and not isinstance(target, str):
+                raise ValueError("structural snapshot: membership edge target must be a string")
+
+    return deepcopy(raw)
+
+
 class Index:
     """In-memory structural index. Pure data; no file I/O."""
 
@@ -209,8 +243,6 @@ class Index:
                 raise ValueError("structural snapshot: entry kind must be a string")
             if not isinstance(relations_raw, list):
                 raise ValueError("structural snapshot: entry relations must be a list")
-            if membership_raw is not None and not isinstance(membership_raw, dict):
-                raise ValueError("structural snapshot: entry membership must be a dict or null")
             if uid in idx.by_uid:
                 raise ValueError(f"structural snapshot: duplicate uid {uid!r}")
             deprecated_ids = _validated_deprecated_ids(raw["deprecated_ids"], entry_id)
@@ -224,7 +256,7 @@ class Index:
                     relations.append(Relation(**relation_data))
                 except (PydanticValidationError, TypeError) as exc:
                     raise ValueError("structural snapshot: invalid relation row") from exc
-            membership = deepcopy(membership_raw)
+            membership = _validated_membership(membership_raw)
             out_refs = _out_refs_from(relations, membership)
             entry = IndexEntry(
                 uid=uid,

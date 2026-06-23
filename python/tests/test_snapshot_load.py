@@ -111,6 +111,15 @@ def test_duplicate_manifest_uid_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None
 
 
+def test_duplicate_manifest_path_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["manifest"][1]["path"] = doc["manifest"][0]["path"]
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
 @pytest.mark.parametrize("key", ("manifest", "structural", "search", "vectors"))
 def test_missing_required_top_level_key_returns_none(tmp_path, key):
     _write(tmp_path)
@@ -182,6 +191,37 @@ def test_malformed_structural_entry_id_returns_none(tmp_path):
     first_uid = doc["manifest"][0]["uid"]
     doc["structural"]["entries"][0]["id"] = 123
     doc["search"]["id_by_uid"][first_uid] = 123
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_membership_members_string_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["structural"]["entries"][0]["membership"] = {"members": "topic:a"}
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_membership_edges_dict_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["structural"]["entries"][0]["membership"] = {
+        "edges": {"source": "topic:a", "target": "topic:b"}
+    }
+    write_json_atomic(snapshot_path(tmp_path), doc)
+
+    assert load_snapshot(tmp_path, None) is None
+
+
+def test_malformed_structural_membership_edge_source_returns_none(tmp_path):
+    _write(tmp_path)
+    doc = _snapshot_doc(tmp_path)
+    doc["structural"]["entries"][0]["membership"] = {
+        "edges": [{"source": 123, "target": "topic:b"}]
+    }
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None

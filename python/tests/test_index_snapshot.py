@@ -127,6 +127,37 @@ def test_from_dict_rejects_invalid_membership_container():
         Index.from_dict(d)
 
 
+@pytest.mark.parametrize(
+    "members",
+    [
+        "topic:a",
+        ["topic:a", 123],
+        {"a": "topic:a", "b": 123},
+    ],
+)
+def test_from_dict_rejects_invalid_membership_members(members):
+    d = _single_entry_snapshot()
+    d["entries"][0]["membership"] = {"members": members}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+@pytest.mark.parametrize(
+    "edges",
+    [
+        {"source": "topic:a", "target": "topic:b"},
+        ["not an edge"],
+        [{"source": 123, "target": "topic:b"}],
+        [{"source": "topic:a", "target": 123}],
+    ],
+)
+def test_from_dict_rejects_invalid_membership_edges(edges):
+    d = _single_entry_snapshot()
+    d["entries"][0]["membership"] = {"edges": edges}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
 def test_from_dict_rejects_duplicate_uid():
     idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
     d = idx.to_dict()
