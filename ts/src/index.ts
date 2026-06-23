@@ -44,6 +44,21 @@ export {
 export { Store } from "./store.js";
 export { Corpus } from "./corpus.js";
 export {
+  type CorpusFile,
+  type ManifestEntry,
+  type Snapshot,
+  SNAPSHOT_LANG,
+  SNAPSHOT_SCHEMA_VERSION,
+  hashBytes,
+  iterCorpusFiles,
+  loadSnapshot,
+  pathForNodeId,
+  readJson,
+  snapshotPath,
+  writeJsonAtomic,
+  writeSnapshot,
+} from "./snapshot.js";
+export {
   Index,
   type InRef,
   type IndexEntry,
