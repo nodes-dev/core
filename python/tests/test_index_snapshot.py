@@ -211,6 +211,17 @@ def test_from_dict_rejects_invalid_membership_edge_schema(edge):
         Index.from_dict(d)
 
 
+@pytest.mark.parametrize("weight", [float("nan"), float("inf")])
+def test_from_dict_rejects_non_finite_membership_edge_weight(weight):
+    d = _single_entry_snapshot()
+    d["entries"][0]["membership"] = {
+        "shape": "graph",
+        "edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b", "weight": weight}],
+    }
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
 def test_from_dict_rejects_duplicate_uid():
     idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
     d = idx.to_dict()

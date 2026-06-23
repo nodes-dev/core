@@ -140,11 +140,7 @@ def _validated_membership(raw: object) -> dict | None:
             directed = edge.get("directed")
             if "directed" in edge and not isinstance(directed, bool):
                 raise ValueError("structural snapshot: membership edge directed must be a bool")
-            weight = edge.get("weight")
-            if "weight" in edge and (
-                isinstance(weight, bool) or not isinstance(weight, (int, float))
-            ):
-                raise ValueError("structural snapshot: membership edge weight must be numeric")
+            _validate_snapshot_weight(edge, "membership edge")
             attrs = edge.get("attrs")
             if "attrs" in edge and not isinstance(attrs, dict):
                 raise ValueError("structural snapshot: membership edge attrs must be a dict")
