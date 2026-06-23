@@ -1,10 +1,20 @@
 import { CollisionError, EmbedderRequiredError, RefError } from "./errors.js";
+import { nodeFromMarkdown, nodeToMarkdown } from "./frontmatter.js";
 import { NodeId } from "./ids.js";
 import type { Node } from "./node.js";
 import type { Registry } from "./registry.js";
 import { type SearchHit, SearchIndex } from "./search.js";
 import { MEMBERSHIP } from "./shapes.js";
 import { type Embedder, type SimilarHit, type Vector, VectorCache, VectorIndex } from "./similarity.js";
+import {
+  type ManifestEntry,
+  type Snapshot,
+  hashBytes,
+  iterCorpusFiles,
+  loadSnapshot,
+  pathForNodeId,
+  writeSnapshot,
+} from "./snapshot.js";
 import { Store } from "./store.js";
 import { Index, type ResolvedEdge } from "./structural-index.js";
 
@@ -43,23 +53,100 @@ function rewriteRefs(node: Node, oldId: string, newId: string): void {
 export class Corpus {
   readonly store: Store;
   readonly registry?: Registry;
-  readonly index: Index;
-  readonly searchIndex: SearchIndex;
+  index!: Index;
+  searchIndex!: SearchIndex;
   readonly embedder?: Embedder;
   readonly vectorCache?: VectorCache;
-  readonly vectorIndex?: VectorIndex;
+  vectorIndex?: VectorIndex;
+  manifest: Map<string, ManifestEntry>;
 
   constructor(root: string, registry?: Registry, embedder?: Embedder) {
     this.store = new Store(root);
     this.registry = registry;
     this.embedder = embedder;
-    const nodes = this.store.allNodes();
+    this.vectorCache = embedder !== undefined ? new VectorCache(root) : undefined;
+    this.manifest = new Map();
+    const namespace = embedder !== undefined ? embedder.cacheNamespace : null;
+    const snap = loadSnapshot(this.store.root, namespace);
+    if (snap === null) this.fullRebuild();
+    else this.reconcile(snap);
+  }
+
+  private relPath(nodeId: string): string {
+    return pathForNodeId(nodeId);
+  }
+
+  private recordManifest(node: Node): void {
+    const path = this.relPath(node.id);
+    const data = Buffer.from(nodeToMarkdown(node), "utf-8");
+    this.manifest.set(path, { path, sha256: hashBytes(data), uid: node.uid });
+  }
+
+  private fullRebuild(): void {
+    const nodes: Node[] = [];
+    const manifest = new Map<string, ManifestEntry>();
+    for (const f of iterCorpusFiles(this.store.root)) {
+      const node = nodeFromMarkdown(f.data.toString("utf-8"));
+      nodes.push(node);
+      manifest.set(f.path, { path: f.path, sha256: f.sha256, uid: node.uid });
+    }
     this.index = Index.build(nodes);
     this.searchIndex = SearchIndex.build(nodes);
-    if (embedder !== undefined) {
-      this.vectorCache = new VectorCache(root);
-      this.vectorIndex = VectorIndex.build(nodes, embedder, this.vectorCache);
+    if (this.embedder !== undefined) {
+      this.vectorIndex = VectorIndex.build(nodes, this.embedder, this.vectorCache as VectorCache);
+    } else {
+      this.vectorIndex = undefined;
     }
+    this.manifest = manifest;
+  }
+
+  private reconcile(snap: Snapshot): void {
+    this.index = snap.index;
+    this.searchIndex = snap.searchIndex;
+    this.vectorIndex = snap.vectorIndex ?? undefined;
+    const old = new Map<string, ManifestEntry>(snap.manifest.map((m) => [m.path, m]));
+    const newManifest = new Map<string, ManifestEntry>();
+    const changed: Array<{ path: string; sha256: string; node: Node }> = [];
+    const drops: string[] = [];
+    const current = new Set<string>();
+    for (const f of iterCorpusFiles(this.store.root)) {
+      current.add(f.path);
+      const prev = old.get(f.path);
+      if (prev !== undefined && prev.sha256 === f.sha256) {
+        newManifest.set(f.path, prev); // unchanged: keep deserialized state, no parse
+        continue;
+      }
+      if (prev !== undefined) drops.push(prev.uid);
+      changed.push({ path: f.path, sha256: f.sha256, node: nodeFromMarkdown(f.data.toString("utf-8")) });
+    }
+    for (const [path, m] of old) {
+      if (!current.has(path)) drops.push(m.uid); // deleted on disk
+    }
+    for (const uid of drops) {
+      this.index.remove(uid);
+      this.searchIndex.remove(uid);
+      this.vectorIndex?.remove(uid);
+    }
+    for (const { path, sha256, node } of changed) {
+      // Full build() collision contract: duplicate uid is rejected outright, then assertAddable.
+      if (this.index.byUid.has(node.uid))
+        throw new CollisionError(`duplicate uid ${JSON.stringify(node.uid)} in corpus`);
+      this.index.assertAddable(node);
+      const prepared =
+        this.vectorIndex !== undefined
+          ? this.vectorIndex.prepare(node, this.embedder as Embedder, this.vectorCache as VectorCache)
+          : undefined;
+      this.index.upsert(node);
+      this.searchIndex.upsert(node);
+      if (this.vectorIndex !== undefined && prepared !== undefined) this.vectorIndex.commit(node, prepared);
+      newManifest.set(path, { path, sha256, uid: node.uid });
+    }
+    this.manifest = newManifest;
+  }
+
+  flushIndex(): void {
+    const manifest = [...this.manifest.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    writeSnapshot(this.store.root, manifest, this.index, this.searchIndex, this.vectorIndex);
   }
 
   private idFor(uid: string): string {
@@ -87,6 +174,7 @@ export class Corpus {
     if (this.vectorIndex !== undefined && prepared !== undefined) {
       this.vectorIndex.commit(node, prepared);
     }
+    this.recordManifest(node);
     return node;
   }
 
@@ -101,10 +189,12 @@ export class Corpus {
   delete(nodeId: string): void {
     const uid = this.index.idToUid.get(nodeId);
     if (uid === undefined) throw new RefError(`no live node at ${JSON.stringify(nodeId)}`);
+    const path = this.relPath(nodeId);
     this.store.deleteFile(nodeId);
     this.index.remove(uid);
     this.searchIndex.remove(uid);
     this.vectorIndex?.remove(uid);
+    this.manifest.delete(path);
   }
 
   all(): Node[] {
@@ -151,6 +241,7 @@ export class Corpus {
     // 3. Rewrite the renamed node itself (incl. its own oldId refs).
     const node = this.store.readFile(oldId);
     const oldPath = this.store.pathFor(oldId);
+    const oldRelPath = this.relPath(oldId);
     node.id = newId;
     node.kind = NodeId.parse(newId).kind;
     if (!node.deprecatedIds.includes(oldId)) node.deprecatedIds.push(oldId);
@@ -171,25 +262,39 @@ export class Corpus {
       for (const referrer of referrers) this.registry.validate(referrer);
     }
 
-    // 5b. Prepare the renamed node's vector (fail before any disk write).
+    // 5b. Prepare the renamed node's + referrers' vectors (fail before any disk write).
     const prepared =
       this.vectorIndex !== undefined
         ? this.vectorIndex.prepare(node, this.embedder as Embedder, this.vectorCache as VectorCache)
         : undefined;
+    const preparedReferrers =
+      this.vectorIndex !== undefined
+        ? referrers.map((r) =>
+            (this.vectorIndex as VectorIndex).prepare(r, this.embedder as Embedder, this.vectorCache as VectorCache),
+          )
+        : [];
 
     // 6. Commit: renamed node first (crash-atomic), then referrers. Each written once.
     const newPath = this.store.writeFile(node);
     if (oldPath !== newPath) this.store.deleteFile(oldId);
     this.index.upsert(node);
-    for (const referrer of referrers) {
+    for (let i = 0; i < referrers.length; i++) {
+      const referrer = referrers[i];
       this.store.writeFile(referrer);
       this.index.upsert(referrer);
+      this.searchIndex.upsert(referrer);
+      if (this.vectorIndex !== undefined) this.vectorIndex.commit(referrer, preparedReferrers[i]);
     }
 
     this.searchIndex.upsert(node);
     if (this.vectorIndex !== undefined && prepared !== undefined) {
       this.vectorIndex.commit(node, prepared);
     }
+
+    // 7. Manifest: remove old path on move; re-record the renamed node and every rewritten referrer.
+    if (oldPath !== newPath) this.manifest.delete(oldRelPath);
+    this.recordManifest(node);
+    for (const referrer of referrers) this.recordManifest(referrer);
     return node;
   }
 

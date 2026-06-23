@@ -83,6 +83,12 @@ export interface SearchHit {
   matchedTerms: string[];
 }
 
+export interface SearchSnapshot {
+  postings: Record<string, Record<string, [number, number]>>;
+  lengths: Record<string, [number, number]>;
+  idByUid: Record<string, string>;
+}
+
 /** In-memory inverted index over node title+body. Pure data; no file I/O. */
 export class SearchIndex {
   postings = new Map<string, Map<string, [number, number]>>(); // term -> uid -> [titleTf, bodyTf]
@@ -135,6 +141,72 @@ export class SearchIndex {
 
   remove(uid: string): void {
     this.drop(uid);
+  }
+
+  toDict(): SearchSnapshot {
+    const postings: Record<string, Record<string, [number, number]>> = {};
+    for (const [term, docs] of this.postings) {
+      const bucket: Record<string, [number, number]> = {};
+      for (const [uid, tf] of docs) bucket[uid] = [tf[0], tf[1]];
+      postings[term] = bucket;
+    }
+    return {
+      postings,
+      lengths: Object.fromEntries([...this.lengths].map(([uid, l]) => [uid, [l[0], l[1]]])),
+      idByUid: Object.fromEntries(this.idByUid),
+    };
+  }
+
+  static fromDict(d: unknown): SearchIndex {
+    if (typeof d !== "object" || d === null) throw new Error("search snapshot: document must be an object");
+    const raw = d as Record<string, unknown>;
+    if (typeof raw.lengths !== "object" || raw.lengths === null) {
+      throw new Error("search snapshot: lengths must be an object");
+    }
+    if (typeof raw.idByUid !== "object" || raw.idByUid === null) {
+      throw new Error("search snapshot: idByUid must be an object");
+    }
+    if (typeof raw.postings !== "object" || raw.postings === null) {
+      throw new Error("search snapshot: postings must be an object");
+    }
+    const lengths = new Map<string, [number, number]>();
+    for (const [uid, v] of Object.entries(raw.lengths as Record<string, unknown>)) {
+      lengths.set(uid, nonNegativeIntPair(v, `search snapshot: length for uid ${JSON.stringify(uid)}`));
+    }
+    const idByUid = new Map<string, string>();
+    for (const [uid, id] of Object.entries(raw.idByUid as Record<string, unknown>)) {
+      if (typeof id !== "string") throw new Error("search snapshot: idByUid must map uids to string ids");
+      idByUid.set(uid, id as string);
+    }
+    if (lengths.size !== idByUid.size || [...lengths.keys()].some((uid) => !idByUid.has(uid))) {
+      throw new Error("search snapshot: lengths/idByUid uid sets differ");
+    }
+    const postings = new Map<string, Map<string, [number, number]>>();
+    for (const [term, docs] of Object.entries(raw.postings as Record<string, unknown>)) {
+      if (typeof docs !== "object" || docs === null)
+        throw new Error("search snapshot: postings bucket must be an object");
+      const bucket = new Map<string, [number, number]>();
+      for (const [uid, tf] of Object.entries(docs as Record<string, unknown>)) {
+        if (!lengths.has(uid)) {
+          throw new Error(`search snapshot: posting uid ${JSON.stringify(uid)} absent from lengths`);
+        }
+        bucket.set(
+          uid,
+          nonNegativeIntPair(
+            tf,
+            `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)}`,
+          ),
+        );
+      }
+      postings.set(term, bucket);
+    }
+    const idx = new SearchIndex();
+    idx.postings = postings;
+    idx.lengths = lengths;
+    idx.idByUid = idByUid;
+    idx.totalTitle = [...lengths.values()].reduce((s, l) => s + l[0], 0);
+    idx.totalBody = [...lengths.values()].reduce((s, l) => s + l[1], 0);
+    return idx;
   }
 
   search(query: string, limit?: number): SearchHit[] {
@@ -205,4 +277,20 @@ export class SearchIndex {
       }
     }
   }
+}
+
+function nonNegativeIntPair(value: unknown, label: string): [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) throw new Error(`${label} must be a 2-item array`);
+  const [first, second] = value;
+  if (
+    typeof first !== "number" ||
+    typeof second !== "number" ||
+    !Number.isInteger(first) ||
+    !Number.isInteger(second) ||
+    first < 0 ||
+    second < 0
+  ) {
+    throw new Error(`${label} must contain non-negative integers`);
+  }
+  return [first, second];
 }

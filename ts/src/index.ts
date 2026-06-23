@@ -44,6 +44,21 @@ export {
 export { Store } from "./store.js";
 export { Corpus } from "./corpus.js";
 export {
+  type CorpusFile,
+  type ManifestEntry,
+  type Snapshot,
+  SNAPSHOT_LANG,
+  SNAPSHOT_SCHEMA_VERSION,
+  hashBytes,
+  iterCorpusFiles,
+  loadSnapshot,
+  pathForNodeId,
+  readJson,
+  snapshotPath,
+  writeJsonAtomic,
+  writeSnapshot,
+} from "./snapshot.js";
+export {
   Index,
   type InRef,
   type IndexEntry,
@@ -52,11 +67,12 @@ export {
   type Role,
 } from "./structural-index.js";
 export { scoreKey } from "./ranking.js";
-export { SearchIndex, type SearchHit, tokenize } from "./search.js";
+export { SearchIndex, type SearchHit, type SearchSnapshot, tokenize } from "./search.js";
 export {
   type Embedder,
   type SimilarHit,
   type Vector,
+  type VectorSnapshot,
   VectorCache,
   VectorIndex,
   embedText,
