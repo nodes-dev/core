@@ -3,13 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from nodes.kernel.errors import CollisionError, EmbedderRequiredError, RefError
-from nodes.kernel.similarity import Embedder, SimilarHit, Vector, VectorCache, VectorIndex
+from nodes.kernel.frontmatter import node_from_markdown
 from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
 from nodes.kernel.search import SearchHit, SearchIndex
 from nodes.kernel.shapes import MEMBERSHIP
+from nodes.kernel.similarity import Embedder, SimilarHit, Vector, VectorCache, VectorIndex
+from nodes.kernel.snapshot import (
+    ManifestEntry,
+    Snapshot,
+    iter_corpus_files,
+    load_snapshot,
+    write_snapshot,
+)
 from nodes.kernel.store import Store
 
 
@@ -44,15 +52,88 @@ class Corpus:
         self.store = Store(root)
         self.registry = registry
         self.embedder = embedder
-        nodes = self.store.all_nodes()
+        self.vector_cache: VectorCache | None = VectorCache(root) if embedder is not None else None
+        self.manifest: dict[str, ManifestEntry] = {}
+        namespace = embedder.cache_namespace if embedder is not None else None
+        snap = load_snapshot(self.store.root, namespace)
+        if snap is None:
+            self._full_rebuild()
+        else:
+            self._reconcile(snap)
+
+    def _rel_path(self, node_id: str) -> str:
+        return self.store.path_for(node_id).relative_to(self.store.root).as_posix()
+
+    def _full_rebuild(self) -> None:
+        nodes: list[Node] = []
+        manifest: dict[str, ManifestEntry] = {}
+        for f in iter_corpus_files(self.store.root):
+            node = node_from_markdown(f.data.decode("utf-8"))
+            nodes.append(node)
+            manifest[f.path] = ManifestEntry(path=f.path, sha256=f.sha256, uid=node.uid)
         self.index = Index.build(nodes)
         self.search_index = SearchIndex.build(nodes)
-        if embedder is not None:
-            self.vector_cache: VectorCache | None = VectorCache(root)
-            self.vector_index: VectorIndex | None = VectorIndex.build(nodes, embedder, self.vector_cache)
+        if self.embedder is not None:
+            assert self.vector_cache is not None
+            self.vector_index: VectorIndex | None = VectorIndex.build(nodes, self.embedder, self.vector_cache)
         else:
-            self.vector_cache = None
             self.vector_index = None
+        self.manifest = manifest
+
+    def _reconcile(self, snap: Snapshot) -> None:
+        self.index = snap.index
+        self.search_index = snap.search_index
+        self.vector_index = snap.vector_index
+        old = {m.path: m for m in snap.manifest}
+        new_manifest: dict[str, ManifestEntry] = {}
+        changed: list[tuple[str, str, Node]] = []
+        drops: list[str] = []
+        current: set[str] = set()
+        for f in iter_corpus_files(self.store.root):
+            current.add(f.path)
+            prev = old.get(f.path)
+            if prev is not None and prev.sha256 == f.sha256:
+                new_manifest[f.path] = prev
+                continue
+            if prev is not None:
+                drops.append(prev.uid)
+            changed.append((f.path, f.sha256, node_from_markdown(f.data.decode("utf-8"))))
+        for path, m in old.items():
+            if path not in current:
+                drops.append(m.uid)
+        for uid in drops:
+            self.index.remove(uid)
+            self.search_index.remove(uid)
+            if self.vector_index is not None:
+                self.vector_index.remove(uid)
+        for path, sha, node in changed:
+            if node.uid in self.index.by_uid:
+                raise CollisionError(f"duplicate uid {node.uid!r} in corpus")
+            self.index.assert_addable(node)
+            prepared = None
+            if self.vector_index is not None:
+                assert self.embedder is not None and self.vector_cache is not None
+                prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
+            self.index.upsert(node)
+            self.search_index.upsert(node)
+            if self.vector_index is not None and prepared is not None:
+                self.vector_index.commit(node, prepared)
+            new_manifest[path] = ManifestEntry(path=path, sha256=sha, uid=node.uid)
+        self.manifest = new_manifest
+
+    def _current_manifest(self) -> list[ManifestEntry]:
+        by_uid = self.index.by_uid
+        manifest = []
+        for f in iter_corpus_files(self.store.root):
+            node = node_from_markdown(f.data.decode("utf-8"))
+            if node.uid in by_uid:
+                manifest.append(ManifestEntry(path=f.path, sha256=f.sha256, uid=node.uid))
+        return manifest
+
+    def flush_index(self) -> None:
+        manifest = sorted(self._current_manifest(), key=lambda m: m.path)
+        write_snapshot(self.store.root, manifest, self.index, self.search_index, self.vector_index)
+        self.manifest = {m.path: m for m in manifest}
 
     def add(self, node: Node) -> Node:
         if self.registry is not None:
