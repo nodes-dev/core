@@ -1,5 +1,6 @@
 export {
   CollisionError,
+  EmbedderRequiredError,
   FacetError,
   IdError,
   InvariantError,
@@ -52,3 +53,14 @@ export {
 } from "./structural-index.js";
 export { scoreKey } from "./ranking.js";
 export { SearchIndex, type SearchHit, tokenize } from "./search.js";
+export {
+  type Embedder,
+  type SimilarHit,
+  type Vector,
+  VectorCache,
+  VectorIndex,
+  embedText,
+  textHash,
+  validateNamespace,
+  validateTextHash,
+} from "./similarity.js";

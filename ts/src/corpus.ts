@@ -1,9 +1,10 @@
-import { CollisionError, RefError } from "./errors.js";
+import { CollisionError, EmbedderRequiredError, RefError } from "./errors.js";
 import { NodeId } from "./ids.js";
 import type { Node } from "./node.js";
 import type { Registry } from "./registry.js";
 import { type SearchHit, SearchIndex } from "./search.js";
 import { MEMBERSHIP } from "./shapes.js";
+import { type Embedder, type SimilarHit, type Vector, VectorCache, VectorIndex } from "./similarity.js";
 import { Store } from "./store.js";
 import { Index, type ResolvedEdge } from "./structural-index.js";
 
@@ -44,13 +45,21 @@ export class Corpus {
   readonly registry?: Registry;
   readonly index: Index;
   readonly searchIndex: SearchIndex;
+  readonly embedder?: Embedder;
+  readonly vectorCache?: VectorCache;
+  readonly vectorIndex?: VectorIndex;
 
-  constructor(root: string, registry?: Registry) {
+  constructor(root: string, registry?: Registry, embedder?: Embedder) {
     this.store = new Store(root);
     this.registry = registry;
+    this.embedder = embedder;
     const nodes = this.store.allNodes();
     this.index = Index.build(nodes);
     this.searchIndex = SearchIndex.build(nodes);
+    if (embedder !== undefined) {
+      this.vectorCache = new VectorCache(root);
+      this.vectorIndex = VectorIndex.build(nodes, embedder, this.vectorCache);
+    }
   }
 
   private idFor(uid: string): string {
@@ -68,9 +77,16 @@ export class Corpus {
   add(node: Node): Node {
     if (this.registry !== undefined) this.registry.validate(node);
     this.index.assertAddable(node);
+    const prepared =
+      this.vectorIndex !== undefined
+        ? this.vectorIndex.prepare(node, this.embedder as Embedder, this.vectorCache as VectorCache)
+        : undefined;
     this.store.writeFile(node);
     this.index.upsert(node);
     this.searchIndex.upsert(node);
+    if (this.vectorIndex !== undefined && prepared !== undefined) {
+      this.vectorIndex.commit(node, prepared);
+    }
     return node;
   }
 
@@ -88,6 +104,7 @@ export class Corpus {
     this.store.deleteFile(nodeId);
     this.index.remove(uid);
     this.searchIndex.remove(uid);
+    this.vectorIndex?.remove(uid);
   }
 
   all(): Node[] {
@@ -154,6 +171,12 @@ export class Corpus {
       for (const referrer of referrers) this.registry.validate(referrer);
     }
 
+    // 5b. Prepare the renamed node's vector (fail before any disk write).
+    const prepared =
+      this.vectorIndex !== undefined
+        ? this.vectorIndex.prepare(node, this.embedder as Embedder, this.vectorCache as VectorCache)
+        : undefined;
+
     // 6. Commit: renamed node first (crash-atomic), then referrers. Each written once.
     const newPath = this.store.writeFile(node);
     if (oldPath !== newPath) this.store.deleteFile(oldId);
@@ -164,10 +187,34 @@ export class Corpus {
     }
 
     this.searchIndex.upsert(node);
+    if (this.vectorIndex !== undefined && prepared !== undefined) {
+      this.vectorIndex.commit(node, prepared);
+    }
     return node;
   }
 
   search(query: string, limit?: number): SearchHit[] {
     return this.searchIndex.search(query, limit);
+  }
+
+  similar(ref: string, k?: number): SimilarHit[] {
+    if (this.vectorIndex === undefined) {
+      throw new EmbedderRequiredError("similarity requires Corpus(root, registry?, embedder)");
+    }
+    return this.vectorIndex.similar(this.requireUid(ref), k);
+  }
+
+  queryVector(vec: Vector, k?: number): SimilarHit[] {
+    if (this.vectorIndex === undefined) {
+      throw new EmbedderRequiredError("similarity requires Corpus(root, registry?, embedder)");
+    }
+    return this.vectorIndex.queryVector(vec, k);
+  }
+
+  similarText(text: string, k?: number): SimilarHit[] {
+    if (this.vectorIndex === undefined) {
+      throw new EmbedderRequiredError("similarity requires Corpus(root, registry?, embedder)");
+    }
+    return this.vectorIndex.similarText(text, this.embedder as Embedder, k);
   }
 }
