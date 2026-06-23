@@ -7,7 +7,7 @@ from nodes.kernel.errors import CollisionError
 from nodes.kernel.frontmatter import node_to_markdown
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
-from nodes.kernel.snapshot import snapshot_path
+from nodes.kernel.snapshot import ManifestEntry, hash_bytes, load_snapshot, snapshot_path
 
 
 def _seed(root) -> Corpus:
@@ -33,13 +33,23 @@ def _results(c: Corpus) -> dict:
     }
 
 
+def _fresh_rebuild(root) -> Corpus:
+    snapshot_path(root).unlink()
+    return Corpus(root)
+
+
+def _loaded_manifest(root) -> dict[str, ManifestEntry]:
+    snap = load_snapshot(root, None)
+    assert snap is not None
+    return {m.path: m for m in snap.manifest}
+
+
 def test_round_trip_matches_fresh_rebuild(tmp_path):
     c = _seed(tmp_path)
     c.flush_index()
     assert snapshot_path(tmp_path).is_file()
     loaded = Corpus(tmp_path)  # loads + reconciles (no on-disk changes)
-    snapshot_path(tmp_path).unlink()
-    fresh = Corpus(tmp_path)  # full rebuild, identical
+    fresh = _fresh_rebuild(tmp_path)
     assert _results(loaded) == _results(c)
     assert _results(loaded) == _results(fresh)
 
@@ -72,6 +82,34 @@ def test_flush_index_uses_live_manifest_not_disk_rebuild(tmp_path):
     c.flush_index()
     reloaded = Corpus(tmp_path)
     assert [(h.id, h.uid) for h in reloaded.search("zeta")] == [("topic:b", b_node.uid)]
+
+
+def test_delete_flush_writes_usable_manifest_matching_fresh_rebuild(tmp_path):
+    c = _seed(tmp_path)
+    c.delete("topic:a")
+    c.flush_index()
+    manifest = _loaded_manifest(tmp_path)
+    assert set(manifest) == {"topic/b.md"}
+    loaded = Corpus(tmp_path)
+    fresh = _fresh_rebuild(tmp_path)
+    assert [(h.id, h.uid) for h in loaded.search("gamma")] == [(h.id, h.uid) for h in fresh.search("gamma")]
+    assert len(loaded.dangling()) == len(fresh.dangling()) == 0
+
+
+def test_rename_flush_writes_updated_manifest_matching_fresh_rebuild(tmp_path):
+    c = _seed(tmp_path)
+    renamed = c.rename("topic:b", "topic:c")
+    c.flush_index()
+    manifest = _loaded_manifest(tmp_path)
+    assert set(manifest) == {"topic/a.md", "topic/c.md"}
+    assert manifest["topic/a.md"].sha256 == hash_bytes(c.store.path_for("topic:a").read_bytes())
+    assert manifest["topic/c.md"].sha256 == hash_bytes(c.store.path_for("topic:c").read_bytes())
+    loaded = Corpus(tmp_path)
+    assert [(e.relation.target, e.target_uid) for e in loaded.outbound("topic:a")] == [
+        ("topic:c", renamed.uid)
+    ]
+    fresh = _fresh_rebuild(tmp_path)
+    assert _results(loaded) == _results(fresh)
 
 
 def test_reconcile_added_and_deleted_files(tmp_path):

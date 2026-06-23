@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nodes.kernel.errors import CollisionError, EmbedderRequiredError, RefError
-from nodes.kernel.frontmatter import node_from_markdown
+from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
 from nodes.kernel.ids import NodeId
 from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
@@ -64,6 +64,11 @@ class Corpus:
 
     def _rel_path(self, node_id: str) -> str:
         return self.store.path_for(node_id).relative_to(self.store.root).as_posix()
+
+    def _record_manifest(self, node: Node) -> None:
+        path = self._rel_path(node.id)
+        data = node_to_markdown(node).encode("utf-8")
+        self.manifest[path] = ManifestEntry(path=path, sha256=hash_bytes(data), uid=node.uid)
 
     def _full_rebuild(self) -> None:
         nodes: list[Node] = []
@@ -134,13 +139,12 @@ class Corpus:
         if self.vector_index is not None:
             assert self.embedder is not None and self.vector_cache is not None
             prepared = self.vector_index.prepare(node, self.embedder, self.vector_cache)
-        path = self.store.write_file(node)
+        self.store.write_file(node)
         self.index.upsert(node)
         self.search_index.upsert(node)
         if self.vector_index is not None and prepared is not None:
             self.vector_index.commit(node, prepared)
-        rel_path = path.relative_to(self.store.root).as_posix()
-        self.manifest[rel_path] = ManifestEntry(path=rel_path, sha256=hash_bytes(path.read_bytes()), uid=node.uid)
+        self._record_manifest(node)
         return node
 
     def get(self, ref: str) -> Node:
@@ -156,11 +160,13 @@ class Corpus:
         uid = self.index.id_to_uid.get(node_id)
         if uid is None:
             raise RefError(f"no live node at {node_id!r}")
+        path = self._rel_path(node_id)
         self.store.delete_file(node_id)
         self.index.remove(uid)
         self.search_index.remove(uid)
         if self.vector_index is not None:
             self.vector_index.remove(uid)
+        self.manifest.pop(path, None)
 
     def all(self) -> list[Node]:
         return self.store.all_nodes()
@@ -223,6 +229,7 @@ class Corpus:
         # --- prepare: rewrite every node that will change, in memory ---
         node = self.store.read_file(old_id)
         old_path = self.store.path_for(old_id)
+        old_rel_path = old_path.relative_to(self.store.root).as_posix()
         node.id = new_id
         node.kind = NodeId.parse(new_id).kind
         if old_id not in node.deprecated_ids:
@@ -261,4 +268,9 @@ class Corpus:
         self.search_index.upsert(node)
         if self.vector_index is not None and prepared is not None:
             self.vector_index.commit(node, prepared)
+        if old_path != new_path:
+            self.manifest.pop(old_rel_path, None)
+        self._record_manifest(node)
+        for referrer in referrers:
+            self._record_manifest(referrer)
         return node
