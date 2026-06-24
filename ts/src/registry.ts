@@ -63,7 +63,12 @@ export class Registry {
     const optional = new Set(spec.optionalFacets ?? []);
     const invariants: Invariant[] = [];
     if (spec.shape !== undefined) {
-      const shape = this.shapes.get(spec.shape) as ShapeSpec;
+      const shape = this.shapes.get(spec.shape);
+      if (shape === undefined) {
+        throw new UnknownKindError(
+          `kind ${JSON.stringify(node.kind)} adopts unknown shape ${JSON.stringify(spec.shape)}`,
+        );
+      }
       for (const f of shape.requiredFacets ?? []) required.add(f);
       for (const f of shape.optionalFacets ?? []) optional.add(f);
       for (const inv of shape.invariants ?? []) invariants.push(inv);

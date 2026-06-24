@@ -95,4 +95,17 @@ describe("Registry — shapes", () => {
     reg.validate(knode("mindmap", { membership: { members: [] } }));
     expect(order).toEqual(["shape", "kind"]);
   });
+
+  it("validate permits a shape's optional facets", () => {
+    const reg = new Registry();
+    reg.registerShape({
+      name: "graph",
+      requiredFacets: new Set(["membership"]),
+      optionalFacets: new Set(["style"]),
+    });
+    reg.register({ name: "mindmap", shape: "graph" });
+    expect(() =>
+      reg.validate(knode("mindmap", { membership: { members: [] }, style: { color: "red" } })),
+    ).not.toThrow();
+  });
 });
