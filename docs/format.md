@@ -20,8 +20,14 @@ Normalized form: `{source, predicate, target, directed?, weight?, attrs?}`.
 - Graph edge (in a structure's `membership.edges`): both `source` and `target` explicit.
 
 ## Structures
-A structure node carries a `membership` facet: `{shape, members, edges?}`.
-Shapes: `set`, `list`, `dict`, `graph`, `dag`, `tree` (invariants per spec §3.4).
+A **structure** is a node of a registered *shape* carrying a scope-only `membership` facet
+(`{members}`) plus the shape-owned form facet(s) it requires: `edges` (`{edges}`) for
+`graph`/`dag`/`tree`, `order` (`{order}`) for `list`, `keys` (`{keys}`) for `dict`; `set` is
+membership-only. Shapes are registered via `ShapeSpec`; a kind adopts ≤1 shape through
+`KindSpec.shape`, and the registry composes the shape's required facets + invariants into the kind
+(`register_builtin_shapes` registers `set`, `list`, `dict`, `graph`, `dag`, `tree` and their
+convenience kinds). Membership is a unique unordered set; order/edges/keys never leak through member
+position.
 
 ## Index & API (Plan 2)
 The kernel ships an in-memory **structural index** (`nodes.kernel.index.Index`) and a
@@ -31,9 +37,9 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
 
 - Resolution (`id` / deprecated `id` → `uid`) and collision checks are **O(1)** via the index;
   a live id always wins over a deprecated id.
-- `rename` is **O(degree)**: it rewrites only the referrers the reverse index names (relations
-  `source`/`target`, membership members, and edge `source`/`target`), plus the renamed node's
-  own references.
+- `rename` is **O(degree)**: it rewrites only the referrers the reverse index names (relation
+  `source`/`target`, membership members, and `edges`/`order`/`keys` form-facet refs), plus the
+  renamed node's own references.
 - Graph queries are **relations-only** and uid-based. Dangling targets (a relation whose target
   no longer resolves) are a normal state — surfaced by `outbound(source)` and `dangling()`, never
   raised. `inbound`/`outbound` raise `RefError` only when the *input* ref does not resolve.

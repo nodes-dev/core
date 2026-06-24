@@ -9,7 +9,7 @@ from nodes.kernel.index import Index, ResolvedEdge
 from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
 from nodes.kernel.search import SearchHit, SearchIndex
-from nodes.kernel.shapes import MEMBERSHIP
+from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
 from nodes.kernel.similarity import Embedder, SimilarHit, Vector, VectorCache, VectorIndex
 from nodes.kernel.snapshot import (
     ManifestEntry,
@@ -23,27 +23,32 @@ from nodes.kernel.store import Store
 
 
 def _rewrite_refs(node: Node, old: str, new: str) -> None:
-    """Rewrite every position in `node` that holds `old` to `new` (in place)."""
+    """Rewrite every position in `node` that holds `old` to `new` (in place):
+    top-level relations plus the built-in structural form facets."""
     for rel in node.relations:
         if rel.source == old:
             rel.source = new
         if rel.target == old:
             rel.target = new
     mem = node.facets.get(MEMBERSHIP)
-    if isinstance(mem, dict):
-        members = mem.get("members")
-        if isinstance(members, list):
-            mem["members"] = [new if m == old else m for m in members]
-        elif isinstance(members, dict):
-            for key, val in list(members.items()):
-                if val == old:
-                    members[key] = new
-        for edge in mem.get("edges", []) or []:
+    if isinstance(mem, dict) and isinstance(mem.get("members"), list):
+        mem["members"] = [new if m == old else m for m in mem["members"]]
+    eg = node.facets.get(EDGES)
+    if isinstance(eg, dict):
+        for edge in eg.get("edges", []) or []:
             if isinstance(edge, dict):
                 if edge.get("source") == old:
                     edge["source"] = new
                 if edge.get("target") == old:
                     edge["target"] = new
+    od = node.facets.get(ORDER)
+    if isinstance(od, dict) and isinstance(od.get("order"), list):
+        od["order"] = [new if m == old else m for m in od["order"]]
+    ky = node.facets.get(KEYS)
+    if isinstance(ky, dict) and isinstance(ky.get("keys"), dict):
+        for key, val in list(ky["keys"].items()):
+            if val == old:
+                ky["keys"][key] = new
 
 
 class Corpus:

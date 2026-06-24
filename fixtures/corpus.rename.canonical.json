@@ -9,8 +9,9 @@
     "relations": [],
     "facets": {
       "membership": {
-        "shape": "graph",
-        "members": ["topic:new"],
+        "members": ["topic:new"]
+      },
+      "edges": {
         "edges": [{ "source": "topic:new", "predicate": "to", "target": "topic:new" }]
       }
     },

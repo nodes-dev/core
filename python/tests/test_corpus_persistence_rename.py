@@ -86,6 +86,38 @@ def test_flush_after_mutations_reloads_equivalently(tmp_path):
     assert _results(Corpus(tmp_path)) == _results(c)
 
 
+def test_rename_rewrites_structure_form_facet_refs_without_registry(tmp_path):
+    from nodes.kernel.corpus import Corpus
+    from nodes.kernel.node import Node
+    from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
+
+    c = Corpus(tmp_path)  # no registry attached
+    c.store.write_file(Node(id="topic:a", kind="topic", title="A"))
+    c.store.write_file(Node(id="topic:b", kind="topic", title="B"))
+    c.store.write_file(Node(
+        id="graph:g", kind="graph", title="G",
+        facets={MEMBERSHIP: {"members": ["topic:a", "topic:b"]},
+                EDGES: {"edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}]}},
+    ))
+    c.store.write_file(Node(
+        id="list:l", kind="list", title="L",
+        facets={MEMBERSHIP: {"members": ["topic:a"]}, ORDER: {"order": ["topic:a"]}},
+    ))
+    c.store.write_file(Node(
+        id="dict:d", kind="dict", title="D",
+        facets={MEMBERSHIP: {"members": ["topic:a"]}, KEYS: {"keys": {"k": "topic:a"}}},
+    ))
+    c = Corpus(tmp_path)  # reload: index sees every structural ref, with no registry
+
+    c.rename("topic:a", "topic:c")
+
+    g = c.store.read_file("graph:g")
+    assert g.facets[MEMBERSHIP]["members"] == ["topic:c", "topic:b"]
+    assert g.facets[EDGES]["edges"][0]["source"] == "topic:c"
+    assert c.store.read_file("list:l").facets[ORDER]["order"] == ["topic:c"]
+    assert c.store.read_file("dict:d").facets[KEYS]["keys"] == {"k": "topic:c"}
+
+
 def test_delete_last_embedder_node_flushes_self_usable_snapshot(tmp_path):
     c = Corpus(tmp_path, embedder=FixedEmbedder())
     c.add(Node(id="topic:a", kind="topic", title="A", body="gamma"))

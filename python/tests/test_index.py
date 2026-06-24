@@ -5,7 +5,12 @@ import pytest
 from nodes.kernel.errors import CollisionError
 from nodes.kernel.index import Index
 from nodes.kernel.node import Node
+from nodes.kernel.node import Node as _Node
 from nodes.kernel.relations import Relation, relates_to
+from nodes.kernel.shapes import EDGES as _EDGES
+from nodes.kernel.shapes import KEYS as _KEYS
+from nodes.kernel.shapes import MEMBERSHIP as _MEMBERSHIP
+from nodes.kernel.shapes import ORDER as _ORDER
 
 
 def test_build_and_resolve_live_id():
@@ -137,11 +142,10 @@ def test_outbound_with_noncontainer_source_attributes_to_source_node():
 
 
 def test_membership_refs_not_in_graph_queries():
-    g = Node(id="graph:g", kind="graph", title="G", facets={"membership": {
-        "shape": "graph",
-        "members": ["topic:x"],
-        "edges": [{"source": "topic:x", "predicate": "to", "target": "topic:y"}],
-    }})
+    g = Node(id="graph:g", kind="graph", title="G", facets={
+        "membership": {"members": ["topic:x"]},
+        "edges": {"edges": [{"source": "topic:x", "predicate": "to", "target": "topic:y"}]},
+    })
     x = Node(id="topic:x", kind="topic", title="X")
     y = Node(id="topic:y", kind="topic", title="Y")
     idx = Index.build([g, x, y])
@@ -157,3 +161,40 @@ def test_dangling_lists_unresolved_targets():
     dangling = idx.dangling_edges()
     assert len(dangling) == 1
     assert dangling[0].relation.target == "topic:gone" and dangling[0].target_uid is None
+
+
+def _graph_node() -> _Node:
+    return _Node(
+        id="graph:g", kind="graph", title="G",
+        facets={
+            _MEMBERSHIP: {"members": ["topic:a", "topic:b"]},
+            _EDGES: {"edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}]},
+        },
+    )
+
+
+def test_structure_refs_register_referrers_but_not_graph_edges():
+    g = _graph_node()
+    idx = Index.build([g])
+    # membership members + edge endpoints are tracked as referrers (for rename):
+    assert g.uid in {ir.source_uid for ir in idx.in_refs.get("topic:a", [])}
+    assert g.uid in {ir.source_uid for ir in idx.in_refs.get("topic:b", [])}
+    # ...but they are NOT relation-graph edges:
+    assert idx.outbound_edges(g.uid) == []
+    assert idx.dangling_edges() == []  # unresolved members are not dangling relation edges
+
+
+def test_order_member_refs_are_tracked():
+    lst = _Node(id="list:l", kind="list", title="L",
+                facets={_MEMBERSHIP: {"members": ["topic:a"]}, _ORDER: {"order": ["topic:a"]}})
+    idx = Index.build([lst])
+    assert lst.uid in {ir.source_uid for ir in idx.in_refs.get("topic:a", [])}
+
+
+def test_keys_value_refs_are_tracked():
+    dct = _Node(id="dict:d", kind="dict", title="D",
+                facets={_MEMBERSHIP: {"members": ["topic:a"]},
+                        _KEYS: {"keys": {"k": "topic:a"}}})
+    idx = Index.build([dct])
+    roles = {ir.out_ref.role for ir in idx.in_refs.get("topic:a", []) if ir.source_uid == dct.uid}
+    assert "keys_value" in roles
