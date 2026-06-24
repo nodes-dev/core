@@ -61,7 +61,7 @@ cd ~/d/mindful/v6 && rtk npm install
 ```
 Expected: exits 0; `zod` now resolvable directly from the package. Verify:
 ```bash
-cd ~/d/mindful/v6 && node -e "console.log(require.resolve('zod'))"
+cd ~/d/mindful/v6 && rtk node -e "console.log(require.resolve('zod'))"
 ```
 Expected: prints a path under `~/d/mindful/v6/node_modules/zod` (or a hoisted location the package controls), exit 0.
 
@@ -138,6 +138,16 @@ describe("visualIdentityOf / requireValidVisualIdentity", () => {
 			visualIdentityOf(thoughtWith({ seed: good.seed, slots: [{ index: 0, variant: 4 }, ...good.slots.slice(1)] })),
 		).toThrow(FacetError);
 	});
+
+	it("throws FacetError on extra top-level or slot keys", () => {
+		const good = deriveIdentity(UID);
+		expect(() => visualIdentityOf(thoughtWith({ ...good, extra: true }))).toThrow(FacetError);
+		expect(() =>
+			visualIdentityOf(
+				thoughtWith({ seed: good.seed, slots: [{ ...good.slots[0], label: "ink" }, ...good.slots.slice(1)] }),
+			),
+		).toThrow(FacetError);
+	});
 });
 ```
 
@@ -158,11 +168,11 @@ export const VISUAL_IDENTITY = "visualIdentity";
 export const ColorSlotSchema = z.object({
 	index: z.number().int().min(0).max(255),
 	variant: z.number().int().min(0).max(3),
-});
+}).strict();
 export const VisualIdentitySchema = z.object({
 	seed: z.string().regex(/^[0-9a-f]{64}$/, "seed must be a 64-char SHA-256 hex string"),
 	slots: z.array(ColorSlotSchema).length(4, "exactly 4 slots required"),
-});
+}).strict();
 
 export type ColorSlot = z.infer<typeof ColorSlotSchema>;
 export type VisualIdentity = z.infer<typeof VisualIdentitySchema>;
@@ -560,7 +570,7 @@ describe("Mindful — visual identity integration", () => {
 		expect(withDefault).toEqual(resolve(visualIdentityOf(t), defaultColorscheme));
 		expect(withDefault).toHaveLength(4);
 		const other = { name: "mono", colors: ["#101010", "#f0f0f0"] };
-		expect(m.palette(t.id, other)).not.toEqual(withDefault);
+		expect(m.palette(t.id, other)).toEqual(resolve(visualIdentityOf(t), other));
 	});
 });
 ```
