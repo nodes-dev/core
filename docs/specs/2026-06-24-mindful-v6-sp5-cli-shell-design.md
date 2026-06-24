@@ -205,7 +205,8 @@ triggers one `get(hit.id)` for display:
 ```
 <id>  <title>  (<score>)
 ```
-An empty result set prints nothing (exit 0).
+`<score>` is the **raw** `String(hit.score)` — no rounding or fixed precision, so tests and scripts see
+the kernel's exact value. An empty result set prints nothing (exit 0, **no sink call** — see §7).
 
 **`edit` / `delete` / `tag`** — single confirmation lines: `updated <id>`, `deleted <id>`,
 `tagged <id> #<name>`.
@@ -241,8 +242,10 @@ string containing its internal newlines and one trailing `\n`). The sinks are *n
 chunks that callers must reassemble. `bin.ts` wires `out = (s) => process.stdout.write(s)` and
 `err = (s) => process.stderr.write(s)` — no extra newline added at the wiring layer. **`spriteToAnsi`
 itself stays no-trailing-newline** (its SP4 contract is unchanged); the CLI appends the `\n` when it
-embeds the sprite in a command's output, so terminal output ends cleanly on its own line. Tests
-concatenate the captured sink calls and assert against the joined string (including trailing newlines).
+embeds the sprite in a command's output, so terminal output ends cleanly on its own line. **Commands with
+no output make no sink call** — e.g. an empty `search` result or a `list` of zero thoughts produces exit
+0 and zero `out` calls (it does not emit an empty `"\n"`). Tests concatenate the captured sink calls and
+assert against the joined string (including trailing newlines).
 
 **`package.json` build metadata** — adopt the kernel's full dist-package shape (not just `bin`), so the
 package is a coherent dist-package rather than half-source/half-dist:
@@ -268,8 +271,19 @@ imports it cleanly under plain `node` — no runner needed.
 
 ## 8. Testing Strategy (`cli.test.ts`)
 
-Mirrors the existing integration-test pattern: `root = mkdtempSync(join(tmpdir(), "mindful-cli-"))` in
-`beforeEach`, `rmSync(root, { recursive: true, force: true })` in `afterEach`, `new Mindful(root)`.
+**Gate (extended).** Because this SP changes the package shape (full dist metadata + `bin`) and adds a
+real build, **build success is part of correctness**. The gate run from `~/d/mindful/v6` becomes:
+
+```
+rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
+```
+
+`rtk npm run build` (`tsc -p tsconfig.build.json`) must emit `dist/` — including `dist/bin.js` and
+`dist/index.js` — with no errors. (`dist/` is git-ignored; the build is verified in the gate, not
+committed.)
+
+Unit/integration tests mirror the existing pattern: `root = mkdtempSync(join(tmpdir(), "mindful-cli-"))`
+in `beforeEach`, `rmSync(root, { recursive: true, force: true })` in `afterEach`, `new Mindful(root)`.
 Each test calls `runCli(argv, m, out, err)` with `out`/`err` pushing into string arrays, then asserts the
 returned exit code and the captured output.
 
@@ -288,7 +302,9 @@ returned exit code and the captured output.
 - **Multiline body:** `add` then `edit <ref> --body $'a\nb'`; `show` output contains `body:` followed by
   the verbatim two-line body (newline preserved, not escaped).
 - **Duplicate single-valued flag:** `add "X" --body one --body two` → exit 2 (usage), not last-wins;
-  likewise a repeated `--title`/`--limit`. `add "X" --tag a --tag b` → exit 0 (repeated `--tag` allowed).
+  likewise a repeated `--title`/`--limit`. For the repeated-`--tag` happy path, **first create the tag
+  targets** — `add "a"`, `add "b"` — then `add "X" --tag a --tag b` → exit 0 (repeated `--tag` allowed,
+  and both targets resolve per §2's fail-early tag semantics).
 - **`delete`:** `delete <ref>` → exit 0; subsequent `show <ref>` → exit 1.
 - **`tag`:** `tag <ref> <name>` against an existing target → exit 0, `tagged … #name`; `show` then lists
   it under `related:`.
