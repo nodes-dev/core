@@ -44,7 +44,8 @@ The 8×8 test fixture reuses SP3's frozen byte-mapping seed `MAP_SEED = "c080880
 - Test: `~/d/mindful/v6/tests/encode.test.ts`
 
 **Interfaces:**
-- Consumes: `Sprite`, `renderSprite` from `./sprite.js`; `VisualIdentity` from `./identity.js`; `ValidationError` from `@nodes/kernel`.
+- `src/encode.ts` consumes only `ValidationError` from `@nodes/kernel` and `type Sprite` from `./sprite.js`.
+- `tests/encode.test.ts` also uses `renderSprite` from `./sprite.js` and `type VisualIdentity` from `./identity.js` to build the 8×8 fixture.
 - Produces: `function spriteToAnsi(sprite: Sprite): string` — validates a positive-width, even-height, rectangular, `#rrggbb` sprite (throws `ValidationError` otherwise) and returns half-block truecolor ANSI (4 text rows for an 8×8 sprite; no trailing newline).
 
 - [ ] **Step 1: Write the failing tests**
@@ -101,7 +102,8 @@ const FOUR = ["#102030", "#a1b2c3", "#ffffff", "#000000"];
 
 describe("spriteToAnsi", () => {
 	it("encodes a 2×2 sprite to one exact half-block text row", () => {
-		const expected = `${fg("#ff0000")}${bg("#0000ff")}▀${fg("#00ff00")}${bg("#ffffff")}▀${RESET}`;
+		const expected =
+			"\x1b[38;2;255;0;0m\x1b[48;2;0;0;255m▀\x1b[38;2;0;255;0m\x1b[48;2;255;255;255m▀\x1b[0m";
 		expect(spriteToAnsi(twoByTwo)).toBe(expected);
 	});
 
@@ -156,6 +158,13 @@ describe("spriteToAnsi", () => {
 	it("throws ValidationError on a ragged row", () => {
 		const bad: Sprite = { width: 2, height: 2, pixels: [["#000000", "#000000"], ["#000000"]] };
 		expect(() => spriteToAnsi(bad)).toThrow(ValidationError);
+	});
+
+	it("throws ValidationError when pixels or a row is not an array", () => {
+		const badPixels = { width: 2, height: 2, pixels: null } as unknown as Sprite;
+		const badRow = { width: 2, height: 2, pixels: [["#000000", "#000000"], null] } as unknown as Sprite;
+		expect(() => spriteToAnsi(badPixels)).toThrow(ValidationError);
+		expect(() => spriteToAnsi(badRow)).toThrow(ValidationError);
 	});
 
 	it("throws ValidationError on a non-#rrggbb pixel", () => {
@@ -257,10 +266,16 @@ export function spriteToAnsi(sprite: Sprite): string {
 	if (height % 2 !== 0) {
 		throw new ValidationError(`sprite height must be even for half-block encoding, got ${height}`);
 	}
+	if (!Array.isArray(pixels)) {
+		throw new ValidationError("sprite pixels must be an array of rows");
+	}
 	if (pixels.length !== height) {
 		throw new ValidationError(`sprite has ${pixels.length} rows, expected height ${height}`);
 	}
 	for (const row of pixels) {
+		if (!Array.isArray(row)) {
+			throw new ValidationError("sprite rows must be arrays of pixels");
+		}
 		if (row.length !== width) {
 			throw new ValidationError(`sprite row has ${row.length} cells, expected width ${width}`);
 		}
@@ -292,7 +307,7 @@ export { spriteToAnsi } from "./encode.js";
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `rtk npm test -- encode.test.ts`
-Expected: PASS (10 tests).
+Expected: PASS (11 tests).
 
 - [ ] **Step 6: Run the full gate**
 
@@ -313,7 +328,7 @@ rtk git commit -m "feat(encode): spriteToAnsi — strict half-block truecolor AN
 **1. Spec coverage:**
 - §2 constants (`RESET`, `UPPER_HALF_BLOCK`, `HEX_RE`) → Task 1 implementation.
 - §3 algorithm (row pairing, `fg(top)+bg(bottom)+▀`, `\n`-joined, no trailing newline) → implementation + 2×2 exact / 8×8 structural / first-cell / uniform tests.
-- §4 strict contract (positive-int width/height, even height, `pixels.length === height`, rectangular rows, `#rrggbb`) → implementation guard order + the five validation tests.
+- §4 strict contract (positive-int width/height, even height, array-shaped `pixels`/rows, `pixels.length === height`, rectangular rows, `#rrggbb`) → implementation guard order + the six validation tests.
 - §5 surface (`encode.ts` imports `ValidationError` + `type Sprite` only; barrel export; no `api.ts` change) → Task 1 files.
 - §6 testing strategy → exactly the test cases listed.
 - §7 out of scope (SVG/PNG, animation, shell, scheme storage, I/O, color fallbacks, odd-height/scaling) → not built. ✓
