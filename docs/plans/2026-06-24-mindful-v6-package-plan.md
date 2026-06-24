@@ -402,7 +402,7 @@ rtk git commit -m "feat: mindful kinds (thought/mindmap/journal) + registerMindf
 - Test: `tests/mindful-thoughts.test.ts`
 
 **Interfaces:**
-- Consumes: `Corpus`, `Registry`, `Node`, `Embedder`, `SearchHit`, `SimilarHit`, `makeNode`, `newUid`, `registerBuiltinShapes`, `tagToRelation`, `ValidationError`, `RefError` (`@nodes/kernel`); the mindful profile (Task 3).
+- Consumes: `Corpus`, `Registry`, `Node`, `Embedder`, `Relation`, `SearchHit`, `SimilarHit`, `makeNode`, `newUid`, `registerBuiltinShapes`, `tagToRelation`, `ValidationError`, `RefError` (`@nodes/kernel`); the mindful profile (Task 3).
 - Produces (this task's slice of `Mindful`):
   - `new Mindful(root: string, opts?: { embedder?: Embedder })`
   - `capture(input: { title: string; body?: string; tags?: string[] }): Node`
@@ -418,7 +418,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Embedder, EmbedderRequiredError, RefError, type Vector } from "@nodes/kernel";
+import { type Embedder, EmbedderRequiredError, RefError, ValidationError, type Vector } from "@nodes/kernel";
 import { Mindful } from "../src/api.js";
 
 let root: string;
@@ -481,6 +481,20 @@ describe("Mindful — thoughts", () => {
     expect(m.related(note.id).some((n) => n.title === "Recipes")).toBe(true);
   });
 
+  it("capture with an unresolved tag throws and persists nothing (atomic)", () => {
+    const m = new Mindful(root);
+    expect(() => m.capture({ title: "Carbonara", tags: ["does-not-exist"] })).toThrow(RefError);
+    expect(m.allThoughts()).toEqual([]); // the half-created thought was never written
+  });
+
+  it("tagging by a title shared by multiple thoughts fails early instead of guessing", () => {
+    const m = new Mindful(root);
+    m.capture({ title: "Recipes" });
+    m.capture({ title: "Recipes" }); // duplicate title — allowed in SP1
+    const note = m.capture({ title: "Carbonara" });
+    expect(() => m.tag(note.id, "Recipes")).toThrow(ValidationError);
+  });
+
   it("search finds a captured thought", () => {
     const m = new Mindful(root);
     m.capture({ title: "Quantum", body: "entanglement is spooky" });
@@ -516,6 +530,7 @@ import {
   type Embedder,
   type Node,
   Registry,
+  type Relation,
   type SearchHit,
   type SimilarHit,
   ValidationError,
@@ -542,6 +557,12 @@ export interface MindfulOptions {
   embedder?: Embedder;
 }
 
+/** Title/lowercase-title → thought id, with titles that resolve to multiple thoughts held out as ambiguous. */
+interface AliasIndex {
+  map: Record<string, string>;
+  ambiguous: Set<string>;
+}
+
 export class Mindful {
   readonly corpus: Corpus;
 
@@ -556,8 +577,11 @@ export class Mindful {
 
   capture(input: { title: string; body?: string; tags?: string[] }): Node {
     const node = makeNode({ id: `${THOUGHT}:${newUid()}`, kind: THOUGHT, title: input.title, body: input.body ?? "" });
-    this.corpus.add(node);
-    for (const name of input.tags ?? []) this.tag(node.id, name);
+    // Resolve every tag BEFORE the single write: a miss (RefError) or an ambiguous title
+    // (ValidationError) throws here, so an unresolved tag never leaves a half-created thought on disk.
+    const idx = this.aliasIndex();
+    for (const name of input.tags ?? []) node.relations.push(this.resolveTag(node.id, name, idx));
+    this.corpus.add(node); // one write; nothing persists if a tag above threw
     return this.corpus.get(node.id);
   }
 
@@ -579,19 +603,37 @@ export class Mindful {
 
   // --- tags (global relation graph) ---
 
-  private aliasMap(): Record<string, string> {
-    const map: Record<string, string> = {};
+  // SP1 allows duplicate thought titles, so a title can map to more than one id. An alias key that
+  // resolves to >1 distinct thought is ambiguous: we record it separately and refuse to guess.
+  private aliasIndex(): AliasIndex {
+    const byKey: Record<string, Set<string>> = {};
     for (const n of this.corpus.all()) {
-      map[n.title] = n.id;
-      map[n.title.toLowerCase()] = n.id;
+      for (const key of [n.title, n.title.toLowerCase()]) (byKey[key] ??= new Set<string>()).add(n.id);
     }
-    return map;
+    const map: Record<string, string> = {};
+    const ambiguous = new Set<string>();
+    for (const [key, ids] of Object.entries(byKey)) {
+      if (ids.size === 1) map[key] = [...ids][0];
+      else ambiguous.add(key);
+    }
+    return { map, ambiguous };
+  }
+
+  // Mirrors tagToRelation's lookup order (map[name] ?? map[name.toLowerCase()]) but fails early on the
+  // key it would land on if that key is ambiguous — instead of silently linking to an arbitrary match.
+  private resolveTag(source: string, name: string, idx: AliasIndex): Relation {
+    if (idx.map[name] === undefined) {
+      const lower = name.toLowerCase();
+      if (idx.ambiguous.has(name) || (idx.map[lower] === undefined && idx.ambiguous.has(lower))) {
+        throw new ValidationError(`ambiguous tag ${JSON.stringify(name)}: multiple thoughts share that title`);
+      }
+    }
+    return tagToRelation(source, name, idx.map); // RefError on a genuine miss
   }
 
   tag(thoughtId: string, name: string): Node {
     const node = this.corpus.get(thoughtId);
-    const relation = tagToRelation(node.id, name, this.aliasMap()); // throws RefError if unresolved
-    node.relations.push(relation);
+    node.relations.push(this.resolveTag(node.id, name, this.aliasIndex())); // RefError/ValidationError before any write
     this.corpus.add(node); // overwrite + re-validate; relation now in the global graph
     return this.corpus.get(thoughtId);
   }
@@ -621,7 +663,7 @@ export class Mindful {
 }
 ```
 
-Note: `tagToRelation(source, name, aliasMap)` resolves `aliasMap[name] ?? aliasMap[name.toLowerCase()]` and throws `RefError` on a miss — so `aliasMap()` registers both the title and its lowercase form. `MINDMAP`/`JOURNAL` are imported here only because they are used by Tasks 5–6 (which extend this file); if biome flags them as unused at this task's boundary, import them in the task that first uses them instead. To keep Task 4 lint-clean, import ONLY `THOUGHT` here and add `MINDMAP`/`JOURNAL` in Task 5/6.
+Note: `tagToRelation(source, name, map)` resolves `map[name] ?? map[name.toLowerCase()]` and throws `RefError` on a miss — so `aliasIndex()` registers both the title and its lowercase form. Because SP1 permits duplicate thought titles, `aliasIndex()` holds any key that resolves to more than one thought in a separate `ambiguous` set, and `resolveTag` throws `ValidationError` rather than linking to an arbitrary match (fail early, no silent fallback). `capture` builds ONE index up front and resolves every tag against it before its single `corpus.add`, so an unresolved or ambiguous tag never persists a half-created thought. To keep Task 4 lint-clean, import ONLY `THOUGHT` from `./kinds.js` here and add `MINDMAP`/`JOURNAL` in Task 5/6 (their first use); likewise `requireThought` (Task 5) is defined where it is first used, since biome's `noUnusedPrivateClassMembers` would flag a method defined a task before its first call.
 
 - [ ] **Step 4: Export `Mindful` from the barrel `src/index.ts`**
 
@@ -653,7 +695,7 @@ rtk git commit -m "feat: Mindful — capture/edit/delete thoughts, tags, search/
 - Test: `tests/mindful-mindmaps.test.ts`
 
 **Interfaces:**
-- Consumes (add to `api.ts` imports): `MEMBERSHIP`, `EDGES`, `membershipOf`, `edgesOf`, `RELATES_TO`, `type Relation`, `RefError` (`@nodes/kernel`); `MINDMAP`.
+- Consumes (add to `api.ts` imports): `MEMBERSHIP`, `EDGES`, `membershipOf`, `edgesOf`, `RELATES_TO` (`@nodes/kernel`); `MINDMAP` (`./kinds.js`). (`Relation` and `ValidationError` are already imported by Task 4; `RefError` is needed only in this task's test file.)
 - Produces (added to `Mindful`):
   - `createMindmap(input: { title: string }): Node`
   - `addThought(mapId: string, thoughtId: string): Node`
@@ -671,7 +713,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InvariantError } from "@nodes/kernel";
+import { InvariantError, RefError } from "@nodes/kernel";
 import { Mindful } from "../src/api.js";
 
 let root: string;
@@ -738,6 +780,13 @@ describe("Mindful — mindmaps", () => {
     expect(m.mindmapEdges(map.id)).toEqual([]); // edge a->b removed with a
   });
 
+  it("addThought rejects a missing thought id (fail early, no dangling member)", () => {
+    const m = new Mindful(root);
+    const map = m.createMindmap({ title: "Map" });
+    expect(() => m.addThought(map.id, "thought:does-not-exist")).toThrow(RefError);
+    expect((m.get(map.id).facets.membership as { members: string[] }).members).toEqual([]);
+  });
+
   it("addThought is idempotent on the member set (unique members)", () => {
     const m = new Mindful(root);
     const a = m.capture({ title: "A" });
@@ -756,10 +805,19 @@ Expected: FAIL — `createMindmap`/`addThought`/etc. are not methods of `Mindful
 
 - [ ] **Step 3: Extend `src/api.ts`**
 
-Add to the `@nodes/kernel` import: `EDGES`, `MEMBERSHIP`, `RELATES_TO`, `type Relation`, `edgesOf`, `membershipOf`. Add `MINDMAP` to the `./kinds.js` import. Add these methods to the `Mindful` class:
+Add to the `@nodes/kernel` import: `EDGES`, `MEMBERSHIP`, `RELATES_TO`, `edgesOf`, `membershipOf` (`Relation` is already imported by Task 4). Add `MINDMAP` to the `./kinds.js` import. Add these methods to the `Mindful` class — `requireThought` is defined here (its first use) so biome's `noUnusedPrivateClassMembers` does not flag it in Task 4:
 
 ```ts
   // --- mindmaps (graph form facet) ---
+
+  // Members are live thoughts, not arbitrary ids: the kernel checks structural consistency, not
+  // existence, so the API resolves the id here (RefError if absent) and rejects non-thoughts.
+  private requireThought(thoughtId: string): void {
+    const node = this.corpus.get(thoughtId); // throws RefError if no such node
+    if (node.kind !== THOUGHT) {
+      throw new ValidationError(`${thoughtId} is a ${node.kind}, not a thought`);
+    }
+  }
 
   createMindmap(input: { title: string }): Node {
     const node = makeNode({
@@ -774,6 +832,7 @@ Add to the `@nodes/kernel` import: `EDGES`, `MEMBERSHIP`, `RELATES_TO`, `type Re
 
   addThought(mapId: string, thoughtId: string): Node {
     const map = this.corpus.get(mapId);
+    this.requireThought(thoughtId); // fail early: no dangling members
     const members = membershipOf(map).members;
     if (!members.includes(thoughtId)) {
       map.facets[MEMBERSHIP] = { members: [...members, thoughtId] };
@@ -856,7 +915,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InvariantError } from "@nodes/kernel";
+import { InvariantError, RefError } from "@nodes/kernel";
 import { Mindful } from "../src/api.js";
 
 let root: string;
@@ -910,6 +969,13 @@ describe("Mindful — journals", () => {
     expect(() => m.reorder(j.id, [a.id])).toThrow(InvariantError); // missing b
   });
 
+  it("append rejects a missing thought id (fail early, no dangling order entry)", () => {
+    const m = new Mindful(root);
+    const j = m.createJournal({ title: "log" });
+    expect(() => m.append(j.id, "thought:does-not-exist")).toThrow(RefError);
+    expect(ids(m.get(j.id).facets.order)).toEqual([]);
+  });
+
   it("remove drops the entry from members AND order", () => {
     const m = new Mindful(root);
     const a = m.capture({ title: "A" });
@@ -940,7 +1006,7 @@ Expected: FAIL — journal methods are not defined.
 
 - [ ] **Step 3: Extend `src/api.ts`**
 
-Add to the `@nodes/kernel` import: `ORDER`, `orderOf`. Add `JOURNAL` to the `./kinds.js` import. Add these methods to the `Mindful` class:
+Add to the `@nodes/kernel` import: `ORDER`, `orderOf`. Add `JOURNAL` to the `./kinds.js` import. Add these methods to the `Mindful` class (`append` reuses the `requireThought` helper added in Task 5):
 
 ```ts
   // --- journals (list form facet) ---
@@ -958,6 +1024,7 @@ Add to the `@nodes/kernel` import: `ORDER`, `orderOf`. Add `JOURNAL` to the `./k
 
   append(journalId: string, thoughtId: string): Node {
     const j = this.corpus.get(journalId);
+    this.requireThought(thoughtId); // fail early: no dangling order/member entry (helper from Task 5)
     const members = membershipOf(j).members;
     if (!members.includes(thoughtId)) {
       j.facets[MEMBERSHIP] = { members: [...members, thoughtId] };
@@ -1008,7 +1075,9 @@ Key invariants to confirm by inspection after the gates are green:
 - `Mindful` never hands callers a raw `membership`/`edges`/`order` to build — every structural mutation goes through a method that maintains the facet and is validated by `Corpus.add`.
 - A mindmap's edges are read via `mindmapEdges`/the node, NEVER surfaced by `related` (which is the global relation graph from tags). The mindmaps test asserts `related(a.id) === []` after an internal `link`.
 - A journal's order lives in the `order` facet and is a permutation of members; `reorder` with a non-permutation fails early (`InvariantError`).
-- Tags fail early (`RefError`) on an unresolved name; `similar*` fail early (`EmbedderRequiredError`) without an embedder.
+- Tags fail early (`RefError`) on an unresolved name and (`ValidationError`) on a title shared by multiple thoughts — never a silent arbitrary match; `similar*` fail early (`EmbedderRequiredError`) without an embedder.
+- `capture` is atomic: tags resolve before the single `corpus.add`, so an unresolved/ambiguous tag persists nothing (`allThoughts()` stays empty).
+- `addThought`/`append` reject a missing or non-thought id (`RefError`/`ValidationError`) before mutating membership — no dangling structural members.
 - On-disk round-trip works through the package API (a fresh `Mindful` over the same root sees prior state).
 
 ## Deferred (per spec §7)
