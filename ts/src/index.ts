@@ -29,7 +29,7 @@ export {
   newUid,
 } from "./node.js";
 export { nodeFromMarkdown, nodeToMarkdown, splitFrontmatter } from "./frontmatter.js";
-export { type Invariant, type KindSpec, Registry } from "./registry.js";
+export { type Invariant, type KindSpec, type ShapeSpec, Registry } from "./registry.js";
 export {
   MEMBERSHIP,
   MembershipSchema,
