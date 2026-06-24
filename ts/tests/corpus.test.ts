@@ -135,47 +135,51 @@ describe("Corpus — rename", () => {
     expect(fresh.get("topic:old").id).toBe("topic:new");
   });
 
-  it("rewrites membership members and edge sources", () => {
-    const c = new Corpus(root);
-    c.add(n("topic:old", "topic"));
-    c.add(n("topic:x", "topic"));
+  it("rename rewrites membership members and edges-facet endpoints", () => {
+    const c = new Corpus(root); // `root` is the module-level temp dir from beforeEach
+    c.add(makeNode({ id: "topic:old", kind: "topic", title: "Old" }));
+    c.add(makeNode({ id: "topic:x", kind: "topic", title: "X" }));
     c.add(
       makeNode({
         id: "graph:g",
         kind: "graph",
         title: "G",
         facets: {
-          membership: {
-            shape: "graph",
-            members: ["topic:old", "topic:x"],
-            edges: [{ source: "topic:old", predicate: "to", target: "topic:old" }],
-          },
+          membership: { members: ["topic:old", "topic:x"] },
+          edges: { edges: [{ source: "topic:old", predicate: "to", target: "topic:old" }] },
         },
       }),
     );
     c.rename("topic:old", "topic:new");
-    const mem = c.get("graph:g").facets.membership as Record<string, unknown>;
-    expect(mem.members).toEqual(["topic:new", "topic:x"]);
-    const edge = (mem.edges as Array<Record<string, unknown>>)[0];
-    expect(edge.source).toBe("topic:new");
-    expect(edge.target).toBe("topic:new");
+    const g = c.get("graph:g");
+    expect((g.facets.membership as { members: string[] }).members).toEqual(["topic:new", "topic:x"]);
+    const edges = (g.facets.edges as { edges: Array<{ source: string; target: string }> }).edges;
+    expect(edges[0].source).toBe("topic:new");
+    expect(edges[0].target).toBe("topic:new");
   });
 
-  it("rewrites dict-membership members", () => {
+  it("rename rewrites dict keys-facet values and list order entries", () => {
     const c = new Corpus(root);
-    c.add(n("topic:old", "topic"));
-    c.add(n("topic:x", "topic"));
+    c.add(makeNode({ id: "topic:old", kind: "topic", title: "Old" }));
     c.add(
       makeNode({
         id: "dict:d",
         kind: "dict",
         title: "D",
-        facets: { membership: { members: ["topic:old", "topic:x"] }, keys: { keys: { a: "topic:old", b: "topic:x" } } },
+        facets: { membership: { members: ["topic:old"] }, keys: { keys: { label: "topic:old" } } },
+      }),
+    );
+    c.add(
+      makeNode({
+        id: "list:l",
+        kind: "list",
+        title: "L",
+        facets: { membership: { members: ["topic:old"] }, order: { order: ["topic:old"] } },
       }),
     );
     c.rename("topic:old", "topic:new");
-    const mem = c.get("dict:d").facets.membership as Record<string, unknown>;
-    expect(mem.members).toEqual(["topic:new", "topic:x"]);
+    expect((c.get("dict:d").facets.keys as { keys: Record<string, string> }).keys.label).toBe("topic:new");
+    expect((c.get("list:l").facets.order as { order: string[] }).order).toEqual(["topic:new"]);
   });
 
   it("rewrites the renamed node's OWN explicit relation source (no stale source: old)", () => {

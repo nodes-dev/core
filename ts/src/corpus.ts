@@ -4,7 +4,7 @@ import { NodeId } from "./ids.js";
 import type { Node } from "./node.js";
 import type { Registry } from "./registry.js";
 import { type SearchHit, SearchIndex } from "./search.js";
-import { MEMBERSHIP } from "./shapes.js";
+import { EDGES, KEYS, MEMBERSHIP, ORDER } from "./shapes.js";
 import { type Embedder, type SimilarHit, type Vector, VectorCache, VectorIndex } from "./similarity.js";
 import {
   type ManifestEntry,
@@ -18,25 +18,23 @@ import {
 import { Store } from "./store.js";
 import { Index, type ResolvedEdge } from "./structural-index.js";
 
-/** Rewrite every position in `node` that holds `oldId` to `newId` (in place). */
+/** Rewrite every position in `node` that holds `oldId` to `newId` (in place):
+ * top-level relations plus the built-in structural form facets. */
 function rewriteRefs(node: Node, oldId: string, newId: string): void {
   for (const rel of node.relations) {
     if (rel.source === oldId) rel.source = newId;
     if (rel.target === oldId) rel.target = newId;
   }
   const mem = node.facets[MEMBERSHIP];
-  if (mem !== undefined && mem !== null && typeof mem === "object") {
-    const m = mem as Record<string, unknown>;
-    const members = m.members;
+  if (mem !== null && typeof mem === "object") {
+    const members = (mem as Record<string, unknown>).members;
     if (Array.isArray(members)) {
-      m.members = members.map((x) => (x === oldId ? newId : x));
-    } else if (members !== null && typeof members === "object") {
-      const obj = members as Record<string, unknown>;
-      for (const key of Object.keys(obj)) {
-        if (obj[key] === oldId) obj[key] = newId;
-      }
+      (mem as Record<string, unknown>).members = members.map((m) => (m === oldId ? newId : m));
     }
-    const edges = m.edges;
+  }
+  const eg = node.facets[EDGES];
+  if (eg !== null && typeof eg === "object") {
+    const edges = (eg as Record<string, unknown>).edges;
     if (Array.isArray(edges)) {
       for (const edge of edges) {
         if (edge !== null && typeof edge === "object") {
@@ -44,6 +42,23 @@ function rewriteRefs(node: Node, oldId: string, newId: string): void {
           if (e.source === oldId) e.source = newId;
           if (e.target === oldId) e.target = newId;
         }
+      }
+    }
+  }
+  const od = node.facets[ORDER];
+  if (od !== null && typeof od === "object") {
+    const order = (od as Record<string, unknown>).order;
+    if (Array.isArray(order)) {
+      (od as Record<string, unknown>).order = order.map((m) => (m === oldId ? newId : m));
+    }
+  }
+  const ky = node.facets[KEYS];
+  if (ky !== null && typeof ky === "object") {
+    const keys = (ky as Record<string, unknown>).keys;
+    if (keys !== null && typeof keys === "object") {
+      const km = keys as Record<string, unknown>;
+      for (const k of Object.keys(km)) {
+        if (km[k] === oldId) km[k] = newId;
       }
     }
   }
