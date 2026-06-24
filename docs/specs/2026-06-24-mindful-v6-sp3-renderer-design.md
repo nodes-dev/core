@@ -15,8 +15,9 @@ the interactive shell are **SP4**, not here.
 **Architecture:** A pure generator `spriteCells(identity)` parses the stored 32-byte `seed` into an
 8×8 grid of cell values (`0` = background, `1|2|3` = ink slot), generated on the left 4 columns and
 mirrored. `renderSprite(identity, colors)` validates a resolved 4-color palette and paints the cells
-into a `Sprite` (an 8×8 raster of `#rrggbb`). The core generator depends only on the `VisualIdentity`
-type — **not** on `color.ts`; the `resolve`-then-`render` glue lives solely in `api.ts` as
+into a `Sprite` (an 8×8 raster of `#rrggbb`). The core generator depends only on the identity module
+(`VisualIdentity` plus `VisualIdentitySchema` for direct-call validation) — **not** on `color.ts` or
+`Corpus`; the `resolve`-then-`render` glue lives solely in `api.ts` as
 `Mindful.sprite()`, mirroring SP2's `Mindful.palette()`. Everything stays pure and headless: no
 `Corpus` access in the renderer, no I/O, no mutation, no persistence.
 
@@ -179,8 +180,8 @@ sprite(thoughtId: string, scheme: Colorscheme = defaultColorscheme): Sprite {
   sprite-integration.test.ts   # Mindful.sprite() end-to-end + re-theme                 (new)
 ```
 
-`sprite.ts` imports only the `VisualIdentity` type (and `VisualIdentitySchema` for direct-call
-validation) from `identity.ts`; it does **not** import `color.ts`. The `resolve`-then-`render` glue
+`sprite.ts` imports only from `identity.ts` (`VisualIdentity` and `VisualIdentitySchema` for
+direct-call validation); it does **not** import `color.ts` or touch `Corpus`. The `resolve`-then-`render` glue
 lives solely in `api.ts`. Split by responsibility: `identity.ts` owns the fingerprint, `color.ts` owns
 the theme/resolution, `sprite.ts` owns the pattern/raster. They share only types.
 
@@ -207,14 +208,16 @@ Fail early, no silent fallbacks:
 ## 8. Testing Strategy
 
 **Pure (`sprite.test.ts`):**
-- **Determinism:** `spriteCells(id)` equals itself across calls; two different seeds produce different
-  grids.
+- **Determinism:** `spriteCells(id)` equals itself across calls. Two hand-picked fixture seeds with
+  known different byte mappings produce different grids (the test does not assert that arbitrary
+  distinct seeds can never collide).
 - **Dimensions & type:** exactly 8 rows × 8 columns; every value ∈ `{0, 1, 2, 3}`.
 - **Vertical symmetry:** `cells[r][c] === cells[r][7 - c]` for all `r ∈ 0..7`, `c ∈ 0..7`.
 - **Byte mapping:** against a hand-chosen seed, assert specific cells match the `(b & 0x80)` fill rule
   and the `(((b >> 1) % 3) + 1)` ink rule for known bytes.
-- **Palette independence:** the same identity yields identical `spriteCells` and differing `pixels`
-  under two different 4-color palettes.
+- **Palette independence:** the same identity yields identical `spriteCells` under different palettes.
+  A fixture seed with known filled cells, rendered against two palettes whose four slots all differ,
+  yields different `pixels`.
 - **`renderSprite` validation:** throws on 3-color and 5-color arrays and on a malformed entry (e.g.
   `"#xyz"`, `"red"`); a valid call satisfies `pixels[r][c] === colors[cells[r][c]]` (lowercased).
 - **`spriteCells` validation:** a malformed `VisualIdentity` (short seed, non-hex seed) throws
@@ -225,8 +228,9 @@ Fail early, no silent fallbacks:
 **Integration (`sprite-integration.test.ts`):**
 - `capture` then `Mindful.sprite(id)` returns an 8×8 sprite; reloading the corpus yields a
   byte-identical sprite (stored-seed determinism, no re-derivation).
-- The same thought rendered against two schemes yields identical `cells` (verified via `spriteCells`)
-  but different `pixels` (re-theming through the `sprite()` path).
+- The same thought rendered against two schemes yields identical `cells` (verified via `spriteCells`).
+  The re-theming assertion uses a fixture thought/seed with known filled cells and schemes whose four
+  resolved slots differ, so differing `pixels` is deterministic rather than probabilistic.
 - `Mindful.sprite()` on a missing id throws `RefError`.
 
 ---
@@ -260,8 +264,9 @@ Fail early, no silent fallbacks:
    source of truth.
 7. **`spriteCells` is color-free and exported** — the canonical test surface for determinism,
    symmetry, byte mapping, and palette independence.
-8. **`renderSprite(identity, colors)` takes resolved colors,** not a `Colorscheme`; `sprite.ts` never
-   imports `color.ts`. The `resolve`-then-`render` glue lives only in `Mindful.sprite()`.
+8. **`renderSprite(identity, colors)` takes resolved colors,** not a `Colorscheme`; `sprite.ts` depends
+   only on `identity.ts` and never imports `color.ts` or touches `Corpus`. The `resolve`-then-`render`
+   glue lives only in `Mindful.sprite()`.
 9. **Typed cells** (`CellValue = 0|1|2|3`, `SpriteCells = CellValue[][]`) make the paint mapping
    explicit and misuse-resistant.
 10. **Fail early at both public boundaries:** `renderSprite` validates colors (4× `#rrggbb`);
