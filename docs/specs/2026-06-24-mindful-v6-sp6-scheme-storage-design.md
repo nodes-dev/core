@@ -142,9 +142,12 @@ Catalog order (default first):
 | `nord` | 16 | Nord palette |
 | `solarized` | 16 | Solarized (dark base) |
 
-The implementer authors the actual hex values. Every palette must be non-empty and every entry must
-match `#rrggbb`. `resolve` is scheme-size independent (`index % length`), so a 4-entry `gameboy`
-works without special-casing.
+**Canonical palettes are pinned in the implementation plan, not improvised.** Where the scheme name
+denotes a specific published palette — `dawnbringer-16` (DB16), `nord`, `solarized` — the plan must
+use that palette's canonical hex values verbatim; the same applies to `gameboy` (DMG ramp) and
+`chiptune-16` (PICO-8, already fixed in `color.ts`). `monochrome` is the one freely-authored ramp.
+Every palette must be non-empty and every entry must match `#rrggbb`. `resolve` is scheme-size
+independent (`index % length`), so a 4-entry `gameboy` works without special-casing.
 
 ## 5. CLI surface
 
