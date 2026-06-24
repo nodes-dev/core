@@ -70,7 +70,7 @@ Create `~/d/mindful/v6/tests/sprite.test.ts`:
 import { ValidationError } from "@nodes/kernel";
 import { describe, expect, it } from "vitest";
 import type { VisualIdentity } from "../src/identity.js";
-import { type CellValue, type SpriteCells, spriteCells } from "../src/sprite.js";
+import { type SpriteCells, spriteCells } from "../src/sprite.js";
 
 // Valid identity with a controllable seed. slots are required by the schema but unused by spriteCells.
 function idWithSeed(seed: string): VisualIdentity {
@@ -221,7 +221,7 @@ rtk git commit -m "feat(sprite): SpriteCells/Sprite types + pure spriteCells gen
 
 First, **merge `renderSprite` into the existing `../src/sprite.js` import** at the top of the file (do not add a second import statement from the same module — biome's import organizer flags duplicates). The line becomes:
 ```ts
-import { type CellValue, type SpriteCells, renderSprite, spriteCells } from "../src/sprite.js";
+import { type SpriteCells, renderSprite, spriteCells } from "../src/sprite.js";
 ```
 
 Then append the new describe block to `~/d/mindful/v6/tests/sprite.test.ts`:
@@ -258,13 +258,19 @@ describe("renderSprite", () => {
 		expect(s.pixels[0][0]).toBe("#abcdef");
 	});
 
-	it("is palette-independent in its cell grid: same identity, two palettes → same cells, different pixels", () => {
+	it("is palette-independent in its cell grid: both palettes paint the same cells", () => {
 		const id = idWithSeed(MAP_SEED);
+		const cells = spriteCells(id); // MAP_SEED has filled cells (inks 1/2/3), so palettes diverge
+		const B = ["#000000", "#111111", "#222222", "#333333"];
 		const a = renderSprite(id, FOUR);
-		const b = renderSprite(id, ["#000000", "#111111", "#222222", "#333333"]);
-		// cells identical (proxy: structure same), pixels differ
+		const b = renderSprite(id, B);
+		for (let r = 0; r < 8; r++) {
+			for (let c = 0; c < 8; c++) {
+				expect(a.pixels[r][c]).toBe(FOUR[cells[r][c]]);
+				expect(b.pixels[r][c]).toBe(B[cells[r][c]]);
+			}
+		}
 		expect(a.pixels).not.toEqual(b.pixels);
-		expect(spriteCells(id)).toEqual(spriteCells(id));
 	});
 
 	it("throws ValidationError when colors is not exactly length 4", () => {
@@ -349,12 +355,15 @@ Create `~/d/mindful/v6/tests/sprite-integration.test.ts`:
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RefError } from "@nodes/kernel";
+import { RefError, makeNode } from "@nodes/kernel";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Mindful } from "../src/api.js";
 import type { Colorscheme } from "../src/color.js";
-import { visualIdentityOf } from "../src/identity.js";
+import { VISUAL_IDENTITY, visualIdentityOf } from "../src/identity.js";
 import { renderSprite, spriteCells } from "../src/sprite.js";
+
+// Known seed with filled (non-background) cells — see sprite.test.ts / plan byte-mapping fixture.
+const MAP_SEED = `c0808800${"0".repeat(56)}`;
 
 let root: string;
 beforeEach(() => {
@@ -385,12 +394,32 @@ describe("Mindful.sprite", () => {
 
 	it("re-themes: same thought, two schemes → identical cells, different pixels", () => {
 		const m = new Mindful(root);
-		const t = m.capture({ title: "Re-theme me" });
+		// Fixture thought with a KNOWN seed that has filled cells and distinct ink slots, so two schemes
+		// genuinely diverge. (A random capture could be all-background, making both schemes render the
+		// same background color for every cell and the assertion pass for the wrong reason.)
+		const node = makeNode({
+			id: "thought:fixture",
+			kind: "thought",
+			title: "Fixture",
+			facets: {
+				[VISUAL_IDENTITY]: {
+					seed: MAP_SEED,
+					slots: [
+						{ index: 0, variant: 0 },
+						{ index: 1, variant: 0 },
+						{ index: 2, variant: 0 },
+						{ index: 3, variant: 0 },
+					],
+				},
+			},
+		});
+		m.corpus.add(node);
+		const cells = spriteCells(visualIdentityOf(node)); // grid computed once, before any rendering
 		const mono: Colorscheme = { name: "mono", colors: ["#000000", "#555555", "#aaaaaa", "#ffffff"] };
-		const a = m.sprite(t.id); // default scheme
-		const b = m.sprite(t.id, mono);
-		expect(spriteCells(visualIdentityOf(t))).toEqual(spriteCells(visualIdentityOf(t))); // cells stable
-		expect(b.pixels).not.toEqual(a.pixels); // colors differ
+		const a = m.sprite(node.id); // default scheme
+		const b = m.sprite(node.id, mono);
+		expect(spriteCells(visualIdentityOf(m.get(node.id)))).toEqual(cells); // palette never changes the grid
+		expect(b.pixels).not.toEqual(a.pixels); // filled cells + distinct inks → colors diverge
 	});
 
 	it("throws RefError for an unknown thought id", () => {
