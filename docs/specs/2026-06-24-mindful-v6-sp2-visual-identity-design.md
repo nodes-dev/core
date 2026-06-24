@@ -159,6 +159,11 @@ A small internal color module provides `hexToHsl` / `hslToHex` for the transform
 module-private helpers, not part of the public surface (only `resolve`, `defaultColorscheme`, and the
 types are exported).
 
+**Colorscheme color validation:** every entry in a `Colorscheme.colors` array must be a valid
+`#rrggbb` string. `resolve` validates each selected entry and **fails fast** (throws) on a malformed
+color rather than letting it fall through to vague parser behavior in `hexToHsl`. The built-in
+`defaultColorscheme` is well-formed by construction; the guard exists for caller-supplied schemes.
+
 ---
 
 ## 5. Facet Wiring & Validation
@@ -270,6 +275,8 @@ check). `visualIdentity` malformed (bad seed, wrong slot count, out-of-range `in
 `FacetError` (schema, via the accessor invoked by the invariant). All before any disk write. `resolve`
 on an empty-`colors` scheme is a programming error, not user data — `defaultColorscheme` is non-empty
 and a caller-supplied scheme with no colors fails fast (modulo-by-zero guarded with a thrown error).
+Likewise, a caller-supplied scheme whose selected `colors` entry is not a valid `#rrggbb` string fails
+fast in `resolve` (a thrown error), never falling through to undefined `hexToHsl` behavior.
 
 ---
 
@@ -288,12 +295,17 @@ and a caller-supplied scheme with no colors fails fast (modulo-by-zero guarded w
 
 **Resolution (`color.test.ts`):**
 - `resolve` returns exactly 4 `#rrggbb` strings.
-- Variant transforms: `0` returns the base unchanged; `1`/`2` shift lightness up/down; `3` rotates hue
-  ~180° (asserted on known inputs through `hexToHsl`).
+- Variant transforms, asserted through the **public `resolve()` output** (production HSL helpers stay
+  private): build identities with hand-chosen single-slot `index`/`variant` against a known scheme,
+  then inspect the resulting hex — `0` returns the base entry unchanged; `1`/`2` shift lightness
+  up/down; `3` rotates hue ~180°. Lightness/hue comparisons use a **test-local** hex→HSL helper, not
+  an import of the production helper.
 - Scheme-size independence: the same identity resolves against schemes of different lengths without
   error (`index % K`), and re-theming (same identity, different scheme) yields different colors but
   the same 4-length structure.
 - Empty-scheme guard: `resolve` against a `colors: []` scheme throws.
+- Invalid-color guard: `resolve` against a scheme whose selected entry is not a valid `#rrggbb`
+  string throws (no fall-through to `hexToHsl`).
 
 **Integration:**
 - `capture` persists a valid identity; on-disk round-trip (reload corpus) preserves it byte-for-byte.
@@ -335,3 +347,6 @@ and a caller-supplied scheme with no colors fails fast (modulo-by-zero guarded w
     invariants already exist in the kernel registry.
 11. SP2 scope = identity facet + `Colorscheme` type + built-in default scheme + pure `resolve` +
     `Mindful.palette`. **Rendering and scheme-picking UI are SP3.**
+12. `resolve` **fails fast** on a caller-supplied scheme that is empty or whose selected entry is not
+    a valid `#rrggbb` string — no fall-through to undefined `hexToHsl` behavior. Variant transforms
+    are tested through the public `resolve()` output; production HSL helpers stay module-private.
