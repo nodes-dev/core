@@ -33,7 +33,8 @@ dependencies — pure string/integer math over the existing `Sprite`.
 - **Pure presentation leaf.** `spriteToAnsi` is a pure function of its `Sprite` argument: no I/O
   (it returns a string; printing is the caller's job), no state, no `Corpus`, no new dependency.
 - **No `Mindful` method.** Encoding is presentation, not data. `Mindful` is untouched. `encode.ts`
-  imports nothing from `api.ts`; it imports only the `Sprite` type from `sprite.ts`.
+  imports `ValidationError` from `@nodes/kernel` and the `Sprite` type from `./sprite.js`, and no
+  other mindful module (nothing from `api.ts`).
 - **Consumes only `Sprite`.** The encoder has no knowledge of `VisualIdentity`, slots, palettes, or
   colorschemes. It cannot mutate identity or persist anything — the SP2/SP3 boundary holds by
   construction.
@@ -41,9 +42,9 @@ dependencies — pure string/integer math over the existing `Sprite`.
   throws `ValidationError` before producing any output. No silent fallbacks, no partial output.
 - **Truecolor only.** 24-bit `\x1b[38;2;r;g;bm` / `\x1b[48;2;r;g;bm` sequences. No 256-color or
   16-color downgrade path (YAGNI; modern terminals support truecolor).
-- **8×8 / even-height contract.** SP4 supports rectangular, **even-height** sprites only (SP3 emits
-  8×8). Odd-height / generic-size support is explicitly deferred — a future additive change, not an
-  accidental Hyrum's-Law contract.
+- **Size contract.** SP4 supports **positive-width, even-height rectangular** sprites; SP3's 8×8
+  output is the primary caller. Odd-height support, scaling/zoom, and richer terminal layout are
+  deferred — future additive changes, not accidental Hyrum's-Law contracts.
 
 ---
 
@@ -145,8 +146,9 @@ throw.
   encode.test.ts   # pure unit tests                                                           (new)
 ```
 
-`encode.ts` imports only the `Sprite` type from `./sprite.js`. The barrel adds `spriteToAnsi`. No
-other file changes — `api.ts`, `sprite.ts`, `color.ts`, `identity.ts`, `kinds.ts` are untouched.
+`encode.ts` imports `ValidationError` from `@nodes/kernel` and the `Sprite` type from `./sprite.js` —
+no other mindful module. The barrel adds `spriteToAnsi`. No other file changes — `api.ts`, `sprite.ts`,
+`color.ts`, `identity.ts`, `kinds.ts` are untouched.
 
 ---
 
@@ -187,7 +189,8 @@ correctly:
   storage point) and the UI to choose it.
 - **Any I/O:** `spriteToAnsi` returns a string; printing/streaming to a terminal is the caller's job.
 - **Color-depth fallbacks:** no 256-color / 16-color downgrade; truecolor only.
-- **Scaling/zoom** and **odd-height / generic-size sprites:** additive future work.
+- **Odd-height sprites, scaling/zoom, and richer terminal layout:** additive future work. (Positive-width,
+  even-height rectangular sprites of any width ARE supported now — only odd height is rejected.)
 
 ---
 
@@ -202,8 +205,9 @@ correctly:
    `Sprite` type.
 4. **Strict encoder, not forgiving.** Validates a positive-integer, even-height, rectangular dimension
    contract and `#rrggbb` pixels; throws `ValidationError` and emits nothing on violation.
-5. **Even-height / rectangular only.** Odd-height and generic-size support deferred (avoid an
-   accidental Hyrum's-Law contract); SP3 sprites are 8×8.
+5. **Positive-width, even-height rectangular sprites of any width.** SP3's 8×8 is the primary caller.
+   Only odd height is rejected; odd-height support, scaling/zoom, and richer layout are deferred (avoid
+   accidental Hyrum's-Law contracts).
 6. **Frozen escape construction:** `RESET = "\x1b[0m"`, `UPPER_HALF_BLOCK = "▀"`, `fg`/`bg` emit exact
    `\x1b[38;2;r;g;bm` / `\x1b[48;2;r;g;bm`; rows joined with `\n`, no trailing newline.
 7. **Truecolor only**, no color-depth fallback (YAGNI).
