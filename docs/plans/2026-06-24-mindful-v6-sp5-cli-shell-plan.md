@@ -281,7 +281,7 @@ Edit `~/d/mindful/v6/src/cli.ts`. Update the top imports to:
 import { join } from "node:path";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import { type Node, NodesError } from "@nodes/kernel";
-import { Mindful } from "./api.js";
+import { type Mindful } from "./api.js";
 import { spriteToAnsi } from "./encode.js";
 ```
 
@@ -533,6 +533,8 @@ describe("runCli — flag-bearing commands", () => {
 		expect(run("add", "Dup", "--body", "one", "--body", "two")).toBe(2);
 		const t = m.capture({ title: "EditDup" });
 		expect(run("edit", t.id, "--title", "x", "--title", "y")).toBe(2);
+		m.capture({ title: "SearchDup" });
+		expect(run("search", "SearchDup", "--limit", "1", "--limit", "2")).toBe(2);
 		// repeated --tag is allowed (targets exist)
 		m.capture({ title: "ta" });
 		m.capture({ title: "tb" });
@@ -785,8 +787,8 @@ Edit `~/d/mindful/v6/biome.json` to add a `files.ignore` (so `biome check .` nev
 ```bash
 cd ~/d/mindful/v6
 rtk npm run build
-ls dist/bin.js dist/index.js dist/cli.js
-head -1 dist/bin.js   # expect: #!/usr/bin/env node
+rtk ls dist/bin.js dist/index.js dist/cli.js
+rtk sed -n '1p' dist/bin.js   # expect: #!/usr/bin/env node
 ```
 Expected: build exits 0; all three files exist; `dist/bin.js` first line is the shebang.
 
