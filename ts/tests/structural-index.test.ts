@@ -141,22 +141,23 @@ describe("Index — graph queries", () => {
     expect(idx.outboundEdges(b.uid)).toEqual([]); // B is not the source of any relation
   });
 
-  it("membership members/edges are tracked but are NOT public graph edges", () => {
+  it("structure-facet refs are tracked but are NOT public graph edges", () => {
     const g = makeNode({
       id: "graph:g",
       kind: "graph",
       title: "G",
       facets: {
-        membership: {
-          shape: "graph",
-          members: ["topic:x"],
-          edges: [{ source: "topic:x", predicate: "to", target: "topic:y" }],
-        },
+        membership: { members: ["topic:x"] },
+        edges: { edges: [{ source: "topic:x", predicate: "to", target: "topic:y" }] },
       },
     });
     const x = makeNode({ id: "topic:x", kind: "topic", title: "X" });
     const y = makeNode({ id: "topic:y", kind: "topic", title: "Y" });
     const idx = Index.build([g, x, y]);
+    // structural refs register as inbound refs (for rename) ...
+    expect((idx.inRefs.get("topic:x") ?? []).some((r) => r.sourceUid === g.uid)).toBe(true);
+    expect((idx.inRefs.get("topic:y") ?? []).some((r) => r.sourceUid === g.uid)).toBe(true);
+    // ... but never as graph edges.
     expect(idx.outboundEdges(g.uid)).toEqual([]);
     expect(idx.inboundEdges(y.uid)).toEqual([]);
     expect(idx.danglingEdges()).toEqual([]);

@@ -2,14 +2,25 @@ import { CollisionError, IdError, RefError } from "./errors.js";
 import { NodeId } from "./ids.js";
 import type { Node } from "./node.js";
 import { type Relation, RelationSchema } from "./relations.js";
-import { MEMBERSHIP } from "./shapes.js";
+import { EDGES, KEYS, MEMBERSHIP, ORDER } from "./shapes.js";
 
 export type Role =
   | "relation_source"
   | "relation_target"
   | "membership_member"
-  | "membership_edge_source"
-  | "membership_edge_target";
+  | "edges_source"
+  | "edges_target"
+  | "order_member"
+  | "keys_value";
+
+const STRUCTURAL_ENTRY_KEYS = ["uid", "id", "kind", "deprecatedIds", "relations", "structuralRefs"] as const;
+const STRUCTURAL_REF_ROLES = new Set<Role>([
+  "membership_member",
+  "edges_source",
+  "edges_target",
+  "order_member",
+  "keys_value",
+]);
 
 export interface OutRef {
   ref: string;
@@ -28,7 +39,6 @@ export interface IndexEntry {
   kind: string;
   deprecatedIds: ReadonlySet<string>;
   outRefs: OutRef[];
-  membership?: Record<string, unknown>;
 }
 
 export interface ResolvedEdge {
@@ -37,33 +47,53 @@ export interface ResolvedEdge {
   targetUid: string | null; // null when the endpoint ref is dangling
 }
 
-// Every position that holds an id: relation source+target, membership members
-// (list values and dict values), and membership edge source+target. Valid corpora
-// hold only string refs in these positions; the string guards are a typed safety net.
-function outRefsFrom(relations: Relation[], membership: unknown): OutRef[] {
+function relationOutRefs(relations: Relation[]): OutRef[] {
   const refs: OutRef[] = [];
   for (const rel of relations) {
     refs.push({ ref: rel.source, role: "relation_source", relation: rel });
     refs.push({ ref: rel.target, role: "relation_target", relation: rel });
   }
-  if (membership !== undefined && membership !== null && typeof membership === "object") {
-    const m = membership as Record<string, unknown>;
-    const members = m.members;
+  return refs;
+}
+
+// Refs from the built-in structural facets. Read directly from `node.facets`
+// (registry-independent); they populate `inRefs` for rename + dangling integrity but
+// are never relation-graph edges (their `relation` stays undefined).
+function structuralOutRefs(node: Node): OutRef[] {
+  const refs: OutRef[] = [];
+  const mem = node.facets[MEMBERSHIP];
+  if (mem !== null && typeof mem === "object") {
+    const members = (mem as Record<string, unknown>).members;
     if (Array.isArray(members)) {
-      for (const x of members) if (typeof x === "string") refs.push({ ref: x, role: "membership_member" });
-    } else if (members !== null && typeof members === "object") {
-      for (const v of Object.values(members as Record<string, unknown>)) {
-        if (typeof v === "string") refs.push({ ref: v, role: "membership_member" });
-      }
+      for (const m of members) if (typeof m === "string") refs.push({ ref: m, role: "membership_member" });
     }
-    const edges = m.edges;
+  }
+  const eg = node.facets[EDGES];
+  if (eg !== null && typeof eg === "object") {
+    const edges = (eg as Record<string, unknown>).edges;
     if (Array.isArray(edges)) {
       for (const edge of edges) {
         if (edge !== null && typeof edge === "object") {
           const e = edge as Record<string, unknown>;
-          if (typeof e.source === "string") refs.push({ ref: e.source, role: "membership_edge_source" });
-          if (typeof e.target === "string") refs.push({ ref: e.target, role: "membership_edge_target" });
+          if (typeof e.source === "string") refs.push({ ref: e.source, role: "edges_source" });
+          if (typeof e.target === "string") refs.push({ ref: e.target, role: "edges_target" });
         }
+      }
+    }
+  }
+  const od = node.facets[ORDER];
+  if (od !== null && typeof od === "object") {
+    const order = (od as Record<string, unknown>).order;
+    if (Array.isArray(order)) {
+      for (const m of order) if (typeof m === "string") refs.push({ ref: m, role: "order_member" });
+    }
+  }
+  const ky = node.facets[KEYS];
+  if (ky !== null && typeof ky === "object") {
+    const keys = (ky as Record<string, unknown>).keys;
+    if (keys !== null && typeof keys === "object") {
+      for (const v of Object.values(keys as Record<string, unknown>)) {
+        if (typeof v === "string") refs.push({ ref: v, role: "keys_value" });
       }
     }
   }
@@ -71,7 +101,7 @@ function outRefsFrom(relations: Relation[], membership: unknown): OutRef[] {
 }
 
 function extractOutRefs(node: Node): OutRef[] {
-  return outRefsFrom(node.relations, node.facets[MEMBERSHIP]);
+  return [...relationOutRefs(node.relations), ...structuralOutRefs(node)];
 }
 
 function validatedDeprecatedIds(raw: unknown, entryId: string): string[] {
@@ -106,44 +136,19 @@ function validateSnapshotDirected(raw: Record<string, unknown>, label: string): 
   }
 }
 
-function validatedMembership(raw: unknown): Record<string, unknown> | undefined {
-  if (raw === null || raw === undefined) return undefined;
-  if (typeof raw !== "object") throw new Error("structural snapshot: entry membership must be an object or null");
-  const m = raw as Record<string, unknown>;
-  if (typeof m.shape !== "string") throw new Error("structural snapshot: membership shape must be a string");
-  const members = m.members;
-  if (members !== undefined && members !== null) {
-    if (Array.isArray(members)) {
-      if (members.some((x) => typeof x !== "string"))
-        throw new Error("structural snapshot: membership members must be strings");
-    } else if (typeof members === "object") {
-      if (Object.values(members as Record<string, unknown>).some((v) => typeof v !== "string")) {
-        throw new Error("structural snapshot: membership member values must be strings");
-      }
-    } else {
-      throw new Error("structural snapshot: membership members must be an array or object");
-    }
+function validatedStructuralRefs(raw: unknown): OutRef[] {
+  if (!Array.isArray(raw)) throw new Error("structural snapshot: structuralRefs must be an array");
+  const out: OutRef[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object")
+      throw new Error("structural snapshot: structuralRef must be an object");
+    const { ref, role } = item as Record<string, unknown>;
+    if (typeof ref !== "string") throw new Error("structural snapshot: structuralRef ref must be a string");
+    if (typeof role !== "string" || !STRUCTURAL_REF_ROLES.has(role as Role))
+      throw new Error("structural snapshot: structuralRef role is invalid");
+    out.push({ ref, role: role as Role });
   }
-  const edges = m.edges;
-  if (edges !== undefined && edges !== null) {
-    if (!Array.isArray(edges)) throw new Error("structural snapshot: membership edges must be an array");
-    for (const edge of edges) {
-      if (typeof edge !== "object" || edge === null)
-        throw new Error("structural snapshot: membership edge must be an object");
-      const e = edge as Record<string, unknown>;
-      if (typeof e.source !== "string") throw new Error("structural snapshot: membership edge source must be a string");
-      if (typeof e.predicate !== "string")
-        throw new Error("structural snapshot: membership edge predicate must be a string");
-      if (typeof e.target !== "string") throw new Error("structural snapshot: membership edge target must be a string");
-      validateSnapshotDirected(e, "membership edge");
-      validateSnapshotWeight(e, "membership edge");
-      if ("attrs" in e && (typeof e.attrs !== "object" || e.attrs === null)) {
-        throw new Error("structural snapshot: membership edge attrs must be an object");
-      }
-      if (!RelationSchema.safeParse(e).success) throw new Error("structural snapshot: invalid membership edge");
-    }
-  }
-  return structuredClone(m);
+  return out;
 }
 
 /** In-memory structural index. Pure data; no file I/O. */
@@ -191,17 +196,12 @@ export class Index {
 
   upsert(node: Node): void {
     if (this.byUid.has(node.uid)) this.drop(node.uid);
-    const membership = node.facets[MEMBERSHIP];
     const entry: IndexEntry = {
       uid: node.uid,
       id: node.id,
       kind: node.kind,
       deprecatedIds: new Set(node.deprecatedIds),
       outRefs: extractOutRefs(node),
-      membership:
-        membership !== undefined && membership !== null && typeof membership === "object"
-          ? (membership as Record<string, unknown>)
-          : undefined,
     };
     this.byUid.set(node.uid, entry);
     this.idToUid.set(node.id, node.uid);
@@ -220,7 +220,7 @@ export class Index {
       kind: string;
       deprecatedIds: string[];
       relations: Array<Record<string, unknown>>;
-      membership: Record<string, unknown> | null;
+      structuralRefs: Array<{ ref: string; role: Role }>;
     }>;
   } {
     const entries = [];
@@ -245,7 +245,9 @@ export class Index {
         kind: entry.kind,
         deprecatedIds: [...entry.deprecatedIds].sort(),
         relations,
-        membership: entry.membership !== undefined ? structuredClone(entry.membership) : null,
+        structuralRefs: entry.outRefs
+          .filter((o) => !o.role.startsWith("relation_"))
+          .map((o) => ({ ref: o.ref, role: o.role })),
       });
     }
     return { entries };
@@ -261,7 +263,7 @@ export class Index {
       if (typeof rawEntry !== "object" || rawEntry === null)
         throw new Error("structural snapshot: entry must be an object");
       const e = rawEntry as Record<string, unknown>;
-      for (const key of ["uid", "id", "kind", "deprecatedIds", "relations", "membership"]) {
+      for (const key of STRUCTURAL_ENTRY_KEYS) {
         if (!(key in e)) throw new Error(`structural snapshot: entry missing ${key}`);
       }
       const { uid, id: entryId, kind } = e;
@@ -291,15 +293,14 @@ export class Index {
         if (!result.success) throw new Error("structural snapshot: invalid relation row");
         relations.push(result.data);
       }
-      const membership = validatedMembership(e.membership);
-      const outRefs = outRefsFrom(relations, membership);
+      const structuralRefs = validatedStructuralRefs(e.structuralRefs);
+      const outRefs = [...relationOutRefs(relations), ...structuralRefs];
       const entry: IndexEntry = {
         uid,
         id: entryId,
         kind,
         deprecatedIds: new Set(deprecatedIds),
         outRefs,
-        membership,
       };
       for (const claim of [entry.id, ...entry.deprecatedIds]) {
         const owner = idx.resolveUid(claim);

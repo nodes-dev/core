@@ -3,88 +3,158 @@ import { FacetError, InvariantError } from "../src/errors.js";
 import { makeNode } from "../src/node.js";
 import { Registry } from "../src/registry.js";
 import {
+  EDGES,
+  KEYS,
   MEMBERSHIP,
+  ORDER,
+  edgesOf,
+  keysOf,
   membershipOf,
+  orderOf,
   registerBuiltinShapes,
-  requireAcyclic,
-  requireDictKeys,
-  requireSingleParent,
   requireUniqueMembers,
 } from "../src/shapes.js";
 
-function shaped(kind: string, membership: Record<string, unknown>) {
-  return makeNode({ id: `${kind}:1`, kind, title: "S", facets: { [MEMBERSHIP]: membership } });
+function reg(): Registry {
+  const r = new Registry();
+  registerBuiltinShapes(r);
+  return r;
 }
 
-describe("shapes", () => {
+function struct(kind: string, facets: Record<string, Record<string, unknown>>) {
+  return makeNode({ id: `${kind}:1`, kind, title: "S", facets });
+}
+
+function edge(source: string, target: string) {
+  return { source, predicate: "to", target };
+}
+
+describe("shapes — facet accessors", () => {
   it("membershipOf throws FacetError when the facet is absent", () => {
     expect(() => membershipOf(makeNode({ id: "set:1", kind: "set", title: "S" }))).toThrow(FacetError);
   });
 
-  it("membershipOf defaults members and edges to empty", () => {
-    const m = membershipOf(shaped("set", { shape: "set" }));
-    expect(m.members).toEqual([]);
-    expect(m.edges).toEqual([]);
+  it("membershipOf defaults members to empty", () => {
+    expect(membershipOf(struct("set", { [MEMBERSHIP]: {} })).members).toEqual([]);
   });
 
-  it("requireUniqueMembers rejects duplicates", () => {
-    expect(() => requireUniqueMembers(shaped("set", { shape: "set", members: ["a:1", "a:1"] }))).toThrow(
+  it("each accessor wraps a malformed facet as FacetError", () => {
+    expect(() => membershipOf(struct("set", { [MEMBERSHIP]: { members: [1] } }))).toThrow(FacetError);
+    expect(() => orderOf(struct("list", { [ORDER]: { order: [1] } }))).toThrow(FacetError);
+    expect(() => keysOf(struct("dict", { [KEYS]: { keys: { a: 1 } } }))).toThrow(FacetError);
+    expect(() => edgesOf(struct("graph", { [EDGES]: { edges: [{ source: 1 }] } }))).toThrow(FacetError);
+  });
+});
+
+describe("shapes — built-in validation", () => {
+  it("set requires membership only and rejects duplicates", () => {
+    expect(() => reg().validate(struct("set", { [MEMBERSHIP]: { members: ["a:1"] } }))).not.toThrow();
+    expect(() => reg().validate(struct("set", { [MEMBERSHIP]: { members: ["a:1", "a:1"] } }))).toThrow(InvariantError);
+  });
+
+  it("set rejects form facets it does not own", () => {
+    expect(() =>
+      reg().validate(struct("set", { [MEMBERSHIP]: { members: ["a:1"] }, [ORDER]: { order: ["a:1"] } })),
+    ).toThrow(FacetError);
+  });
+
+  it("list requires order to be a permutation of members", () => {
+    expect(() =>
+      reg().validate(struct("list", { [MEMBERSHIP]: { members: ["a:1", "a:2"] }, [ORDER]: { order: ["a:2", "a:1"] } })),
+    ).not.toThrow();
+    expect(() =>
+      reg().validate(struct("list", { [MEMBERSHIP]: { members: ["a:1", "a:2"] }, [ORDER]: { order: ["a:1"] } })),
+    ).toThrow(InvariantError);
+  });
+
+  it("list rejects duplicate members (isolated from the permutation check)", () => {
+    // duplicate members, but order is NOT itself duplicated: requireUniqueMembers fires first.
+    expect(() =>
+      reg().validate(struct("list", { [MEMBERSHIP]: { members: ["a:1", "a:1"] }, [ORDER]: { order: ["a:1"] } })),
+    ).toThrow(InvariantError);
+  });
+
+  it("list missing the order facet is rejected", () => {
+    expect(() => reg().validate(struct("list", { [MEMBERSHIP]: { members: ["a:1"] } }))).toThrow(FacetError);
+  });
+
+  it("dict requires key values to be members", () => {
+    expect(() =>
+      reg().validate(struct("dict", { [MEMBERSHIP]: { members: ["a:1"] }, [KEYS]: { keys: { label: "a:1" } } })),
+    ).not.toThrow();
+    expect(() =>
+      reg().validate(struct("dict", { [MEMBERSHIP]: { members: ["a:1"] }, [KEYS]: { keys: { label: "a:2" } } })),
+    ).toThrow(InvariantError);
+  });
+
+  it("graph requires edge endpoints to be members", () => {
+    expect(() =>
+      reg().validate(
+        struct("graph", { [MEMBERSHIP]: { members: ["a:1", "a:2"] }, [EDGES]: { edges: [edge("a:1", "a:2")] } }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      reg().validate(struct("graph", { [MEMBERSHIP]: { members: ["a:1"] }, [EDGES]: { edges: [edge("a:1", "a:2")] } })),
+    ).toThrow(InvariantError);
+  });
+
+  it("dag rejects a cycle", () => {
+    expect(() =>
+      reg().validate(
+        struct("dag", {
+          [MEMBERSHIP]: { members: ["a:1", "a:2"] },
+          [EDGES]: { edges: [edge("a:1", "a:2"), edge("a:2", "a:1")] },
+        }),
+      ),
+    ).toThrow(InvariantError);
+  });
+
+  it("dag accepts a diamond (shared sink reached by two paths)", () => {
+    expect(() =>
+      reg().validate(
+        struct("dag", {
+          [MEMBERSHIP]: { members: ["a:1", "a:2", "a:3", "a:4"] },
+          [EDGES]: { edges: [edge("a:1", "a:2"), edge("a:1", "a:3"), edge("a:2", "a:4"), edge("a:3", "a:4")] },
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("tree rejects multiple parents of one target", () => {
+    expect(() =>
+      reg().validate(
+        struct("tree", {
+          [MEMBERSHIP]: { members: ["a:1", "a:2", "a:3"] },
+          [EDGES]: { edges: [edge("a:1", "a:3"), edge("a:2", "a:3")] },
+        }),
+      ),
+    ).toThrow(InvariantError);
+  });
+
+  it("tree rejects a cycle (acyclic failure path on the full tree stack)", () => {
+    // each node has in-degree 1 so requireSingleParent passes; the cycle trips requireAcyclic
+    // (which runs before requireSingleParent).
+    expect(() =>
+      reg().validate(
+        struct("tree", {
+          [MEMBERSHIP]: { members: ["a:1", "a:2"] },
+          [EDGES]: { edges: [edge("a:1", "a:2"), edge("a:2", "a:1")] },
+        }),
+      ),
+    ).toThrow(InvariantError);
+  });
+
+  it("registerBuiltinShapes wires all six shapes and kinds", () => {
+    const r = reg();
+    for (const k of ["set", "list", "dict", "graph", "dag", "tree"]) {
+      expect(r.isShape(k)).toBe(true);
+      expect(r.isRegistered(k)).toBe(true);
+    }
+  });
+
+  it("a standalone invariant is callable on a node", () => {
+    expect(() => requireUniqueMembers(struct("set", { [MEMBERSHIP]: { members: ["a:1", "a:1"] } }))).toThrow(
       InvariantError,
     );
-  });
-
-  it("requireDictKeys requires a mapping", () => {
-    expect(() => requireDictKeys(shaped("dict", { shape: "dict", members: ["a:1"] }))).toThrow(InvariantError);
-    expect(() => requireDictKeys(shaped("dict", { shape: "dict", members: { k: "a:1" } }))).not.toThrow();
-  });
-
-  it("requireAcyclic detects a cycle", () => {
-    const m = {
-      shape: "graph",
-      members: ["a:1", "a:2"],
-      edges: [
-        { source: "a:1", predicate: "e", target: "a:2" },
-        { source: "a:2", predicate: "e", target: "a:1" },
-      ],
-    };
-    expect(() => requireAcyclic(shaped("dag", m))).toThrow(InvariantError);
-  });
-
-  it("requireAcyclic does not throw on a diamond DAG (shared sink reached by two paths)", () => {
-    const m = {
-      shape: "graph",
-      members: ["a:1", "a:2", "a:3", "a:4"],
-      edges: [
-        { source: "a:1", predicate: "e", target: "a:2" },
-        { source: "a:1", predicate: "e", target: "a:3" },
-        { source: "a:2", predicate: "e", target: "a:4" },
-        { source: "a:3", predicate: "e", target: "a:4" },
-      ],
-    };
-    expect(() => requireAcyclic(shaped("dag", m))).not.toThrow();
-  });
-
-  it("requireSingleParent rejects two parents of one target", () => {
-    const m = {
-      shape: "tree",
-      members: ["a:1", "a:2", "a:3"],
-      edges: [
-        { source: "a:1", predicate: "e", target: "a:3" },
-        { source: "a:2", predicate: "e", target: "a:3" },
-      ],
-    };
-    expect(() => requireSingleParent(shaped("tree", m))).toThrow(InvariantError);
-  });
-
-  it("registerBuiltinShapes wires all six shapes; a valid tree passes", () => {
-    const reg = new Registry();
-    registerBuiltinShapes(reg);
-    for (const k of ["set", "list", "dict", "graph", "dag", "tree"]) expect(reg.isRegistered(k)).toBe(true);
-    const tree = shaped("tree", {
-      shape: "tree",
-      members: ["a:1", "a:2"],
-      edges: [{ source: "a:1", predicate: "child", target: "a:2" }],
-    });
-    expect(() => reg.validate(tree)).not.toThrow();
   });
 });

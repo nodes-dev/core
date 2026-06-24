@@ -44,12 +44,21 @@ function seed(): Index {
       kind: "graph",
       title: "G",
       facets: {
-        membership: {
-          shape: "graph",
-          members: ["topic:a", "topic:missing"],
-          edges: [{ source: "topic:a", predicate: "to", target: "topic:b" }],
-        },
+        membership: { members: ["topic:a", "topic:missing"] },
+        edges: { edges: [{ source: "topic:a", predicate: "to", target: "topic:b" }] },
       },
+    }),
+    makeNode({
+      id: "list:l",
+      kind: "list",
+      title: "L",
+      facets: { membership: { members: ["topic:a"] }, order: { order: ["topic:a"] } },
+    }),
+    makeNode({
+      id: "dict:d",
+      kind: "dict",
+      title: "D",
+      facets: { membership: { members: ["topic:a"] }, keys: { keys: { label: "topic:a" } } },
     }),
   ]);
 }
@@ -67,7 +76,7 @@ describe("structural Index snapshot", () => {
     const aUid = restored.idToUid.get("topic:a") as string;
     const out = restored.outboundEdges(aUid);
     expect(out.length).toBe(1);
-    // topic:missing is dangling (membership_member role does not produce a relation edge,
+    // topic:missing is dangling (structural roles do not produce relation edges,
     // but the graph edge a->b resolves; the relatesTo a->b resolves too). Confirm no spurious dup.
     const bUid = restored.idToUid.get("topic:b") as string;
     expect(restored.inboundEdges(bUid).length).toBe(idx.inboundEdges(idx.idToUid.get("topic:b") as string).length);
@@ -99,5 +108,19 @@ describe("structural Index snapshot", () => {
     const d = seed().toDict();
     d.entries[1].deprecatedIds = ["topic:a"]; // topic:a is entry 0's live id
     expect(() => Index.fromDict(d)).toThrow();
+  });
+
+  it("persists structural refs under structuralRefs (not membership) for every role", () => {
+    const d = seed().toDict();
+    for (const entry of d.entries) {
+      expect("membership" in entry).toBe(false);
+      expect(Array.isArray(entry.structuralRefs)).toBe(true);
+    }
+    const allRoles = new Set(d.entries.flatMap((e) => e.structuralRefs.map((r) => r.role)));
+    expect(allRoles).toContain("membership_member");
+    expect(allRoles).toContain("edges_source");
+    expect(allRoles).toContain("edges_target");
+    expect(allRoles).toContain("order_member");
+    expect(allRoles).toContain("keys_value");
   });
 });

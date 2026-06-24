@@ -135,47 +135,51 @@ describe("Corpus — rename", () => {
     expect(fresh.get("topic:old").id).toBe("topic:new");
   });
 
-  it("rewrites membership members and edge sources", () => {
-    const c = new Corpus(root);
-    c.add(n("topic:old", "topic"));
-    c.add(n("topic:x", "topic"));
+  it("rename rewrites membership members and edges-facet endpoints", () => {
+    const c = new Corpus(root); // `root` is the module-level temp dir from beforeEach
+    c.add(makeNode({ id: "topic:old", kind: "topic", title: "Old" }));
+    c.add(makeNode({ id: "topic:x", kind: "topic", title: "X" }));
     c.add(
       makeNode({
         id: "graph:g",
         kind: "graph",
         title: "G",
         facets: {
-          membership: {
-            shape: "graph",
-            members: ["topic:old", "topic:x"],
-            edges: [{ source: "topic:old", predicate: "to", target: "topic:old" }],
-          },
+          membership: { members: ["topic:old", "topic:x"] },
+          edges: { edges: [{ source: "topic:old", predicate: "to", target: "topic:old" }] },
         },
       }),
     );
     c.rename("topic:old", "topic:new");
-    const mem = c.get("graph:g").facets.membership as Record<string, unknown>;
-    expect(mem.members).toEqual(["topic:new", "topic:x"]);
-    const edge = (mem.edges as Array<Record<string, unknown>>)[0];
-    expect(edge.source).toBe("topic:new");
-    expect(edge.target).toBe("topic:new");
+    const g = c.get("graph:g");
+    expect((g.facets.membership as { members: string[] }).members).toEqual(["topic:new", "topic:x"]);
+    const edges = (g.facets.edges as { edges: Array<{ source: string; target: string }> }).edges;
+    expect(edges[0].source).toBe("topic:new");
+    expect(edges[0].target).toBe("topic:new");
   });
 
-  it("rewrites dict-membership values", () => {
+  it("rename rewrites dict keys-facet values and list order entries", () => {
     const c = new Corpus(root);
-    c.add(n("topic:old", "topic"));
-    c.add(n("topic:x", "topic"));
+    c.add(makeNode({ id: "topic:old", kind: "topic", title: "Old" }));
     c.add(
       makeNode({
         id: "dict:d",
         kind: "dict",
         title: "D",
-        facets: { membership: { shape: "dict", members: { a: "topic:old", b: "topic:x" } } },
+        facets: { membership: { members: ["topic:old"] }, keys: { keys: { label: "topic:old" } } },
+      }),
+    );
+    c.add(
+      makeNode({
+        id: "list:l",
+        kind: "list",
+        title: "L",
+        facets: { membership: { members: ["topic:old"] }, order: { order: ["topic:old"] } },
       }),
     );
     c.rename("topic:old", "topic:new");
-    const mem = c.get("dict:d").facets.membership as Record<string, unknown>;
-    expect(mem.members).toEqual({ a: "topic:new", b: "topic:x" });
+    expect((c.get("dict:d").facets.keys as { keys: Record<string, string> }).keys.label).toBe("topic:new");
+    expect((c.get("list:l").facets.order as { order: string[] }).order).toEqual(["topic:new"]);
   });
 
   it("rewrites the renamed node's OWN explicit relation source (no stale source: old)", () => {
@@ -255,15 +259,14 @@ describe("Corpus — registry validation (built-in shapes)", () => {
 
   it("a registry rejects an invalid node on add, writing no file", () => {
     const c = new Corpus(root, shapeRegistry());
-    // a `dag` whose membership has a cycle fails requireAcyclic
+    // a `dag` whose edges form a cycle fails requireAcyclic
     const bad = makeNode({
       id: "dag:d",
       kind: "dag",
       title: "D",
       facets: {
-        membership: {
-          shape: "dag",
-          members: ["a:1", "a:2"],
+        membership: { members: ["a:1", "a:2"] },
+        edges: {
           edges: [
             { source: "a:1", predicate: "e", target: "a:2" },
             { source: "a:2", predicate: "e", target: "a:1" },
@@ -277,9 +280,7 @@ describe("Corpus — registry validation (built-in shapes)", () => {
 
   it("a registry accepts a valid node on add", () => {
     const c = new Corpus(root, shapeRegistry());
-    c.add(
-      makeNode({ id: "set:s", kind: "set", title: "S", facets: { membership: { shape: "set", members: ["a:1"] } } }),
-    );
+    c.add(makeNode({ id: "set:s", kind: "set", title: "S", facets: { membership: { members: ["a:1"] } } }));
     expect(c.get("set:s").title).toBe("S");
   });
 
@@ -291,7 +292,7 @@ describe("Corpus — registry validation (built-in shapes)", () => {
         id: "set:s",
         kind: "set",
         title: "S",
-        facets: { membership: { shape: "set", members: ["a:1", "a:1"] } }, // duplicate members
+        facets: { membership: { members: ["a:1", "a:1"] } }, // duplicate members
       }),
     );
     const c = new Corpus(root, shapeRegistry());
@@ -309,7 +310,7 @@ describe("Corpus — registry validation (built-in shapes)", () => {
         id: "set:t",
         kind: "set",
         title: "set:t",
-        facets: { membership: { shape: "set", members: ["a:1"] } },
+        facets: { membership: { members: ["a:1"] } },
       }),
     );
     seed.add(
@@ -318,11 +319,8 @@ describe("Corpus — registry validation (built-in shapes)", () => {
         kind: "dag",
         title: "Bad",
         facets: {
-          membership: {
-            shape: "dag",
-            members: ["a:1"],
-            edges: [{ source: "a:1", predicate: "e", target: "a:1" }], // self-cycle → requireAcyclic fails
-          },
+          membership: { members: ["a:1"] },
+          edges: { edges: [{ source: "a:1", predicate: "e", target: "a:1" }] }, // self-cycle → requireAcyclic fails
         },
         relations: [{ source: "dag:bad", predicate: "about", target: "set:t" }],
       }),
