@@ -113,20 +113,18 @@ def test_rename_rewrites_membership_members_and_edges(tmp_path):
     c = Corpus(tmp_path)
     c.add(Node(id="topic:old", kind="topic", title="Old"))
     c.add(Node(id="topic:x", kind="topic", title="X"))
-    c.add(Node(id="graph:g", kind="graph", title="G", facets={"membership": {
-        "shape": "graph",
-        "members": ["topic:old", "topic:x"],
-        "edges": [{"source": "topic:old", "predicate": "to", "target": "topic:x"}],
-    }}))
+    c.add(Node(id="graph:g", kind="graph", title="G", facets={
+        "membership": {"members": ["topic:old", "topic:x"]},
+        "edges": {"edges": [{"source": "topic:old", "predicate": "to", "target": "topic:x"}]},
+    }))
     c.rename("topic:old", "topic:new")
-    mem = c.get("graph:g").facets["membership"]
-    assert "topic:new" in mem["members"] and "topic:old" not in mem["members"]
-    assert mem["edges"][0]["source"] == "topic:new"  # edge SOURCE rewritten
+    g = c.get("graph:g")
+    members = g.facets["membership"]["members"]
+    assert "topic:new" in members and "topic:old" not in members
+    assert g.facets["edges"]["edges"][0]["source"] == "topic:new"  # edge SOURCE rewritten
 
 
 def test_rename_rewrites_dict_membership(tmp_path):
-    # dict shape: split-facet model — membership (list) + keys (dict of ref values).
-    # Task 4 will add keys-facet rewriting; this test covers the membership-list rewrite.
     c = Corpus(tmp_path)
     c.add(Node(id="topic:old", kind="topic", title="Old"))
     c.add(Node(id="topic:x", kind="topic", title="X"))
@@ -135,8 +133,21 @@ def test_rename_rewrites_dict_membership(tmp_path):
         "keys": {"keys": {"a": "topic:old", "b": "topic:x"}},
     }))
     c.rename("topic:old", "topic:new")
-    mem = c.get("dict:d").facets["membership"]
-    assert "topic:new" in mem["members"] and "topic:old" not in mem["members"]
+    keys = c.get("dict:d").facets["keys"]["keys"]
+    assert keys["a"] == "topic:new" and keys["b"] == "topic:x"
+
+
+def test_rename_rewrites_list_order(tmp_path):
+    c = Corpus(tmp_path)
+    c.add(Node(id="topic:old", kind="topic", title="Old"))
+    c.add(Node(id="list:l", kind="list", title="L", facets={
+        "membership": {"members": ["topic:old"]},
+        "order": {"order": ["topic:old"]},
+    }))
+    c.rename("topic:old", "topic:new")
+    lst = c.get("list:l")
+    assert lst.facets["membership"]["members"] == ["topic:new"]
+    assert lst.facets["order"]["order"] == ["topic:new"]
 
 
 def test_rename_rewrites_own_relation_source(tmp_path):

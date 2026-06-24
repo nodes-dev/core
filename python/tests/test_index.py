@@ -8,6 +8,7 @@ from nodes.kernel.node import Node
 from nodes.kernel.node import Node as _Node
 from nodes.kernel.relations import Relation, relates_to
 from nodes.kernel.shapes import EDGES as _EDGES
+from nodes.kernel.shapes import KEYS as _KEYS
 from nodes.kernel.shapes import MEMBERSHIP as _MEMBERSHIP
 from nodes.kernel.shapes import ORDER as _ORDER
 
@@ -188,3 +189,12 @@ def test_order_member_refs_are_tracked():
                 facets={_MEMBERSHIP: {"members": ["topic:a"]}, _ORDER: {"order": ["topic:a"]}})
     idx = Index.build([lst])
     assert lst.uid in {ir.source_uid for ir in idx.in_refs.get("topic:a", [])}
+
+
+def test_keys_value_refs_are_tracked():
+    dct = _Node(id="dict:d", kind="dict", title="D",
+                facets={_MEMBERSHIP: {"members": ["topic:a"]},
+                        _KEYS: {"keys": {"k": "topic:a"}}})
+    idx = Index.build([dct])
+    roles = {ir.out_ref.role for ir in idx.in_refs.get("topic:a", []) if ir.source_uid == dct.uid}
+    assert "keys_value" in roles

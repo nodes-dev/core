@@ -273,18 +273,30 @@ def test_extract_out_refs_still_works_after_refactor():
 
 
 def test_structural_refs_round_trip():
-    from nodes.kernel.shapes import EDGES, MEMBERSHIP
+    from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
 
     g = Node(id="graph:g", kind="graph", title="G",
              facets={MEMBERSHIP: {"members": ["topic:a", "topic:b"]},
                      EDGES: {"edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}]}})
-    idx = Index.build([g])
+    lst = Node(id="list:l", kind="list", title="L",
+               facets={MEMBERSHIP: {"members": ["topic:a"]}, ORDER: {"order": ["topic:a"]}})
+    dct = Node(id="dict:d", kind="dict", title="D",
+               facets={MEMBERSHIP: {"members": ["topic:a"]}, KEYS: {"keys": {"k": "topic:a"}}})
+    idx = Index.build([g, lst, dct])
 
     doc = idx.to_dict()
-    entry = next(e for e in doc["entries"] if e["id"] == "graph:g")
-    assert "membership" not in entry
-    roles = sorted(r["role"] for r in entry["structural_refs"])
-    assert roles == ["edges_source", "edges_target", "membership_member", "membership_member"]
+    g_entry = next(e for e in doc["entries"] if e["id"] == "graph:g")
+    assert "membership" not in g_entry
+    g_roles = sorted(r["role"] for r in g_entry["structural_refs"])
+    assert g_roles == ["edges_source", "edges_target", "membership_member", "membership_member"]
+
+    lst_entry = next(e for e in doc["entries"] if e["id"] == "list:l")
+    lst_roles = sorted(r["role"] for r in lst_entry["structural_refs"])
+    assert lst_roles == ["membership_member", "order_member"]
+
+    dct_entry = next(e for e in doc["entries"] if e["id"] == "dict:d")
+    dct_roles = sorted(r["role"] for r in dct_entry["structural_refs"])
+    assert dct_roles == ["keys_value", "membership_member"]
 
     restored = Index.from_dict(doc)
     assert g.uid in {ir.source_uid for ir in restored.in_refs.get("topic:a", [])}

@@ -5,9 +5,9 @@ kind: graph
 title: G
 facets:
   membership:
-    shape: graph
     members:
     - topic:old
+  edges:
     edges:
     - source: topic:old
       predicate: to
