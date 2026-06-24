@@ -259,7 +259,7 @@ rtk git commit -m "feat(scheme): built-in colorscheme catalog (6 palettes)"
 Create `tests/config.test.ts`:
 
 ```ts
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -302,6 +302,10 @@ describe("readConfig / writeConfig", () => {
 	});
 	it("rejects a non-string scheme", () => {
 		writeRaw("scheme: 42\n");
+		expect(() => readConfig(root)).toThrow(ConfigError);
+	});
+	it("wraps a non-file config path as ConfigError", () => {
+		mkdirSync(join(root, "config.yaml"));
 		expect(() => readConfig(root)).toThrow(ConfigError);
 	});
 
@@ -390,7 +394,7 @@ export function readConfig(root: string): MindfulConfig {
 		text = readFileSync(configPath(root), "utf8");
 	} catch (e) {
 		if ((e as NodeJS.ErrnoException).code === "ENOENT") return {};
-		throw e;
+		throw new ConfigError(`cannot read config.yaml: ${e instanceof Error ? e.message : String(e)}`);
 	}
 	let parsed: unknown;
 	try {
@@ -561,6 +565,13 @@ describe("runCli — active scheme affects rendering", () => {
 		writeFileSync(join(root, "config.yaml"), "{ bad");
 		expect(runEnv({}, "show", t.id)).toBe(1);
 		expect(stderr()).toContain("error:");
+	});
+
+	it("malformed config.yaml makes add exit 1 without persisting the thought", () => {
+		writeFileSync(join(root, "config.yaml"), "{ bad");
+		expect(runEnv({}, "add", "Blocked")).toBe(1);
+		expect(stderr()).toContain("error:");
+		expect(m.allThoughts()).toEqual([]);
 	});
 });
 ```
@@ -986,8 +997,8 @@ rtk git commit -m "feat(cli): scheme list/set/show command"
 - §4 six canonical palettes (hex pinned) → Task 1 Step 3.
 - §5 command surface + exact output formats (`list` lines, `configured scheme:` + override note, `show` source labels, `SCHEME_USAGE`) → Task 4.
 - §6 render with active scheme → Task 3 Step 4 (resolve before capture) + render-threading test.
-- §7 error model (unknown scheme exit 1; malformed config exit 1 and fails `add`/`show`; bare/unknown sub exit 2) → Tasks 3–4 + tests.
-- §8 full test plan (schemes/config/cli, exact `list` lines, unknown-env `list` exit 1, no-file-on-bogus-set, render-differs probe, malformed-config) → Tasks 1, 2, 4, 3 respectively.
+- §7 error model (unknown scheme exit 1; malformed config exit 1 and fails `add`/`show`; unreadable config becomes `ConfigError`; bare/unknown sub exit 2) → Tasks 2–4 + tests.
+- §8 full test plan (schemes/config/cli, exact `list` lines, unknown-env `list` exit 1, no-file-on-bogus-set, render-differs probe, malformed-config `show`, malformed-config `add` atomicity) → Tasks 1, 2, 4, 3 respectively.
 - Gate unchanged → every task Step 6/7.
 
 **2. Placeholder scan:** No "TBD"/"add error handling"/"similar to" placeholders; every code and test step carries complete code; all hex values are literal.
