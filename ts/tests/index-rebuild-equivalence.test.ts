@@ -67,11 +67,8 @@ describe("Index rebuild equivalence", () => {
         kind: "graph",
         title: "G",
         facets: {
-          membership: {
-            shape: "graph",
-            members: ["topic:a", "topic:b"],
-            edges: [{ source: "topic:a", predicate: "to", target: "topic:b" }],
-          },
+          membership: { members: ["topic:a", "topic:b"] },
+          edges: { edges: [{ source: "topic:a", predicate: "to", target: "topic:b" }] },
         },
       }),
     );

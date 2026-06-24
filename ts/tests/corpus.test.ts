@@ -161,7 +161,7 @@ describe("Corpus — rename", () => {
     expect(edge.target).toBe("topic:new");
   });
 
-  it("rewrites dict-membership values", () => {
+  it("rewrites dict-membership members", () => {
     const c = new Corpus(root);
     c.add(n("topic:old", "topic"));
     c.add(n("topic:x", "topic"));
@@ -170,12 +170,12 @@ describe("Corpus — rename", () => {
         id: "dict:d",
         kind: "dict",
         title: "D",
-        facets: { membership: { shape: "dict", members: { a: "topic:old", b: "topic:x" } } },
+        facets: { membership: { members: ["topic:old", "topic:x"] }, keys: { keys: { a: "topic:old", b: "topic:x" } } },
       }),
     );
     c.rename("topic:old", "topic:new");
     const mem = c.get("dict:d").facets.membership as Record<string, unknown>;
-    expect(mem.members).toEqual({ a: "topic:new", b: "topic:x" });
+    expect(mem.members).toEqual(["topic:new", "topic:x"]);
   });
 
   it("rewrites the renamed node's OWN explicit relation source (no stale source: old)", () => {
