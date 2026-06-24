@@ -105,6 +105,10 @@ interface KindSpec {
 - `registerShape(spec: ShapeSpec)` registers reusable structural form.
 - `register(spec: KindSpec)` **fails early** (`UnknownKindError`/`ValidationError`) if `spec.shape`
   names a shape that is not registered.
+- **Duplicate names fail early:** `registerShape` rejects a duplicate **shape** name; `register`
+  rejects a duplicate **kind** name. Shapes and kinds occupy **separate namespaces**, so a shape and
+  a kind may share a name intentionally (e.g. the `graph` shape-spec and the `graph` convenience
+  kind) without collision.
 - `validate(node)` composes, for a node whose kind adopts shape `S`:
   - required facets = `S.requiredFacets ∪ kind.requiredFacets`
   - optional facets = `S.optionalFacets ∪ kind.optionalFacets`
@@ -170,7 +174,7 @@ Changing the membership schema requires updating everything that assumed `{shape
   registry, and `registerBuiltinShapes`.
 - **`registry.{py,ts}`** — `ShapeSpec`, `KindSpec.shape`, `registerShape`, composed `validate`.
 - **Corpus rename ref-rewriting** — stop treating `membership.edges` as the universal edge source.
-  Rewrite refs from `membership.members` **plus the registered/known form facets** (`edges` endpoints,
+  Rewrite refs from `membership.members` **plus the built-in form facets** (`edges` endpoints,
   `order` entries, `keys` values) when a referenced id is renamed.
 - **Structural index / snapshot** — update membership-ref extraction and snapshot validation away
   from hard-coded `{shape,members,edges}`; read edges from the `edges` form facet.
@@ -178,6 +182,19 @@ Changing the membership schema requires updating everything that assumed `{shape
   expectations to the new model.
 
 Implemented in Python and TS together.
+
+**Two guarantees that constrain the ripple:**
+
+- **Structure edges are not global relations.** A structure's `edges` (and `order`/`keys`) refs are
+  tracked for **rename and snapshot integrity**, but are **never** exposed through
+  `Corpus.outbound`/`inbound`/`neighbors`/`dangling`. Only a node's **top-level `relations:`** feed
+  the global relation graph. (Mindmap-internal traversal is read from the `edges` facet directly —
+  see §3.3.)
+- **Built-in form facets are recognized without a registry.** The built-in structural facets
+  (`membership`, `edges`, `order`, `keys`) are recognized for **ref rewriting and index extraction
+  regardless of whether a registry is attached**. The registry's job is to *validate* shape
+  correctness (composition, invariants); a `Corpus` opened **without** a registry must still rewrite
+  these known structural refs on rename — it must not silently skip them.
 
 ---
 
@@ -341,3 +358,14 @@ SP1 is naturally two plans, executed in order:
    `file:` dependency; one-way dependency.
 8. Tags resolve by alias and **fail early** on miss; embedder is a seam (stub in tests), real model
    deferred.
+9. `registerShape`/`register` reject duplicate names within their own namespace; shape and kind
+   namespaces are separate (a `graph` shape and a `graph` kind coexist).
+10. Structure edges/order/keys are tracked for rename + snapshot integrity but never surface through
+    `Corpus.outbound`/`inbound`/`neighbors`/`dangling`; only top-level `relations:` feed the global
+    relation graph.
+11. Built-in structural facets (`membership`/`edges`/`order`/`keys`) are recognized for ref
+    rewriting + index extraction **with or without** a registry; the registry only adds shape
+    validation. Rename never skips known structural refs for lack of a registry.
+12. Two plans, in order: **Plan A** kernel shape redesign, then **Plan B** mindful package. All six
+    built-ins (`set/list/dict/graph/dag/tree`) stay in scope — this is a built-in shape redesign,
+    not the minimum mindful subset.
