@@ -84,6 +84,19 @@ only — `mindful add "A" --tag "B"` **fails** (exit 1) if no thought titled `B`
 does **not** auto-create tag targets. This matches `Mindful.capture`/`resolveTag` behavior (a genuine
 miss throws `RefError`); the thought is not persisted if a tag fails.
 
+**`parseArgs` flag configuration.** Flags are parsed per subcommand with `node:util` `parseArgs`
+(`allowPositionals: true`). Only `--tag` repeats:
+
+- `tag` → `{ type: "string", multiple: true }` — collects every `--tag` into a `string[]` (the `tags`
+  array passed to `capture`).
+- `body`, `title`, `limit` → `{ type: "string" }` (single-valued).
+
+**Duplicate single-valued flags are usage errors, not last-wins.** A repeated `--body`, `--title`, or
+`--limit` → exit 2. `parseArgs` collapses a repeated single-valued flag to a single string (silently
+keeping the last), so the CLI must pass `{ tokens: true }` and scan the returned tokens to detect a
+single-valued option appearing more than once, rejecting it via the usage path. (`--tag` is exempt — it
+is explicitly `multiple`.)
+
 ---
 
 ## 3. ID Resolution — unique-prefix `<ref>`
@@ -140,9 +153,12 @@ Dispatch is wrapped in try/catch with three outcomes:
   `--body`. These throw (or are caught as) `CliUsageError`; `runCli` writes a usage message to `err` and
   returns `2`. **`parseArgs` throws its own errors** for unknown options / bad option values — these are
   caught and funneled into the usage path (exit 2).
-- **Domain error → exit `1`.** `RefError`, `ValidationError`, `FacetError`, `CollisionError` (from the
-  kernel / `Mindful`), and CLI domain failures (no-match or ambiguous `<ref>` from §3). `runCli` writes
-  `error: <message>` to `err` and returns `1`.
+- **Domain error → exit `1`.** Any `NodesError` — the kernel's base error class, which **all** kernel
+  errors extend (`RefError`, `ValidationError`, `FacetError`, `CollisionError`, **and `InvariantError`**,
+  the last able to surface from validation paths over malformed on-disk data) — plus CLI domain failures
+  (no-match or ambiguous `<ref>` from §3). The catch tests `instanceof NodesError` (not the individual
+  subclasses) so a new kernel error subtype is covered automatically. `runCli` writes `error: <message>`
+  to `err` and returns `1`.
 - **Success → exit `0`.** Output written to `out`.
 
 No partial state on a domain error: the `Mindful` API persists atomically (a thought whose tag fails is
@@ -169,7 +185,9 @@ title: <title>
 body: <body>
 related: []
 ```
-- `body:` prints the thought's body (may be empty after the colon).
+- `body:` prints the thought's body **verbatim** for human readability (may be empty after the colon).
+  A multiline body is printed as-is — its newlines flow onto the following lines after `body:`; the body
+  is **not** JSON-encoded or escaped. (Field order is still stable: `related:` always follows the body.)
 - **`related:`** lists the global-graph neighbors (`Mindful.related(id)`), one `- <id>` bullet per
   neighbor on following lines. **When there are no neighbors, the line is exactly `related: []`** (no
   bullets). This is the chosen empty-collection convention.
@@ -181,8 +199,9 @@ line:
 ```
 
 **`search <query>`** — hits in the **kernel's order**, which is deterministic: score descending, then id
-ascending (the kernel sorts `SearchHit`s this way; the CLI preserves that order, it does not re-sort).
-`SearchHit` carries no title, so each hit triggers one `get(hit.id)` for display:
+ascending. The kernel already sorts `SearchHit`s this way (verified in `search.ts`), so the CLI **must
+not re-sort** — it iterates `search()`'s result as returned. `SearchHit` carries no title, so each hit
+triggers one `get(hit.id)` for display:
 ```
 <id>  <title>  (<score>)
 ```
@@ -215,6 +234,15 @@ export function runCli(argv: string[], mindful: Mindful, out: Sink, err: Sink): 
 export function resolveDataDir(env: NodeJS.ProcessEnv): string;
 ```
 `argv` is the post-`node bin.ts` argument list (i.e. `process.argv.slice(2)`).
+
+**Sink contract (pinned).** `runCli` calls `out`/`err` with **complete, newline-terminated strings** —
+each user-facing result or error message is one call ending in `\n` (a multi-line result is a single
+string containing its internal newlines and one trailing `\n`). The sinks are *not* given newline-free
+chunks that callers must reassemble. `bin.ts` wires `out = (s) => process.stdout.write(s)` and
+`err = (s) => process.stderr.write(s)` — no extra newline added at the wiring layer. **`spriteToAnsi`
+itself stays no-trailing-newline** (its SP4 contract is unchanged); the CLI appends the `\n` when it
+embeds the sprite in a command's output, so terminal output ends cleanly on its own line. Tests
+concatenate the captured sink calls and assert against the joined string (including trailing newlines).
 
 **`package.json` build metadata** — adopt the kernel's full dist-package shape (not just `bin`), so the
 package is a coherent dist-package rather than half-source/half-dist:
@@ -257,6 +285,10 @@ returned exit code and the captured output.
   result → exit 0, no hit lines.
 - **`edit`:** `edit <ref> --body "new"` → exit 0, `updated …`; a subsequent `show` reflects the new body.
   `edit <ref>` with no flags → exit 2 (usage).
+- **Multiline body:** `add` then `edit <ref> --body $'a\nb'`; `show` output contains `body:` followed by
+  the verbatim two-line body (newline preserved, not escaped).
+- **Duplicate single-valued flag:** `add "X" --body one --body two` → exit 2 (usage), not last-wins;
+  likewise a repeated `--title`/`--limit`. `add "X" --tag a --tag b` → exit 0 (repeated `--tag` allowed).
 - **`delete`:** `delete <ref>` → exit 0; subsequent `show <ref>` → exit 1.
 - **`tag`:** `tag <ref> <name>` against an existing target → exit 0, `tagged … #name`; `show` then lists
   it under `related:`.
@@ -305,8 +337,10 @@ returned exit code and the captured output.
 5. **Unique-prefix `<ref>` resolution.** `show`/`edit`/`delete`/`tag` accept a unique id-prefix (incl.
    bare uid-prefix); zero/ambiguous matches are domain errors (exit 1). Title resolution deferred.
 6. **Usage vs domain errors are distinct.** Internal `CliUsageError`; usage problems (incl. `parseArgs`
-   throws, bad `--limit`, `edit` with no flags) → exit 2; kernel/CLI domain failures → `error: <msg>`,
-   exit 1; success → 0.
+   throws, bad `--limit`, duplicate single-valued flag, `edit` with no flags) → exit 2; domain failures —
+   any `NodesError` (the kernel base class all kernel errors extend, incl. `InvariantError`) plus CLI
+   domain failures — → `error: <msg>`, exit 1; success → 0. The catch tests `instanceof NodesError`, not
+   the leaf subclasses.
 7. **Empty env vars treated as absent** in `resolveDataDir`; no fallback to cwd; throws if nothing
    resolvable.
 8. **Default scheme only.** `show`/`add` render via `defaultColorscheme`; no scheme flag, config, or
@@ -316,4 +350,10 @@ returned exit code and the captured output.
    with `related: []` as the explicit empty-collection form.
 10. **`add --tag` does not auto-create tags** (SP1 fail-early): an unknown tag target fails the command
     (exit 1) and nothing is persisted.
-11. **No kernel changes; no new runtime or dev dependency.**
+11. **`--tag` is the only repeatable flag** (`parseArgs` `multiple: true`); `--body`/`--title`/`--limit`
+    are single-valued, and repeating one is a usage error (exit 2), not last-wins — detected by scanning
+    `parseArgs` tokens (`{ tokens: true }`).
+12. **Sink contract:** `out`/`err` receive complete, newline-terminated strings (one call per
+    result/error, trailing `\n` included); `spriteToAnsi` stays no-trailing-newline and the CLI appends
+    the `\n` when embedding it. `body:` is printed verbatim (multiline bodies flow as-is, not escaped).
+13. **No kernel changes; no new runtime or dev dependency.**
