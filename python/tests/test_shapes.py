@@ -46,7 +46,7 @@ def test_list_requires_order_permutation(reg):
 def test_list_rejects_duplicate_members(reg):
     with pytest.raises(InvariantError):
         reg.validate(_struct("list", **{MEMBERSHIP: {"members": ["a:1", "a:1"]},
-                                        ORDER: {"order": ["a:1", "a:1"]}}))
+                                        ORDER: {"order": ["a:1"]}}))
 
 
 def test_list_missing_order_facet_raises(reg):
@@ -86,6 +86,15 @@ def test_tree_rejects_multiple_parents(reg):
              EDGES: {"edges": [_edge("a:1", "a:3"), _edge("a:2", "a:3")]}}
     with pytest.raises(InvariantError):
         reg.validate(_struct("tree", **multi))
+
+
+def test_tree_rejects_cycle(reg):
+    # Each node has in-degree 1 so require_single_parent passes;
+    # the cycle trips require_acyclic (which runs before require_single_parent).
+    cyclic = {MEMBERSHIP: {"members": ["a:1", "a:2"]},
+              EDGES: {"edges": [_edge("a:1", "a:2"), _edge("a:2", "a:1")]}}
+    with pytest.raises(InvariantError):
+        reg.validate(_struct("tree", **cyclic))
 
 
 def test_missing_membership_facet_raises(reg):
