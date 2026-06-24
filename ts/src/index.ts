@@ -31,16 +31,27 @@ export {
 export { nodeFromMarkdown, nodeToMarkdown, splitFrontmatter } from "./frontmatter.js";
 export { type Invariant, type KindSpec, type ShapeSpec, Registry } from "./registry.js";
 export {
+  EDGES,
+  EdgesSchema,
+  KEYS,
+  KeysSchema,
   MEMBERSHIP,
   MembershipSchema,
-  type Membership,
+  ORDER,
+  OrderSchema,
+  edgesOf,
+  keysOf,
   membershipOf,
+  orderOf,
   registerBuiltinShapes,
   requireAcyclic,
-  requireDictKeys,
+  requireEdgeEndpointsAreMembers,
+  requireKeyValuesAreMembers,
+  requireOrderIsPermutation,
   requireSingleParent,
   requireUniqueMembers,
 } from "./shapes.js";
+export type { Edges, Keys, Membership, Order } from "./shapes.js";
 export { Store } from "./store.js";
 export { Corpus } from "./corpus.js";
 export {

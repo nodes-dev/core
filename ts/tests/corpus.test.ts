@@ -255,15 +255,14 @@ describe("Corpus — registry validation (built-in shapes)", () => {
 
   it("a registry rejects an invalid node on add, writing no file", () => {
     const c = new Corpus(root, shapeRegistry());
-    // a `dag` whose membership has a cycle fails requireAcyclic
+    // a `dag` whose edges form a cycle fails requireAcyclic
     const bad = makeNode({
       id: "dag:d",
       kind: "dag",
       title: "D",
       facets: {
-        membership: {
-          shape: "dag",
-          members: ["a:1", "a:2"],
+        membership: { members: ["a:1", "a:2"] },
+        edges: {
           edges: [
             { source: "a:1", predicate: "e", target: "a:2" },
             { source: "a:2", predicate: "e", target: "a:1" },
@@ -277,9 +276,7 @@ describe("Corpus — registry validation (built-in shapes)", () => {
 
   it("a registry accepts a valid node on add", () => {
     const c = new Corpus(root, shapeRegistry());
-    c.add(
-      makeNode({ id: "set:s", kind: "set", title: "S", facets: { membership: { shape: "set", members: ["a:1"] } } }),
-    );
+    c.add(makeNode({ id: "set:s", kind: "set", title: "S", facets: { membership: { members: ["a:1"] } } }));
     expect(c.get("set:s").title).toBe("S");
   });
 
@@ -291,7 +288,7 @@ describe("Corpus — registry validation (built-in shapes)", () => {
         id: "set:s",
         kind: "set",
         title: "S",
-        facets: { membership: { shape: "set", members: ["a:1", "a:1"] } }, // duplicate members
+        facets: { membership: { members: ["a:1", "a:1"] } }, // duplicate members
       }),
     );
     const c = new Corpus(root, shapeRegistry());
@@ -309,7 +306,7 @@ describe("Corpus — registry validation (built-in shapes)", () => {
         id: "set:t",
         kind: "set",
         title: "set:t",
-        facets: { membership: { shape: "set", members: ["a:1"] } },
+        facets: { membership: { members: ["a:1"] } },
       }),
     );
     seed.add(
@@ -318,11 +315,8 @@ describe("Corpus — registry validation (built-in shapes)", () => {
         kind: "dag",
         title: "Bad",
         facets: {
-          membership: {
-            shape: "dag",
-            members: ["a:1"],
-            edges: [{ source: "a:1", predicate: "e", target: "a:1" }], // self-cycle → requireAcyclic fails
-          },
+          membership: { members: ["a:1"] },
+          edges: { edges: [{ source: "a:1", predicate: "e", target: "a:1" }] }, // self-cycle → requireAcyclic fails
         },
         relations: [{ source: "dag:bad", predicate: "about", target: "set:t" }],
       }),
