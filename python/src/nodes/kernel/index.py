@@ -12,17 +12,20 @@ from nodes.kernel.errors import CollisionError, IdError
 from nodes.kernel.ids import NodeId
 from nodes.kernel.node import Node
 from nodes.kernel.relations import Relation
-from nodes.kernel.shapes import MEMBERSHIP
+from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
 
 Role = Literal[
     "relation_source",
     "relation_target",
     "membership_member",
-    "membership_edge_source",
-    "membership_edge_target",
+    "edges_source",
+    "edges_target",
+    "order_member",
+    "keys_value",
 ]
 
-_STRUCTURAL_ENTRY_KEYS = frozenset({"uid", "id", "kind", "deprecated_ids", "relations", "membership"})
+_STRUCTURAL_ENTRY_KEYS = frozenset({"uid", "id", "kind", "deprecated_ids", "relations", "structural_refs"})
+_STRUCTURAL_REF_ROLES = frozenset({"membership_member", "edges_source", "edges_target", "order_member", "keys_value"})
 
 
 @dataclass
@@ -45,7 +48,6 @@ class IndexEntry:
     kind: str
     deprecated_ids: frozenset[str]
     out_refs: list[OutRef]
-    membership: dict | None = None
 
 
 @dataclass
@@ -55,30 +57,49 @@ class ResolvedEdge:
     target_uid: str | None
 
 
-def _out_refs_from(relations: list[Relation], membership: object) -> list[OutRef]:
+def _relation_out_refs(relations: list[Relation]) -> list[OutRef]:
     refs: list[OutRef] = []
     for rel in relations:
         refs.append(OutRef(ref=rel.source, role="relation_source", relation=rel))
         refs.append(OutRef(ref=rel.target, role="relation_target", relation=rel))
-    if isinstance(membership, dict):
-        members = membership.get("members")
-        if isinstance(members, list):
-            for m in members:
+    return refs
+
+
+def _structural_out_refs(node: Node) -> list[OutRef]:
+    """Refs from the built-in structural facets. Read directly from `node.facets`
+    (registry-independent); they populate `in_refs` for rename + dangling integrity but
+    are never relation-graph edges (their `relation` is None)."""
+    refs: list[OutRef] = []
+    mem = node.facets.get(MEMBERSHIP)
+    if isinstance(mem, dict):
+        for m in mem.get("members", []) or []:
+            if isinstance(m, str):
                 refs.append(OutRef(ref=m, role="membership_member"))
-        elif isinstance(members, dict):
-            for v in members.values():
-                refs.append(OutRef(ref=v, role="membership_member"))
-        for edge in membership.get("edges", []) or []:
+    eg = node.facets.get(EDGES)
+    if isinstance(eg, dict):
+        for edge in eg.get("edges", []) or []:
             if isinstance(edge, dict):
-                if "source" in edge:
-                    refs.append(OutRef(ref=edge["source"], role="membership_edge_source"))
-                if "target" in edge:
-                    refs.append(OutRef(ref=edge["target"], role="membership_edge_target"))
+                if isinstance(edge.get("source"), str):
+                    refs.append(OutRef(ref=edge["source"], role="edges_source"))
+                if isinstance(edge.get("target"), str):
+                    refs.append(OutRef(ref=edge["target"], role="edges_target"))
+    od = node.facets.get(ORDER)
+    if isinstance(od, dict):
+        for m in od.get("order", []) or []:
+            if isinstance(m, str):
+                refs.append(OutRef(ref=m, role="order_member"))
+    ky = node.facets.get(KEYS)
+    if isinstance(ky, dict):
+        keys = ky.get("keys", {})
+        if isinstance(keys, dict):
+            for v in keys.values():
+                if isinstance(v, str):
+                    refs.append(OutRef(ref=v, role="keys_value"))
     return refs
 
 
 def _extract_out_refs(node: Node) -> list[OutRef]:
-    return _out_refs_from(node.relations, node.facets.get(MEMBERSHIP))
+    return _relation_out_refs(node.relations) + _structural_out_refs(node)
 
 
 def _validated_deprecated_ids(raw: object, entry_id: str) -> list[str]:
@@ -103,53 +124,21 @@ def _validated_deprecated_ids(raw: object, entry_id: str) -> list[str]:
     return deprecated_ids
 
 
-def _validated_membership(raw: object) -> dict | None:
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ValueError("structural snapshot: entry membership must be a dict or null")
-
-    shape = raw.get("shape")
-    if not isinstance(shape, str):
-        raise ValueError("structural snapshot: membership shape must be a string")
-
-    members = raw.get("members")
-    if members is not None:
-        if isinstance(members, list):
-            if any(not isinstance(member, str) for member in members):
-                raise ValueError("structural snapshot: membership members must be strings")
-        elif isinstance(members, dict):
-            if any(not isinstance(member, str) for member in members.values()):
-                raise ValueError("structural snapshot: membership member values must be strings")
-        else:
-            raise ValueError("structural snapshot: membership members must be a list or dict")
-
-    edges = raw.get("edges")
-    if edges is not None:
-        if not isinstance(edges, list):
-            raise ValueError("structural snapshot: membership edges must be a list")
-        for edge in edges:
-            if not isinstance(edge, dict):
-                raise ValueError("structural snapshot: membership edge must be a dict")
-            if not isinstance(edge.get("source"), str):
-                raise ValueError("structural snapshot: membership edge source must be a string")
-            if not isinstance(edge.get("predicate"), str):
-                raise ValueError("structural snapshot: membership edge predicate must be a string")
-            if not isinstance(edge.get("target"), str):
-                raise ValueError("structural snapshot: membership edge target must be a string")
-            directed = edge.get("directed")
-            if "directed" in edge and not isinstance(directed, bool):
-                raise ValueError("structural snapshot: membership edge directed must be a bool")
-            _validate_snapshot_weight(edge, "membership edge")
-            attrs = edge.get("attrs")
-            if "attrs" in edge and not isinstance(attrs, dict):
-                raise ValueError("structural snapshot: membership edge attrs must be a dict")
-            try:
-                Relation(**edge)
-            except (PydanticValidationError, TypeError) as exc:
-                raise ValueError("structural snapshot: invalid membership edge") from exc
-
-    return deepcopy(raw)
+def _validated_structural_refs(raw: object) -> list[OutRef]:
+    if not isinstance(raw, list):
+        raise ValueError("structural snapshot: structural_refs must be a list")
+    out: list[OutRef] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("structural snapshot: structural_ref must be a dict")
+        ref = item.get("ref")
+        role = item.get("role")
+        if not isinstance(ref, str):
+            raise ValueError("structural snapshot: structural_ref ref must be a string")
+        if role not in _STRUCTURAL_REF_ROLES:
+            raise ValueError("structural snapshot: structural_ref role is invalid")
+        out.append(OutRef(ref=ref, role=role))  # type: ignore[arg-type]
+    return out
 
 
 def _validate_snapshot_weight(raw: dict, label: str) -> None:
@@ -205,14 +194,12 @@ class Index:
     def upsert(self, node: Node) -> None:
         if node.uid in self.by_uid:
             self._drop(node.uid)
-        membership = node.facets.get(MEMBERSHIP)
         entry = IndexEntry(
             uid=node.uid,
             id=node.id,
             kind=node.kind,
             deprecated_ids=frozenset(node.deprecated_ids),
             out_refs=_extract_out_refs(node),
-            membership=membership,
         )
         self.by_uid[node.uid] = entry
         self.id_to_uid[node.id] = node.uid
@@ -245,7 +232,11 @@ class Index:
                     "kind": entry.kind,
                     "deprecated_ids": sorted(entry.deprecated_ids),
                     "relations": relations,
-                    "membership": deepcopy(entry.membership),
+                    "structural_refs": [
+                        {"ref": o.ref, "role": o.role}
+                        for o in entry.out_refs
+                        if not o.role.startswith("relation_")
+                    ],
                 }
             )
         return {"entries": entries}
@@ -270,7 +261,7 @@ class Index:
             entry_id = raw["id"]
             kind = raw["kind"]
             relations_raw = raw["relations"]
-            membership_raw = raw["membership"]
+            structural_refs_raw = raw["structural_refs"]
             if not isinstance(uid, str):
                 raise ValueError("structural snapshot: entry uid must be a string")
             if not isinstance(entry_id, str):
@@ -300,15 +291,14 @@ class Index:
                     relations.append(Relation(**relation_data))
                 except (PydanticValidationError, TypeError) as exc:
                     raise ValueError("structural snapshot: invalid relation row") from exc
-            membership = _validated_membership(membership_raw)
-            out_refs = _out_refs_from(relations, membership)
+            structural_refs = _validated_structural_refs(structural_refs_raw)
+            out_refs = _relation_out_refs(relations) + structural_refs
             entry = IndexEntry(
                 uid=uid,
                 id=entry_id,
                 kind=kind,
                 deprecated_ids=frozenset(deprecated_ids),
                 out_refs=out_refs,
-                membership=membership,
             )
             for claim in (entry.id, *entry.deprecated_ids):
                 owner = idx.resolve_uid(claim)

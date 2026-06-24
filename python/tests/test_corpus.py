@@ -125,16 +125,18 @@ def test_rename_rewrites_membership_members_and_edges(tmp_path):
 
 
 def test_rename_rewrites_dict_membership(tmp_path):
+    # dict shape: split-facet model — membership (list) + keys (dict of ref values).
+    # Task 4 will add keys-facet rewriting; this test covers the membership-list rewrite.
     c = Corpus(tmp_path)
     c.add(Node(id="topic:old", kind="topic", title="Old"))
     c.add(Node(id="topic:x", kind="topic", title="X"))
-    c.add(Node(id="dict:d", kind="dict", title="D", facets={"membership": {
-        "shape": "dict",
-        "members": {"a": "topic:old", "b": "topic:x"},
-    }}))
+    c.add(Node(id="dict:d", kind="dict", title="D", facets={
+        "membership": {"members": ["topic:old", "topic:x"]},
+        "keys": {"keys": {"a": "topic:old", "b": "topic:x"}},
+    }))
     c.rename("topic:old", "topic:new")
     mem = c.get("dict:d").facets["membership"]
-    assert mem["members"]["a"] == "topic:new" and mem["members"]["b"] == "topic:x"
+    assert "topic:new" in mem["members"] and "topic:old" not in mem["members"]
 
 
 def test_rename_rewrites_own_relation_source(tmp_path):

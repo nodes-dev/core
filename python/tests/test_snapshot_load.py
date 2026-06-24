@@ -268,61 +268,28 @@ def test_malformed_structural_relation_directed_returns_none(tmp_path):
     assert load_snapshot(tmp_path, None) is None
 
 
-def test_malformed_structural_membership_members_string_returns_none(tmp_path):
+def test_malformed_structural_refs_not_a_list_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
-    doc["structural"]["entries"][0]["membership"] = {"shape": "graph", "members": "topic:a"}
+    doc["structural"]["entries"][0]["structural_refs"] = {}
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None
 
 
-def test_malformed_structural_membership_edges_dict_returns_none(tmp_path):
+def test_malformed_structural_ref_missing_ref_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
-    doc["structural"]["entries"][0]["membership"] = {
-        "shape": "graph",
-        "edges": {"source": "topic:a", "predicate": "to", "target": "topic:b"},
-    }
+    doc["structural"]["entries"][0]["structural_refs"] = [{"role": "membership_member"}]
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None
 
 
-def test_malformed_structural_membership_edge_source_returns_none(tmp_path):
+def test_malformed_structural_ref_invalid_role_returns_none(tmp_path):
     _write(tmp_path)
     doc = _snapshot_doc(tmp_path)
-    doc["structural"]["entries"][0]["membership"] = {
-        "shape": "graph",
-        "edges": [{"source": 123, "predicate": "to", "target": "topic:b"}],
-    }
-    write_json_atomic(snapshot_path(tmp_path), doc)
-
-    assert load_snapshot(tmp_path, None) is None
-
-
-def test_malformed_structural_membership_missing_shape_returns_none(tmp_path):
-    _write(tmp_path)
-    doc = _snapshot_doc(tmp_path)
-    doc["structural"]["entries"][0]["membership"] = {"members": []}
-    write_json_atomic(snapshot_path(tmp_path), doc)
-
-    assert load_snapshot(tmp_path, None) is None
-
-
-@pytest.mark.parametrize(
-    "edge",
-    [
-        {"predicate": "to", "target": "topic:b"},
-        {"source": "topic:a", "target": "topic:b"},
-        {"source": None, "predicate": "to", "target": "topic:b"},
-        {"source": "topic:a", "predicate": 123, "target": "topic:b"},
-    ],
-)
-def test_malformed_structural_membership_edge_schema_returns_none(tmp_path, edge):
-    _write(tmp_path)
-    doc = _snapshot_doc(tmp_path)
-    doc["structural"]["entries"][0]["membership"] = {"shape": "graph", "edges": [edge]}
+    doc["structural"]["entries"][0]["structural_refs"] = [{"ref": "topic:a", "role": "bogus"}]
     write_json_atomic(snapshot_path(tmp_path), doc)
 
     assert load_snapshot(tmp_path, None) is None

@@ -19,11 +19,8 @@ def _corpus() -> list[Node]:
             kind="graph",
             title="G",
             facets={
-                "membership": {
-                    "shape": "graph",
-                    "members": ["topic:a", "topic:b"],
-                    "edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}],
-                }
+                "membership": {"members": ["topic:a", "topic:b"]},
+                "edges": {"edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}]},
             },
         ),
     ]
@@ -83,7 +80,7 @@ def test_from_dict_rejects_entry_not_dict():
         Index.from_dict(d)
 
 
-@pytest.mark.parametrize("field", ("uid", "id", "kind", "deprecated_ids", "relations", "membership"))
+@pytest.mark.parametrize("field", ("uid", "id", "kind", "deprecated_ids", "relations", "structural_refs"))
 def test_from_dict_rejects_missing_entry_keys(field):
     d = _single_entry_snapshot()
     del d["entries"][0][field]
@@ -156,81 +153,6 @@ def test_from_dict_rejects_invalid_relation_directed():
         Index.from_dict(d)
 
 
-def test_from_dict_rejects_invalid_membership_container():
-    d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = []
-    with pytest.raises(ValueError, match="structural snapshot:"):
-        Index.from_dict(d)
-
-
-@pytest.mark.parametrize(
-    "members",
-    [
-        "topic:a",
-        ["topic:a", 123],
-        {"a": "topic:a", "b": 123},
-    ],
-)
-def test_from_dict_rejects_invalid_membership_members(members):
-    d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {"shape": "graph", "members": members}
-    with pytest.raises(ValueError, match="structural snapshot:"):
-        Index.from_dict(d)
-
-
-@pytest.mark.parametrize(
-    "edges",
-    [
-        {"source": "topic:a", "target": "topic:b"},
-        ["not an edge"],
-        [{"source": 123, "predicate": "to", "target": "topic:b"}],
-        [{"source": "topic:a", "predicate": "to", "target": 123}],
-    ],
-)
-def test_from_dict_rejects_invalid_membership_edges(edges):
-    d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {"shape": "graph", "edges": edges}
-    with pytest.raises(ValueError, match="structural snapshot:"):
-        Index.from_dict(d)
-
-
-def test_from_dict_rejects_membership_missing_shape():
-    d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {"members": []}
-    with pytest.raises(ValueError, match="structural snapshot:"):
-        Index.from_dict(d)
-
-
-@pytest.mark.parametrize(
-    "edge",
-    [
-        {"predicate": "to", "target": "topic:b"},
-        {"source": "topic:a", "target": "topic:b"},
-        {"source": None, "predicate": "to", "target": "topic:b"},
-        {"source": "topic:a", "predicate": 123, "target": "topic:b"},
-        {"source": "topic:a", "predicate": "to", "target": "topic:b", "directed": "yes"},
-        {"source": "topic:a", "predicate": "to", "target": "topic:b", "weight": True},
-        {"source": "topic:a", "predicate": "to", "target": "topic:b", "attrs": []},
-    ],
-)
-def test_from_dict_rejects_invalid_membership_edge_schema(edge):
-    d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {"shape": "graph", "edges": [edge]}
-    with pytest.raises(ValueError, match="structural snapshot:"):
-        Index.from_dict(d)
-
-
-@pytest.mark.parametrize("weight", [float("nan"), float("inf")])
-def test_from_dict_rejects_non_finite_membership_edge_weight(weight):
-    d = _single_entry_snapshot()
-    d["entries"][0]["membership"] = {
-        "shape": "graph",
-        "edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b", "weight": weight}],
-    }
-    with pytest.raises(ValueError, match="structural snapshot:"):
-        Index.from_dict(d)
-
-
 def test_from_dict_rejects_duplicate_uid():
     idx = Index.build([Node(id="topic:a", kind="topic", title="A")])
     d = idx.to_dict()
@@ -283,7 +205,7 @@ def test_from_dict_rejects_same_entry_identity_collisions(deprecated_ids):
         Index.from_dict(d)
 
 
-def test_to_dict_deep_copies_relation_attrs_and_membership():
+def test_to_dict_deep_copies_relation_attrs():
     idx = Index.build(
         [
             Node(
@@ -298,37 +220,20 @@ def test_to_dict_deep_copies_relation_attrs_and_membership():
                         attrs={"meta": {"score": 1}},
                     )
                 ],
-                facets={
-                    "membership": {
-                        "shape": "graph",
-                        "members": ["topic:b"],
-                        "edges": [
-                            {
-                                "source": "topic:a",
-                                "predicate": "to",
-                                "target": "topic:b",
-                                "attrs": {"label": "old"},
-                            }
-                        ],
-                    }
-                },
             )
         ]
     )
 
     d = idx.to_dict()
     d["entries"][0]["relations"][0]["attrs"]["meta"]["score"] = 2
-    d["entries"][0]["membership"]["edges"][0]["attrs"]["label"] = "new"
 
     entry = next(iter(idx.by_uid.values()))
     relation = next(o.relation for o in entry.out_refs if o.role == "relation_source")
     assert relation is not None
     assert relation.attrs["meta"]["score"] == 1
-    assert entry.membership is not None
-    assert entry.membership["edges"][0]["attrs"]["label"] == "old"
 
 
-def test_from_dict_deep_copies_relation_attrs_and_membership():
+def test_from_dict_deep_copies_relation_attrs():
     d = Index.build(
         [
             Node(
@@ -343,42 +248,67 @@ def test_from_dict_deep_copies_relation_attrs_and_membership():
                         attrs={"meta": {"score": 1}},
                     )
                 ],
-                facets={
-                    "membership": {
-                        "shape": "graph",
-                        "members": ["topic:b"],
-                        "edges": [
-                            {
-                                "source": "topic:a",
-                                "predicate": "to",
-                                "target": "topic:b",
-                                "attrs": {"label": "old"},
-                            }
-                        ],
-                    }
-                },
             )
         ]
     ).to_dict()
 
     restored = Index.from_dict(d)
     d["entries"][0]["relations"][0]["attrs"]["meta"]["score"] = 2
-    d["entries"][0]["membership"]["edges"][0]["attrs"]["label"] = "new"
 
     entry = next(iter(restored.by_uid.values()))
     relation = next(o.relation for o in entry.out_refs if o.role == "relation_source")
     assert relation is not None
     assert relation.attrs["meta"]["score"] == 1
-    assert entry.membership is not None
-    assert entry.membership["edges"][0]["attrs"]["label"] == "old"
 
 
 def test_extract_out_refs_still_works_after_refactor():
-    # Guards the _out_refs_from refactor: existing build path unchanged.
+    # Guards the _extract_out_refs refactor: existing build path unchanged.
     idx = Index.build(_corpus())
     g_uid = idx.id_to_uid["graph:g"]
     assert {o.role for o in idx.by_uid[g_uid].out_refs} >= {
         "membership_member",
-        "membership_edge_source",
-        "membership_edge_target",
+        "edges_source",
+        "edges_target",
     }
+
+
+def test_structural_refs_round_trip():
+    from nodes.kernel.shapes import EDGES, MEMBERSHIP
+
+    g = Node(id="graph:g", kind="graph", title="G",
+             facets={MEMBERSHIP: {"members": ["topic:a", "topic:b"]},
+                     EDGES: {"edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}]}})
+    idx = Index.build([g])
+
+    doc = idx.to_dict()
+    entry = next(e for e in doc["entries"] if e["id"] == "graph:g")
+    assert "membership" not in entry
+    roles = sorted(r["role"] for r in entry["structural_refs"])
+    assert roles == ["edges_source", "edges_target", "membership_member", "membership_member"]
+
+    restored = Index.from_dict(doc)
+    assert g.uid in {ir.source_uid for ir in restored.in_refs.get("topic:a", [])}
+    assert restored.outbound_edges(g.uid) == []
+
+
+def test_from_dict_rejects_bad_structural_ref_role():
+    bad = {"entries": [{
+        "uid": "u" * 32, "id": "graph:g", "kind": "graph", "deprecated_ids": [],
+        "relations": [], "structural_refs": [{"ref": "topic:a", "role": "bogus"}],
+    }]}
+    with pytest.raises(ValueError):
+        Index.from_dict(bad)
+
+
+def test_from_dict_rejects_structural_refs_not_a_list():
+    d = _single_entry_snapshot()
+    d["entries"][0]["structural_refs"] = {}
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)
+
+
+def test_from_dict_rejects_structural_ref_non_string_ref():
+    d = _single_entry_snapshot()
+    d["entries"][0]["structural_refs"] = [{"ref": 123, "role": "membership_member"}]
+    with pytest.raises(ValueError, match="structural snapshot:"):
+        Index.from_dict(d)

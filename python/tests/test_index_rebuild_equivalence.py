@@ -55,11 +55,10 @@ def test_rebuild_equivalence_through_mutation_sequence(tmp_path):
     c = Corpus(tmp_path)
     c.add(Node(id="topic:a", kind="topic", title="A", relations=[relates_to("topic:a", "topic:b")]))
     c.add(Node(id="topic:b", kind="topic", title="B"))
-    c.add(Node(id="graph:g", kind="graph", title="G", facets={"membership": {
-        "shape": "graph",
-        "members": ["topic:a", "topic:b"],
-        "edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}],
-    }}))
+    c.add(Node(id="graph:g", kind="graph", title="G", facets={
+        "membership": {"members": ["topic:a", "topic:b"]},
+        "edges": {"edges": [{"source": "topic:a", "predicate": "to", "target": "topic:b"}]},
+    }))
     _assert_equivalent(c)
 
     c.rename("topic:b", "topic:b2")  # creates deprecated id, rewrites referrers (A's relation, graph members/edges)
