@@ -253,6 +253,15 @@ describe("seed layout (§7.2)", () => {
 		expect(() => clusterBucket("abc", 6)).toThrow(ValidationError);
 		expect(() => prngSeed("Z".repeat(64))).toThrow(ValidationError);
 	});
+
+	it("rejects invalid k / offset / width (no NaN leaks)", () => {
+		expect(() => clusterBucket(ZERO, 0)).toThrow(ValidationError);
+		expect(() => clusterBucket(ZERO, -3)).toThrow(ValidationError);
+		expect(() => clusterBucket(ZERO, 2.5)).toThrow(ValidationError);
+		expect(() => mapSeed(ZERO, { min: 0, max: 1, byteOffset: 31, byteWidth: 2 })).toThrow(ValidationError); // 31+2>32
+		expect(() => mapSeed(ZERO, { min: 0, max: 1, byteOffset: -1, byteWidth: 2 })).toThrow(ValidationError);
+		expect(() => mapSeed(ZERO, { min: 0, max: 1, byteOffset: 6, byteWidth: 0 })).toThrow(ValidationError);
+	});
 });
 
 describe("mapSeed / mapSeedRangeInt / mapSeedPick", () => {
@@ -285,7 +294,10 @@ describe("mulberry32", () => {
 		const seqA = [a(), a(), a()];
 		const seqB = [b(), b(), b()];
 		expect(seqA).toEqual(seqB);
-		for (const v of seqA) expect(v).toBeGreaterThanOrEqual(0), expect(v).toBeLessThan(1);
+		for (const v of seqA) {
+			expect(v).toBeGreaterThanOrEqual(0);
+			expect(v).toBeLessThan(1);
+		}
 		const c = mulberry32(124);
 		expect([c(), c(), c()]).not.toEqual(seqA);
 	});
@@ -317,7 +329,12 @@ describe("normalizeField", () => {
 
 	it("every output value is within [0,1]", () => {
 		const f = normalizeField([[-3, 2.5, 7], [100, -50, 0]], "minmax");
-		for (const row of f.values) for (const v of row) expect(v).toBeGreaterThanOrEqual(0), expect(v).toBeLessThanOrEqual(1);
+		for (const row of f.values) {
+			for (const v of row) {
+				expect(v).toBeGreaterThanOrEqual(0);
+				expect(v).toBeLessThanOrEqual(1);
+			}
+		}
 	});
 
 	it("rejects ragged or non-finite raw input", () => {
@@ -353,6 +370,15 @@ function readUintBE(seed: string, byteOffset: number, byteWidth: number): number
 	if (typeof seed !== "string" || !SEED_RE.test(seed)) {
 		throw new ValidationError(`invalid seed ${JSON.stringify(seed)} (expected 64 lowercase hex chars)`);
 	}
+	if (!Number.isInteger(byteOffset) || byteOffset < 0) {
+		throw new ValidationError(`byteOffset must be a non-negative integer, got ${byteOffset}`);
+	}
+	if (!Number.isInteger(byteWidth) || byteWidth <= 0) {
+		throw new ValidationError(`byteWidth must be a positive integer, got ${byteWidth}`);
+	}
+	if (byteOffset + byteWidth > 32) {
+		throw new ValidationError(`seed read out of range: byteOffset ${byteOffset} + byteWidth ${byteWidth} > 32`);
+	}
 	let acc = 0;
 	for (let i = 0; i < byteWidth; i++) {
 		const at = (byteOffset + i) * 2;
@@ -363,6 +389,9 @@ function readUintBE(seed: string, byteOffset: number, byteWidth: number): number
 
 /** Cluster bucket: seed bytes 0-1 (uint16 BE) modulo k (§7.2). */
 export function clusterBucket(seed: string, k: number): number {
+	if (!Number.isInteger(k) || k <= 0) {
+		throw new ValidationError(`clusterBucket: k must be a positive integer, got ${k}`);
+	}
 	return readUintBE(seed, 0, 2) % k;
 }
 
@@ -587,7 +616,7 @@ Create the registry and the two closed-form generators (the simplest, proving th
   - `interface Family { slug: string; name: string; normalize: NormalizeMode; generate(seed: string, size: number): number[][] }`
   - `const FAMILIES: Family[]` (2 entries after this task; grows to 6)
   - `const K: number` (= `FAMILIES.length`)
-  - Index meaning is positional: `FAMILIES[clusterId]`. **Append** later families; never reorder (order is the cluster→family mapping).
+  - Index meaning is positional: `FAMILIES[clusterId]`. The **final** registry order (after Task 6) MUST match the spec §6 cluster table exactly: `gray-scott`(0), `modal-acoustics`(1), `logistic-map`(2), `n-body-problem`(3), `vogel-phyllotaxis`(4), `lorenz-attractor`(5). Tasks 4–5 build a provisional array (tests key on `slug`, not index; `api.ts` is not wired until Task 7); Task 6 assembles the final spec-ordered array and asserts the slug order.
 
 **Parameter words (this task) per §7.2:** `modal-acoustics`: `w0`(byte 6)→`n`, `w1`(byte 8)→`m≠n`. `n-body-problem`: `w0`(byte 6)→`M`; masses/positions from the PRNG stream.
 
@@ -625,7 +654,12 @@ describe("registry", () => {
 			const field = normalizeField(raw, f.normalize);
 			expect(field.width).toBe(24);
 			expect(field.height).toBe(24);
-			for (const row of field.values) for (const v of row) expect(v).toBeGreaterThanOrEqual(0), expect(v).toBeLessThanOrEqual(1);
+			for (const row of field.values) {
+				for (const v of row) {
+					expect(v).toBeGreaterThanOrEqual(0);
+					expect(v).toBeLessThanOrEqual(1);
+				}
+			}
 		}
 	});
 
@@ -800,8 +834,10 @@ describe("vogel-phyllotaxis (faithfulness)", () => {
 			expect(rad(seeds[i])).toBeCloseTo(0.45 * Math.sqrt(i / 300), 9);
 		}
 		for (const p of seeds) {
-			expect(p.x).toBeGreaterThanOrEqual(0), expect(p.x).toBeLessThanOrEqual(1);
-			expect(p.y).toBeGreaterThanOrEqual(0), expect(p.y).toBeLessThanOrEqual(1);
+			expect(p.x).toBeGreaterThanOrEqual(0);
+			expect(p.x).toBeLessThanOrEqual(1);
+			expect(p.y).toBeGreaterThanOrEqual(0);
+			expect(p.y).toBeLessThanOrEqual(1);
 		}
 	});
 });
@@ -947,6 +983,20 @@ describe("lorenz-attractor (faithfulness)", () => {
 		expect(right).toBeGreaterThan(0.05 * total);
 	});
 });
+
+describe("registry order (cluster contract)", () => {
+	it("FAMILIES is in the spec §6 cluster order and K=6", () => {
+		expect(FAMILIES.map((f) => f.slug)).toEqual([
+			"gray-scott",
+			"modal-acoustics",
+			"logistic-map",
+			"n-body-problem",
+			"vogel-phyllotaxis",
+			"lorenz-attractor",
+		]);
+		expect(K).toBe(6);
+	});
+});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -1069,12 +1119,20 @@ function lorenzGenerate(seed: string, size: number): number[][] {
 }
 ```
 
-Then append to `FAMILIES` (after `vogel-phyllotaxis`):
+Then **replace the entire `FAMILIES` array** (it has held a provisional order through Tasks 4–5) with the final spec §6 cluster order. Every generator function is now defined, so this is a straight reorder + the two new entries:
 
 ```ts
+export const FAMILIES: Family[] = [
 	{ slug: "gray-scott", name: "Reaction–diffusion", normalize: "minmax", generate: grayScottGenerate },
+	{ slug: "modal-acoustics", name: "Standing waves", normalize: "minmax", generate: modalGenerate },
+	{ slug: "logistic-map", name: "Logistic map", normalize: "minmax", generate: logisticGenerate },
+	{ slug: "n-body-problem", name: "Gravitational potential", normalize: "minmax", generate: nBodyGenerate },
+	{ slug: "vogel-phyllotaxis", name: "Phyllotaxis", normalize: "invert-minmax", generate: phyllotaxisGenerate },
 	{ slug: "lorenz-attractor", name: "Strange attractor", normalize: "log1p-minmax", generate: lorenzGenerate },
+];
 ```
+
+`export const K = FAMILIES.length;` is unchanged (now 6).
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1229,17 +1287,91 @@ import type { Sprite } from "./sprite.js";
 Run: `rtk npx vitest run tests/sprite-integration.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Full gate** — the byte-mirror is now unused by `src/`, but `sprite.test.ts`/`encode.test.ts`/barrel still reference it and must still pass.
+- [ ] **Step 6: Add the golden render-determinism test** (§11) — create `tests/sprite-golden.test.ts`. It drives fixed seeds that hit **every** cluster bucket (2 per family), renders each through the full `Mindful.sprite → spriteToAnsi` pipeline, asserts byte-identical re-render, and locks the exact ANSI with a snapshot:
+
+```ts
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { makeNode } from "@nodes/kernel";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Mindful } from "../src/api.js";
+import { CAPTURED } from "../src/captured.js";
+import { spriteToAnsi } from "../src/encode.js";
+import { K } from "../src/families.js";
+import { clusterBucket } from "../src/field.js";
+import { VISUAL_IDENTITY } from "../src/identity.js";
+import { CAPTURE_AT } from "./fixtures.js";
+
+let root: string;
+beforeEach(() => {
+	root = mkdtempSync(join(tmpdir(), "mindful-golden-"));
+});
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+const SLOTS = [
+	{ index: 0, variant: 0 },
+	{ index: 1, variant: 0 },
+	{ index: 2, variant: 0 },
+	{ index: 3, variant: 0 },
+];
+
+// A seed whose cluster bytes (0-1) equal `bucket` (so uint16 % K === bucket for bucket < K=6),
+// with a variant tag filling the parameter region so the two seeds per bucket render differently.
+function seedFor(bucket: number, variant: "a" | "b"): string {
+	const cluster = bucket.toString(16).padStart(4, "0"); // bytes 0-1
+	const prng = "00000000"; // bytes 2-5
+	const params = (variant === "a" ? "0" : "a").repeat(52); // bytes 6-31
+	return cluster + prng + params;
+}
+
+function addThought(m: Mindful, id: string, seed: string): void {
+	const node = makeNode({
+		id,
+		kind: "thought",
+		title: id,
+		facets: { [VISUAL_IDENTITY]: { seed, slots: SLOTS }, [CAPTURED]: { at: CAPTURE_AT } },
+	});
+	m.corpus.add(node);
+}
+
+describe("organic sprite — golden / bucket coverage", () => {
+	it("every bucket 0..K-1 is reachable by a fixed seed", () => {
+		for (let b = 0; b < K; b++) {
+			expect(clusterBucket(seedFor(b, "a"), K)).toBe(b);
+			expect(clusterBucket(seedFor(b, "b"), K)).toBe(b);
+		}
+	});
+
+	it("renders deterministic, snapshot-locked ANSI for all six families (2 seeds each)", () => {
+		const m = new Mindful(root);
+		for (let b = 0; b < K; b++) {
+			for (const variant of ["a", "b"] as const) {
+				const id = `thought:b${b}${variant}`;
+				addThought(m, id, seedFor(b, variant));
+				const ansi = spriteToAnsi(m.sprite(id));
+				expect(spriteToAnsi(m.sprite(id))).toBe(ansi); // byte-identical re-render
+				expect(ansi).toMatchSnapshot(`bucket-${b}-${variant}`); // golden lock
+			}
+		}
+	});
+});
+```
+
+Run: `rtk npx vitest run tests/sprite-golden.test.ts`
+Expected: PASS — bucket coverage holds; the snapshot file `tests/__snapshots__/sprite-golden.test.ts.snap` is created on first run. (This test runs the full sims for each bucket, so it is one of the slower suites.)
+
+- [ ] **Step 7: Full gate** — the byte-mirror is now unused by `src/`, but `sprite.test.ts`/`encode.test.ts`/barrel still reference it and must still pass.
 
 Run: `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build`
-Expected: PASS (whole suite green, including the still-present byte-mirror tests).
+Expected: PASS (whole suite green, including the still-present byte-mirror tests and the new snapshot).
 
-- [ ] **Step 7: Format, commit**
+- [ ] **Step 8: Format, commit** (include the generated snapshot file)
 
 ```bash
-rtk npx @biomejs/biome check --write src/api.ts tests/sprite-integration.test.ts
-git add src/api.ts tests/sprite-integration.test.ts
-git commit -m "feat(api): Mindful.sprite renders the organic formula-field pipeline (+ size param)"
+rtk npx @biomejs/biome check --write src/api.ts tests/sprite-integration.test.ts tests/sprite-golden.test.ts
+git add src/api.ts tests/sprite-integration.test.ts tests/sprite-golden.test.ts tests/__snapshots__/sprite-golden.test.ts.snap
+git commit -m "feat(api): Mindful.sprite renders the organic formula-field pipeline (+ size param, golden render tests)"
 ```
 
 ---
@@ -1360,14 +1492,14 @@ git commit -m "refactor(sprite): delete byte-mirror renderer; reduce sprite.ts t
 - §4 "render from stored facet, never `deriveIdentity`" → Task 7 uses `visualIdentityOf(node)`.
 - §4 byte-mirror deletion → Task 8.
 - §5 cluster derivation (bytes 0–1 % K, not stored) → Task 2 (`clusterBucket`), Task 7 (use).
-- §6 family registry (6 slugs, faithful math, transcribed constants, no runtime natural-systems dep) → Tasks 4–6.
+- §6 family registry (6 slugs, faithful math, transcribed constants, no runtime natural-systems dep) → Tasks 4–6. **Final `FAMILIES` order matches the spec §6 cluster table** (gray-scott, modal-acoustics, logistic-map, n-body-problem, vogel-phyllotaxis, lorenz-attractor), asserted by the Task 6 "registry order" test; `FAMILIES[clusterId]` in Task 7 therefore matches the spec's cluster→family mapping.
 - §7 raw vs normalized split; `Field`; `mapSeed`; PRNG; `normalize` modes → Task 2 (primitives), Tasks 4–6 (generators emit raw + declare mode).
 - §7.1 pinned constants → Tasks 4–6 (encoded verbatim).
 - §7.2 seed layout (disjoint regions, word offsets) → Task 2 (readers + disjointness test), Tasks 4–6 (word offsets).
 - §8 colormap (cluster base, HSL ramp, `hsl.ts` extraction not barreled, scheme validation) → Task 1 (extraction), Task 3 (colormap + validation).
 - §9 `Mindful.sprite(id, scheme?, size=24)`, even/positive size → Task 7.
 - §10 determinism/purity/validation (size, scheme, NaN, dims) → Tasks 2/3/7 tests.
-- §11 tests (golden determinism, per-generator faithfulness, HSL contract, scheme validation) → Task 1 (HSL), Tasks 4–6 (faithfulness + determinism), Task 7 (round-trip determinism + scheme validation).
+- §11 tests (golden determinism, per-generator faithfulness, HSL contract, scheme validation) → Task 1 (HSL), Tasks 4–6 (faithfulness + raw-determinism), Task 7 (`sprite-golden.test.ts`: fixed seeds covering all six buckets, rendered through `sprite → spriteToAnsi`, re-render byte-identical + snapshot-locked; plus fresh-instance round-trip + scheme validation in `sprite-integration.test.ts`).
 - §12 renderer-agnostic `Field` → Task 2 (`Field` is the common currency; generators emit raw, no renderer coupling).
 - §13 decisions → reflected throughout; Global Constraints copies the binding ones.
 
