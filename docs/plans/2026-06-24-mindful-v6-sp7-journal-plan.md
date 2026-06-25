@@ -693,16 +693,36 @@ These build thought nodes by hand and expect `corpus.add`/`validate` to **succee
 - `tests/sprite-integration.test.ts` — the `thought:fixture` node (currently `facets: { [VISUAL_IDENTITY]: {...} }`): add `[CAPTURED]: { at: CAPTURE_AT }` alongside `[VISUAL_IDENTITY]`.
 - `tests/cli.test.ts` — the three hand-built thought nodes: `thought:abc`, `thought:abcdef` (the exact-vs-prefix test) and `thought:scheme-probe` (the scheme-rendering test): add `[CAPTURED]: { at: CAPTURE_AT }` to each `facets`.
 
-Do **not** touch the deliberately-invalid fixtures that assert rejection — they must still throw: `tests/identity-integration.test.ts` `thought:bare` (no facets) and `thought:bad` (malformed identity), and `tests/profile.test.ts`'s "without visualIdentity" node. They still throw `FacetError` (now for a missing facet either way), so their assertions hold.
+**Identity-error fixtures must keep proving the *identity* error — not accidentally fail on the missing `captured`.** Once `captured` is required, a fixture missing *both* facets could throw `FacetError` for the missing `captured` and no longer prove anything about `visualIdentity`. So add a **valid** `[CAPTURED]: { at: CAPTURE_AT }` to each identity-error fixture in `tests/identity-integration.test.ts`, isolating `visualIdentity` as the only fault:
+
+```ts
+	// "without the visualIdentity facet" — now carries a valid captured so the ONLY fault is identity
+	it("a thought without the visualIdentity facet fails validation (FacetError)", () => {
+		const m = new Mindful(root);
+		const bare = makeNode({ id: "thought:bare", kind: "thought", title: "Bare", facets: { [CAPTURED]: { at: CAPTURE_AT } } });
+		expect(() => m.corpus.add(bare)).toThrow(FacetError);
+	});
+
+	// "malformed identity" — add a valid captured so the ONLY fault is the malformed visualIdentity
+	it("a thought with a malformed identity fails validation (FacetError)", () => {
+		const m = new Mindful(root);
+		const bad = makeNode({
+			id: "thought:bad",
+			kind: "thought",
+			title: "Bad",
+			facets: { [VISUAL_IDENTITY]: { seed: "abc", slots: [] }, [CAPTURED]: { at: CAPTURE_AT } },
+		});
+		expect(() => m.corpus.add(bad)).toThrow(FacetError);
+	});
+```
+
+(Add `import { CAPTURED } from "../src/captured.js";` and `import { CAPTURE_AT } from "./fixtures.js";` to this file.) The genuinely-missing-`captured` path is proven separately by the new test in Step 8.
 
 - [ ] **Step 8: Update `profile.test.ts` for the two required facets**
 
-In `tests/profile.test.ts`, the SP2 "valid thought" test attaches only `visualIdentity` and expects validation to pass — it now needs `captured` too. Add imports and update that test, and add a `captured`-missing test:
+In `tests/profile.test.ts`, add `import { CAPTURED } from "../src/captured.js";` and `import { CAPTURE_AT } from "./fixtures.js";`, then update the SP2 "valid thought" test (attaches only `visualIdentity` → now needs `captured` too) and the "without visualIdentity" test (give it a valid `captured` so identity is the only fault), and add a `captured`-missing test:
 
 ```ts
-import { CAPTURED } from "../src/captured.js";
-import { CAPTURE_AT } from "./fixtures.js";
-// ...
 	it("a thought validates with valid visualIdentity + captured facets (SP2/SP7)", () => {
 		const uid = "t1";
 		const node = makeNode({ id: `${THOUGHT}:t1`, kind: THOUGHT, title: "T" });
@@ -711,12 +731,22 @@ import { CAPTURE_AT } from "./fixtures.js";
 		expect(() => reg().validate(node)).not.toThrow();
 	});
 
+	it("a thought without the visualIdentity facet fails validation (FacetError)", () => {
+		// carries a valid captured so the ONLY fault is the missing visualIdentity
+		const node = makeNode({ id: `${THOUGHT}:t1`, kind: THOUGHT, title: "T" });
+		node.facets[CAPTURED] = { at: CAPTURE_AT };
+		expect(() => reg().validate(node)).toThrow(FacetError);
+	});
+
 	it("a thought without the captured facet fails validation (FacetError)", () => {
+		// carries a valid visualIdentity so the ONLY fault is the missing captured
 		const node = makeNode({ id: `${THOUGHT}:t1`, kind: THOUGHT, title: "T" });
 		node.facets[VISUAL_IDENTITY] = deriveIdentity("t1");
 		expect(() => reg().validate(node)).toThrow(FacetError);
 	});
 ```
+
+(The original "without visualIdentity facet fails" test had **no** facets; replace it with the version above so it isolates the identity fault.)
 
 - [ ] **Step 9: Migrate the `cli.test.ts` `runCli` helpers + the `add` output assertion**
 
@@ -874,16 +904,25 @@ describe("runCli — journal command", () => {
 		expect(stdout()).toBe("no thoughts from 2026-06-01 to 2026-06-05\n");
 	});
 
-	it("bad arguments → exit 2 with journal usage", () => {
-		expect(run("journal", "2026-13-99")).toBe(2); // malformed date
-		expect(run("journal", "--since", "2026-06-01")).toBe(2); // until missing
-		expect(run("journal", "--until", "2026-06-05")).toBe(2); // since missing
-		expect(run("journal", "--since", "2026-06-01", "--since", "2026-06-02", "--until", "2026-06-05")).toBe(2); // dup
-		expect(run("journal", "2026-06-01", "--since", "2026-06-01", "--until", "2026-06-05")).toBe(2); // positional + flags
-		expect(run("journal", "--since", "2026-06-05", "--until", "2026-06-01")).toBe(2); // since > until
-		expect(run("journal", "a", "b")).toBe(2); // too many positionals
-		expect(stderr()).toContain("mindful journal");
-		expect(stdout()).toBe("");
+	it("bad arguments → exit 2 with journal usage (each case isolated)", () => {
+		const cases: string[][] = [
+			["journal", "2026-13-99"], // malformed date
+			["journal", "--since", "2026-06-01"], // until missing
+			["journal", "--until", "2026-06-05"], // since missing
+			["journal", "--since", "2026-06-01", "--since", "2026-06-02", "--until", "2026-06-05"], // duplicate --since
+			["journal", "2026-06-01", "--since", "2026-06-01", "--until", "2026-06-05"], // positional + flags
+			["journal", "--since", "2026-06-05", "--until", "2026-06-01"], // since > until
+			["journal", "a", "b"], // too many positionals
+			["journal", "--bogus"], // unknown flag (parseFlags path → must still get JOURNAL_USAGE)
+		];
+		for (const argv of cases) {
+			out.length = 0;
+			err.length = 0;
+			expect(run(...argv)).toBe(2);
+			expect(stderr()).toContain("usage: mindful journal"); // journal-specific usage
+			expect(stderr()).not.toContain("usage: mindful <command>"); // never the top-level fallback
+			expect(stdout()).toBe("");
+		}
 	});
 });
 ```
@@ -943,7 +982,16 @@ function journalDate(s: string): string {
 }
 
 function cmdJournal(mindful: Mindful, rest: string[], out: Sink, now: string): number {
-	const { values, positionals } = parseFlags(rest, { since: { type: "string" }, until: { type: "string" } });
+	// parseFlags throws CliUsageError WITHOUT a per-error usage (duplicate --since, unknown flag,
+	// missing flag value) → re-tag with JOURNAL_USAGE so journal errors never fall back to top-level USAGE.
+	let parsed: ReturnType<typeof parseFlags>;
+	try {
+		parsed = parseFlags(rest, { since: { type: "string" }, until: { type: "string" } });
+	} catch (e) {
+		if (e instanceof CliUsageError) throw new CliUsageError(e.message, JOURNAL_USAGE);
+		throw e;
+	}
+	const { values, positionals } = parsed;
 	const since = values.since as string | undefined;
 	const until = values.until as string | undefined;
 	let window: DateWindow;
