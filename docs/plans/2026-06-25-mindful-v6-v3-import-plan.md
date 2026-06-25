@@ -31,6 +31,7 @@
 ## File Structure
 
 - Create `src/alias.ts`: alias facet schema, loaders, normalizer.
+- Create `src/resolve.ts`: shared alias-first/title-fallback thought resolver.
 - Modify `src/kinds.ts`: mark alias as optional and validate when present.
 - Modify `src/index.ts`: export alias and importer public surfaces.
 - Modify `src/api.ts`: alias-aware capture input, uniqueness checks, resolver index, tag resolution.
@@ -255,15 +256,16 @@ rtk git commit -m "feat: add optional alias facet"
 
 ---
 
-### Task 2: Alias-Aware Mindful API and CLI Resolution
+### Task 2: Shared Resolver, Alias-Aware Mindful API, and CLI Resolution
 
 **Files:**
+- Create: `src/resolve.ts`
 - Modify: `src/api.ts`
 - Modify: `src/cli.ts`
 - Test: `tests/alias.test.ts`
 - Test: `tests/cli.test.ts`
 
-**Purpose:** Add `capture({ alias? })`, enforce alias uniqueness, resolve tags by alias before title, and resolve CLI refs by alias.
+**Purpose:** Add the shared alias-first/title-fallback resolver, then use it in `Mindful` and the CLI. This prevents the alias precedence rule from being duplicated in the API and importer.
 
 - [ ] **Step 1: Append API alias behavior tests**
 
@@ -366,21 +368,24 @@ Run: `rtk npx vitest run tests/alias.test.ts tests/cli.test.ts`
 
 Expected: FAIL. TypeScript/test failure should show `alias` is not accepted by `capture`, duplicate aliases are not enforced, or CLI alias refs do not resolve.
 
-- [ ] **Step 4: Replace the resolver index in `src/api.ts`**
+- [ ] **Step 4: Create the shared resolver module**
 
-Modify imports and helper types in `src/api.ts`:
-
-```ts
-import { ALIAS, aliasOf, makeAlias } from "./alias.js";
-```
-
-Replace the current `AliasIndex` interface and `aliasIndex()` / `resolveTag()` methods with:
+Create `src/resolve.ts`:
 
 ```ts
-interface ResolverIndex {
+import { type Node, ValidationError } from "@nodes/kernel";
+import { aliasOf } from "./alias.js";
+import { THOUGHT } from "./kinds.js";
+
+export interface ThoughtResolverIndex {
 	aliases: Map<string, string>;
 	titles: Map<string, string>;
 	ambiguousTitles: Set<string>;
+}
+
+export interface ResolveThoughtErrors {
+	missing: (name: string) => Error;
+	ambiguous?: (name: string) => Error;
 }
 
 function addTitleKey(byTitle: Map<string, Set<string>>, key: string, id: string): void {
@@ -389,10 +394,10 @@ function addTitleKey(byTitle: Map<string, Set<string>>, key: string, id: string)
 	byTitle.set(key, ids);
 }
 
-private resolverIndex(extra?: Node): ResolverIndex {
+export function buildThoughtResolverIndex(thoughts: Iterable<Node>): ThoughtResolverIndex {
 	const aliases = new Map<string, string>();
 	const byTitle = new Map<string, Set<string>>();
-	for (const n of [...this.corpus.all(), ...(extra === undefined ? [] : [extra])]) {
+	for (const n of thoughts) {
 		if (n.kind !== THOUGHT) continue;
 		const alias = aliasOf(n);
 		if (alias !== null) aliases.set(alias.name, n.id);
@@ -408,30 +413,31 @@ private resolverIndex(extra?: Node): ResolverIndex {
 	return { aliases, titles, ambiguousTitles };
 }
 
-private resolveThoughtName(name: string, idx: ResolverIndex): string {
-	const aliasTarget = idx.aliases.get(name) ?? idx.aliases.get(name.toLowerCase());
+export function resolveThoughtName(name: string, idx: ThoughtResolverIndex, errors: ResolveThoughtErrors): string {
+	const cleaned = name.replace(/^#+/, "");
+	const aliasTarget = idx.aliases.get(cleaned) ?? idx.aliases.get(cleaned.toLowerCase());
 	if (aliasTarget !== undefined) return aliasTarget;
 
-	const titleTarget = idx.titles.get(name) ?? idx.titles.get(name.toLowerCase());
+	const titleTarget = idx.titles.get(cleaned) ?? idx.titles.get(cleaned.toLowerCase());
 	if (titleTarget !== undefined) return titleTarget;
 
-	const lower = name.toLowerCase();
-	if (idx.ambiguousTitles.has(name) || idx.ambiguousTitles.has(lower)) {
-		throw new ValidationError(`ambiguous tag ${JSON.stringify(name)}: multiple thoughts share that title`);
+	if (idx.ambiguousTitles.has(cleaned) || idx.ambiguousTitles.has(cleaned.toLowerCase())) {
+		throw (
+			errors.ambiguous?.(cleaned) ??
+			new ValidationError(`ambiguous thought reference ${JSON.stringify(name)}: multiple thoughts share that title`)
+		);
 	}
-	throw new RefError(`tag ${JSON.stringify(name)} does not resolve to a known node`);
+	throw errors.missing(cleaned);
 }
+```
 
-private resolveTag(source: string, name: string, idx: ResolverIndex): Relation {
-	return { source, predicate: RELATES_TO, target: this.resolveThoughtName(name.replace(/^#+/, ""), idx), directed: true, weight: null, attrs: {} };
-}
+- [ ] **Step 5: Update `src/api.ts` to use the shared resolver**
 
-private requireUniqueAlias(aliasName: string): void {
-	const idx = this.resolverIndex();
-	if (idx.aliases.has(aliasName)) {
-		throw new ValidationError(`alias ${JSON.stringify(aliasName)} is already in use`);
-	}
-}
+Modify imports in `src/api.ts`:
+
+```ts
+import { ALIAS, makeAlias } from "./alias.js";
+import { buildThoughtResolverIndex, resolveThoughtName, type ThoughtResolverIndex } from "./resolve.js";
 ```
 
 Also import `RefError` from `@nodes/kernel` in the top import list:
@@ -442,7 +448,39 @@ Also import `RefError` from `@nodes/kernel` in the top import list:
 
 Remove the no-longer-used `tagToRelation` import.
 
-- [ ] **Step 5: Update `capture` signature and implementation**
+Replace the current `AliasIndex` interface and `aliasIndex()` / `resolveTag()` methods with class methods that consume the shared resolver:
+
+```ts
+	private resolverIndex(extra?: Node): ThoughtResolverIndex {
+		return buildThoughtResolverIndex([...this.corpus.all(), ...(extra === undefined ? [] : [extra])]);
+	}
+
+	private resolveTag(source: string, name: string, idx: ThoughtResolverIndex): Relation {
+		return {
+			source,
+			predicate: RELATES_TO,
+			target: resolveThoughtName(name, idx, {
+				missing: (cleaned) => new RefError(`tag ${JSON.stringify(cleaned)} does not resolve to a known node`),
+				ambiguous: (cleaned) =>
+					new ValidationError(`ambiguous tag ${JSON.stringify(cleaned)}: multiple thoughts share that title`),
+			}),
+			directed: true,
+			weight: null,
+			attrs: {},
+		};
+	}
+
+	private requireUniqueAlias(aliasName: string): void {
+		const idx = this.resolverIndex();
+		if (idx.aliases.has(aliasName)) {
+			throw new ValidationError(`alias ${JSON.stringify(aliasName)} is already in use`);
+		}
+	}
+```
+
+Keep `resolverIndex` and `resolveTag` as `private` class methods; `ThoughtResolverIndex` and `buildThoughtResolverIndex` live at module level in `src/resolve.ts`.
+
+- [ ] **Step 6: Update `capture` signature and implementation**
 
 Replace the `capture` method in `src/api.ts` with:
 
@@ -466,7 +504,7 @@ Replace the `capture` method in `src/api.ts` with:
 	}
 ```
 
-- [ ] **Step 6: Update `tag` to use the new resolver**
+- [ ] **Step 7: Update `tag` to use the shared resolver path**
 
 Ensure `tag()` still calls `this.resolveTag(node.id, name, this.resolverIndex())`:
 
@@ -479,12 +517,12 @@ Ensure `tag()` still calls `this.resolveTag(node.id, name, this.resolverIndex())
 	}
 ```
 
-- [ ] **Step 7: Make CLI `resolveId` alias-aware**
+- [ ] **Step 8: Make CLI `resolveId` alias-aware**
 
 Modify imports in `src/cli.ts`:
 
 ```ts
-import { aliasOf } from "./alias.js";
+import { buildThoughtResolverIndex } from "./resolve.js";
 ```
 
 Replace `resolveId` in `src/cli.ts` with:
@@ -499,32 +537,31 @@ function resolveId(mindful: Mindful, ref: string): string {
 	if (prefixMatches.length === 1) return prefixMatches[0].id;
 	if (prefixMatches.length > 1) throw new CliError(`ambiguous ref ${JSON.stringify(ref)}: matches ${prefixMatches.length} thoughts`);
 
-	const aliasMatches = thoughts.filter((t) => aliasOf(t)?.name === ref);
-	if (aliasMatches.length === 1) return aliasMatches[0].id;
-	if (aliasMatches.length > 1) throw new CliError(`ambiguous alias ${JSON.stringify(ref)}: matches ${aliasMatches.length} thoughts`);
+	const aliasTarget = buildThoughtResolverIndex(thoughts).aliases.get(ref);
+	if (aliasTarget !== undefined) return aliasTarget;
 
 	throw new CliError(`no thought matching ${JSON.stringify(ref)}`);
 }
 ```
 
-The ambiguous-alias branch should be unreachable through normal APIs, but it keeps CLI behavior explicit for manually corrupted data.
+Alias ambiguity is enforced at write/import boundaries, so the CLI only needs to check the shared alias map.
 
-- [ ] **Step 8: Run focused tests**
+- [ ] **Step 9: Run focused tests**
 
 Run: `rtk npx vitest run tests/alias.test.ts tests/cli.test.ts tests/mindful-thoughts.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 9: Typecheck**
+- [ ] **Step 10: Typecheck**
 
 Run: `rtk npm run typecheck`
 
 Expected: PASS. If TypeScript complains about imports or optional chaining, fix the exact files from this task.
 
-- [ ] **Step 10: Commit Task 2**
+- [ ] **Step 11: Commit Task 2**
 
 ```bash
-rtk git add src/api.ts src/cli.ts tests/alias.test.ts tests/cli.test.ts
+rtk git add src/resolve.ts src/api.ts src/cli.ts tests/alias.test.ts tests/cli.test.ts
 rtk git commit -m "feat: resolve thoughts by alias"
 ```
 
@@ -576,6 +613,7 @@ describe("v3 import helpers", () => {
 
 	it("normalizes timestamps to captured-compatible explicit UTC when needed", () => {
 		expect(normalizeV3Timestamp("2026-06-24T12:30:00Z")).toBe("2026-06-24T12:30:00Z");
+		expect(normalizeV3Timestamp("2026-06-24T12:30:00+05:00")).toBe("2026-06-24T12:30:00+05:00");
 		expect(normalizeV3Timestamp("2026-06-24T12:30:00")).toBe("2026-06-24T12:30:00Z");
 		expect(normalizeV3Timestamp("2026-06-24")).toBe("2026-06-24T00:00:00Z");
 	});
@@ -726,7 +764,7 @@ import {
 import { z } from "zod";
 import { ALIAS, aliasOf, makeAlias, normalizeAliasInput } from "./alias.js";
 import { type Mindful } from "./api.js";
-import { CAPTURED, makeCaptured } from "./captured.js";
+import { CAPTURED, capturedDate, makeCaptured } from "./captured.js";
 import { VISUAL_IDENTITY, deriveIdentity } from "./identity.js";
 import { THOUGHT } from "./kinds.js";
 
@@ -922,7 +960,7 @@ function buildCore(payload: unknown, mindful: Mindful, options: ImportV3Options)
 			kind: THOUGHT,
 			title: textField(thought.title, "Untitled"),
 			body: bodyField(thought.body),
-			metadata: { created: makeCaptured(at).at.slice(0, 10) },
+			metadata: { created: capturedDate(at) },
 		});
 		node.facets[VISUAL_IDENTITY] = deriveIdentity(uid);
 		node.facets[CAPTURED] = makeCaptured(at);
@@ -957,6 +995,8 @@ function buildCore(payload: unknown, mindful: Mindful, options: ImportV3Options)
 
 export function importV3(payload: unknown, mindful: Mindful, options: ImportV3Options = {}): ImportReport {
 	const built = buildCore(payload, mindful, options);
+	// Validate all nodes before write-any. ID/UID and alias collisions are already checked in buildCore;
+	// this loop catches facet/kind/schema problems without relying on the per-node write path.
 	for (const node of built.nodes) {
 		if (mindful.corpus.registry !== undefined) mindful.corpus.registry.validate(node);
 	}
@@ -1178,6 +1218,7 @@ import {
 	type Node,
 	type Relation,
 } from "@nodes/kernel";
+import { buildThoughtResolverIndex, resolveThoughtName } from "./resolve.js";
 ```
 
 Add edge schema near `V3ThoughtSchema`:
@@ -1207,53 +1248,10 @@ const V3PayloadSchema = z
 	.passthrough();
 ```
 
-Add helper types/functions:
+Add helper functions:
 
 ```ts
 type V3Edge = z.infer<typeof V3EdgeSchema>;
-
-interface ResolverIndex {
-	aliases: Map<string, string>;
-	titles: Map<string, string>;
-	ambiguousTitles: Set<string>;
-}
-
-function addTitleKey(byTitle: Map<string, Set<string>>, key: string, id: string): void {
-	const ids = byTitle.get(key) ?? new Set<string>();
-	ids.add(id);
-	byTitle.set(key, ids);
-}
-
-function buildResolverIndex(nodes: Node[], existing: Node[]): ResolverIndex {
-	const aliases = new Map<string, string>();
-	const byTitle = new Map<string, Set<string>>();
-	for (const node of [...existing, ...nodes]) {
-		if (node.kind !== THOUGHT) continue;
-		const alias = aliasOf(node);
-		if (alias !== null) aliases.set(alias.name, node.id);
-		addTitleKey(byTitle, node.title, node.id);
-		addTitleKey(byTitle, node.title.toLowerCase(), node.id);
-	}
-	const titles = new Map<string, string>();
-	const ambiguousTitles = new Set<string>();
-	for (const [key, ids] of byTitle) {
-		if (ids.size === 1) titles.set(key, [...ids][0]);
-		else ambiguousTitles.add(key);
-	}
-	return { aliases, titles, ambiguousTitles };
-}
-
-function resolveName(name: string, idx: ResolverIndex): string {
-	const cleaned = name.replace(/^#+/, "");
-	const aliasTarget = idx.aliases.get(cleaned) ?? idx.aliases.get(cleaned.toLowerCase());
-	if (aliasTarget !== undefined) return aliasTarget;
-	const titleTarget = idx.titles.get(cleaned) ?? idx.titles.get(cleaned.toLowerCase());
-	if (titleTarget !== undefined) return titleTarget;
-	if (idx.ambiguousTitles.has(cleaned) || idx.ambiguousTitles.has(cleaned.toLowerCase())) {
-		throw new ValidationError(`ambiguous tag ${JSON.stringify(name)}: multiple thoughts share that title`);
-	}
-	throw new ValidationError(`tag ${JSON.stringify(name)} does not resolve to a known node`);
-}
 
 function finiteWeight(raw: unknown): number | null {
 	return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
@@ -1311,7 +1309,7 @@ In `buildCore`, after `nodes` are built and before returning, add relation const
 	const nodeById = new Map(nodes.map((node) => [node.id, node]));
 	const existingThoughts = mindful.allThoughts();
 	const existingIdSet = new Set(existingThoughts.map((node) => node.id));
-	const resolver = buildResolverIndex(nodes, existingThoughts);
+	const resolver = buildThoughtResolverIndex([...existingThoughts, ...nodes]);
 	const relationKeys = new Set<string>();
 	let relations = 0;
 	let duplicateRelations = 0;
@@ -1351,7 +1349,18 @@ In `buildCore`, after `nodes` are built and before returning, add relation const
 		if (!Array.isArray(tags)) throw new ValidationError(`thought ${JSON.stringify(thought.id)} tags must be an array`);
 		for (const tag of tags) {
 			if (typeof tag !== "string") throw new ValidationError(`thought ${JSON.stringify(thought.id)} tag must be a string`);
-			addRelation({ source, predicate: RELATES_TO, target: resolveName(tag, resolver), directed: true, weight: null, attrs: {} });
+			addRelation({
+				source,
+				predicate: RELATES_TO,
+				target: resolveThoughtName(tag, resolver, {
+					missing: (cleaned) => new ValidationError(`tag ${JSON.stringify(cleaned)} does not resolve to a known node`),
+					ambiguous: (cleaned) =>
+						new ValidationError(`ambiguous tag ${JSON.stringify(cleaned)}: multiple thoughts share that title`),
+				}),
+				directed: true,
+				weight: null,
+				attrs: {},
+			});
 		}
 	}
 
@@ -1616,7 +1625,7 @@ Run: `rtk npm run check`
 Expected: PASS. If it fails with formatting-only issues, run:
 
 ```bash
-rtk npx @biomejs/biome check --write src/alias.ts src/api.ts src/cli.ts src/import-v3.ts src/bin-import-v3.ts tests/alias.test.ts tests/import-v3.test.ts
+rtk npx @biomejs/biome check --write src/alias.ts src/resolve.ts src/api.ts src/cli.ts src/import-v3.ts src/bin-import-v3.ts tests/alias.test.ts tests/import-v3.test.ts
 ```
 
 Then re-run `rtk npm run check`.
@@ -1638,7 +1647,7 @@ Expected: clean branch after any final formatting commit.
 If Step 3 changed files:
 
 ```bash
-rtk git add src/alias.ts src/api.ts src/cli.ts src/import-v3.ts src/bin-import-v3.ts tests/alias.test.ts tests/import-v3.test.ts
+rtk git add src/alias.ts src/resolve.ts src/api.ts src/cli.ts src/import-v3.ts src/bin-import-v3.ts tests/alias.test.ts tests/import-v3.test.ts
 rtk git commit -m "style: format v3 import helper"
 ```
 
