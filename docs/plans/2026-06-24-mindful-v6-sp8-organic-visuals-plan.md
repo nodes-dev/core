@@ -78,6 +78,12 @@ describe("hslToHex", () => {
 		expect(hslToHex(0, 5, 2)).toBe("#ffffff"); // l clamps to 1 → white
 		expect(hslToHex(0, -1, -1)).toBe("#000000"); // l clamps to 0 → black
 	});
+
+	it("throws ValidationError on non-finite numeric input", () => {
+		expect(() => hslToHex(Number.NaN, 0.5, 0.5)).toThrow(ValidationError);
+		expect(() => hslToHex(0, Number.POSITIVE_INFINITY, 0.5)).toThrow(ValidationError);
+		expect(() => hslToHex(0, 0.5, Number.NEGATIVE_INFINITY)).toThrow(ValidationError);
+	});
 });
 
 describe("hexToHsl", () => {
@@ -135,6 +141,9 @@ export function hexToHsl(hex: string): { h: number; s: number; l: number } {
 
 /** Convert HSL to a lowercase #rrggbb color. Hue is taken mod 360; s and l are clamped to [0,1]. */
 export function hslToHex(h: number, s: number, l: number): string {
+	if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(l)) {
+		throw new ValidationError(`hslToHex: h/s/l must be finite numbers`);
+	}
 	const hue = ((h % 360) + 360) % 360;
 	const sat = Math.min(1, Math.max(0, s));
 	const lig = Math.min(1, Math.max(0, l));
@@ -342,6 +351,10 @@ describe("normalizeField", () => {
 		expect(() => normalizeField([[1, Number.NaN]], "minmax")).toThrow(ValidationError);
 		expect(() => normalizeField([], "minmax")).toThrow(ValidationError);
 	});
+
+	it("rejects log1p-minmax inputs that would transform to NaN", () => {
+		expect(() => normalizeField([[-2, 0]], "log1p-minmax")).toThrow(ValidationError);
+	});
 });
 ```
 
@@ -453,6 +466,11 @@ export function normalizeField(raw: number[][], mode: NormalizeMode): Field {
 		for (const v of row) if (!Number.isFinite(v)) throw new ValidationError("normalizeField: non-finite value");
 	}
 	const t = mode === "log1p-minmax" ? raw.map((row) => row.map((v) => Math.log1p(v))) : raw;
+	for (const row of t) {
+		for (const v of row) {
+			if (!Number.isFinite(v)) throw new ValidationError("normalizeField: transformed non-finite value");
+		}
+	}
 	let min = Number.POSITIVE_INFINITY;
 	let max = Number.NEGATIVE_INFINITY;
 	for (const row of t) {
