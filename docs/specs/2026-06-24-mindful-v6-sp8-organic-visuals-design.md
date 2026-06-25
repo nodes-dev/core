@@ -41,8 +41,8 @@ SP8 swaps the **generator** (byte-mirror → formula field) while reusing the **
 ## 4. Architecture & data flow
 
 ```
-uid
- → deriveIdentity(uid)            (SP2, existing)       → { seed, slots }
+node                              (the persisted thought)
+ → visualIdentityOf(node)         (SP2, existing)       → { seed, slots }   ← stored facet is source of truth
  → clusterId = familyOf(seed)     ∈ [0, K)              hash bucket (stub for real clustering)
  → family    = REGISTRY[clusterId]                       { slug, name, paramSpecs, generate }
  → params    = paramSpecs.map(spec → mapSeed(seed, spec))   + a seeded PRNG for stochastic models
@@ -52,21 +52,25 @@ uid
  → spriteToAnsi(sprite)                                  (SP4, existing)
 ```
 
+SP8 renders from the **stored** `visualIdentity` facet via `visualIdentityOf(node)` (the SP2 source-of-truth contract). It **never calls `deriveIdentity(uid)` during rendering** — `deriveIdentity` is capture-time only.
+
 **New modules (all pure, headless, no heavy deps):**
-- `src/families.ts` — the registry: `K = 6` family entries + their `generate` functions + parameter specs transcribed from the catalog.
+- `src/families.ts` — the registry: `K = 6` family entries + their `generate` functions + parameter specs transcribed from the catalog (with the constants pinned in §7.1).
 - `src/field.ts` — `Field` type, parameter derivation (`mapSeed`), the seeded PRNG, grid evaluation orchestration, normalization.
 - `src/colormap.ts` — scalar → color ramp.
+- `src/hsl.ts` — `hexToHsl` / `hslToHex` extracted from `color.ts` as a shared internal util (see §8); **not** barrel-exported.
 
-**Modified:** `src/api.ts` (`Mindful.sprite` reroute + `size` param), `src/index.ts` (barrel). `add`/`show` CLI call sites are unchanged (they call `Mindful.sprite(id, scheme)` with the default size).
+**Modified:** `src/api.ts` (`Mindful.sprite` reroute + `size` param), `src/color.ts` (HSL helpers moved out to `src/hsl.ts`, imported back), `src/index.ts` (barrel). `add`/`show` CLI call sites are unchanged (they call `Mindful.sprite(id, scheme)` with the default size).
 
-**Retired for the avatar:** the byte-mirror `spriteCells` and the 4-color `renderSprite` are no longer used to render a thought; remove them if no longer referenced. The `Sprite` type, `spriteToAnsi`, `resolve`, and `Mindful.palette` are retained.
+**Retired — explicit migration (not left to implementer judgment):** `spriteCells`, `renderSprite`, and the `CellValue` / `SpriteCells` types are **deleted** — the byte-mirror is fully replaced. `src/sprite.ts` is reduced to the `Sprite` interface only (its sole remaining responsibility), so `encode.ts`'s `import type { Sprite }` is unchanged. The deleted names are removed from the `index.ts` barrel. Tests that referenced the byte-mirror are rewritten: encoder tests build `Sprite` fixtures by hand (most already do); identity/render coverage moves to asserting `Mindful.sprite(...)` output. The `Sprite` type, `spriteToAnsi`, `resolve`, and `Mindful.palette` are retained.
 
 ## 5. Semantic identity (clusters)
 
 `clusterId` is a single integer in `[0, K)`, one per thought, naming a "domain of thought." Each cluster owns **one model family + one color hue**, so all thoughts in a cluster are visually kin.
 
 - **Derivation (now):** `familyOf(seed)` reads a fixed 2-byte slice of the SHA-256 `seed` (distinct from the bytes used for model parameters, so adding/changing parameters never shifts a thought's cluster) and reduces it modulo `K`. Pure function of the uid; no storage, no migration of existing thoughts.
-- **`K` = number of registered families** (6 in SP8), so every `clusterId` maps to a real model.
+- **`K = CLUSTER_BUCKETS` = number of registered families** (6 in SP8), so every `clusterId` maps to a real model. `clusterId = familyOf(seed) = readBucketBytes(seed) % K`.
+- **Stub avatars are not stable across registry growth (accepted).** Because `K` equals the family count, adding families 7…n later changes the modulus and remaps some existing thoughts to new families/hues. This is **explicitly accepted**: the hash-bucket cluster is a stub with no persisted state, and the future real-clustering SP overwrites every thought's cluster via the stored `semanticIdentity` facet regardless — so avatar stability is a non-goal during the stub era and becomes a guarantee only once `semanticIdentity` is stored. (The alternative, freezing `CLUSTER_BUCKETS` at 6, was rejected: it would block incremental family growth toward 15 until the full embeddings SP lands.)
 - **Future seam:** real semantic clustering depends on a thought's *content* (embeddings), not its uid, so it cannot be a uid-derived function. The future SP that introduces it will add a **stored** `semanticIdentity` facet plus a compute pipeline; SP8 deliberately does *not* store the stub, to avoid a facet migration now and a reshape later. `familyOf` is the single seam that future work replaces.
 
 **Decision (ratified):** derive `clusterId` from the seed at render time; do not store it.
@@ -94,13 +98,28 @@ Mixing: two closed-form fields (Chladni, gravitational), one iterated map (logis
 - **Normalization:** each generator returns raw values; the pipeline normalizes to `[0,1]` (min–max, or a documented log scale for density fields) before colormapping.
 - **Generator signature:** `generate(params, size, rng) → Field`. Pure given its inputs.
 
+### 7.1 Pinned generator constants (deterministic contract)
+
+These are fixed constants in `families.ts`; the §11 golden tests depend on them. "Sim grid" is the internal simulation resolution; the result is block-averaged down to the render `size`. All cell sampling uses cell centers `x,y = (i+0.5)/size`.
+
+| Family | Pinned constants |
+|--------|------------------|
+| `gray-scott` | sim grid `48×48` (periodic); `dt=1.0`; `steps=1500`; `Dᵤ=0.16`, `Dᵥ=0.08`; `F∈[0.02,0.06]`, `k∈[0.05,0.07]` from seed; init `u=1, v=0` then `Mₚ∈{3..5}` seeded square patches (side `3`, `v=0.5, u=0.25`) at PRNG positions; snapshot `v`; block-average to `size`; min–max normalize. |
+| `modal-acoustics` | `n,m` two **distinct** ints in `{1..6}` from seed; field `=|cos(nπx)cos(mπy) − cos(mπx)cos(nπy)|`; normalize by `max|f|` (`≤2`). |
+| `logistic-map` | window center `r_c∈[3.2,3.9]` from seed, half-width `0.30`, clamped to `[2.8,4.0]`; column `c → r = r_lo + (r_hi−r_lo)·c/(size−1)`; `burn_in=200`; `samples=400`; accumulate visited `x∈[0,1]` into the column's rows; per-column max-normalize, then global min–max. |
+| `n-body-problem` | `M∈{2..5}` from seed; `mᵢ∈[0.5,2.0]`; positions `∈[0.15,0.85]²`; `G=1`; softening `ε=0.05`; `Φ=−Σ G mᵢ/√(r²+ε²)`; min–max normalize. |
+| `vogel-phyllotaxis` | `N∈{200..500}` from seed; angle `i·137.507°`; radius `rᵢ=0.9·√(i/N)` centered at `(0.5,0.5)`; field `= min_i dist((x,y),seedᵢ)`; min–max normalize, then invert (`1−v`) so seeds are bright. |
+| `lorenz-attractor` | `σ=10`, `β=8/3`, `ρ∈[24,30]` from seed; RK4 `dt=0.005`; `burn_in=1000` steps; `accum=20000` steps from seeded init `(≈0,1,0)+jitter`; project `(x,z)` with bounds `x∈[−25,25]`, `z∈[0,50]` (out-of-bounds clamped to edge bins); density `→ log1p →` min–max normalize. |
+
+**Constant-field rule:** min–max normalization uses `den = max − min`; if `den < 1e−9` the field is set to all `0.5` (flat) — never a divide-by-zero or `NaN`.
+
 ## 8. Colormap (`colormap.ts`)
 
 **Decision (ratified):** continuous single-hue HSL ramp keyed by cluster.
 
 - `clusterId` picks a **base color** from the active scheme: `base = scheme.colors[clusterId % scheme.colors.length]`.
 - The colormap converts `base` to HSL and ramps **lightness** across the normalized value `v ∈ [0,1]` on the base hue/saturation: roughly `L(v) = lerp(L_low, L_high, v)` with `L_low ≈ 0.06` (near-black background for `v=0`) and `L_high ≈ 0.78`. Output via `hslToHex`. (Single-hue lightness ramp avoids hue-interpolation artifacts and keeps "color = cluster".)
-- `hexToHsl` / `hslToHex` are promoted from private to **exported** in `color.ts` for reuse; no behavior change.
+- `hexToHsl` / `hslToHex` are **extracted** from `color.ts` into a small internal `src/hsl.ts`, shared by `color.ts` and `colormap.ts`. They are **not** added to the `index.ts` barrel (not public API). Because two modules now depend on them, their contract is pinned by unit tests (§11): hue taken mod 360, saturation and lightness **clamped** to `[0,1]` (never throws on out-of-range numeric input), deterministic lowercase `#rrggbb` output, `hexToHsl ∘ hslToHex` round-trip within tolerance, and malformed hex input to `hexToHsl` → `ValidationError` (fail-early).
 - Color is therefore tied to **semantic identity** (the cluster's hue) and themed by the **active scheme** (which palette the hue is drawn from). Low-color schemes (e.g. gameboy's 4 greens) still produce a valid, low-contrast ramp.
 
 ## 9. Rendering & integration
@@ -125,7 +144,8 @@ Mixing: two closed-form fields (Chladni, gravitational), one iterated map (logis
   - `gray-scott`: from a seeded perturbation the field develops non-trivial structure (variance grows; not uniform).
   - `vogel-phyllotaxis`: consecutive seeds differ by the golden angle; radius ∝ `√i`.
   - `lorenz-attractor`: trajectory stays bounded; projected density is bimodal (two lobes).
-- **Pipeline / units:** `mapSeed` covers its range and is stable; PRNG is deterministic; `Field` normalized to `[0,1]` with correct dims; `colormap` returns valid lowercase `#rrggbb` and is monotonic in lightness; `size` validation rejects odd/non-positive.
+- **Pipeline / units:** `mapSeed` covers its range and is stable; PRNG is deterministic; `Field` normalized to `[0,1]` with correct dims; the constant-field rule yields a flat `0.5` (no `NaN`); `colormap` returns valid lowercase `#rrggbb` and is monotonic in lightness; `size` validation rejects odd/non-positive.
+- **HSL contract (`hsl.ts`):** hue mod 360, saturation/lightness clamped to `[0,1]`, lowercase `#rrggbb` output, `hexToHsl ∘ hslToHex` round-trip within tolerance, malformed hex → `ValidationError`.
 - **Integration:** `Mindful.sprite(id)` returns a valid `Sprite` (24×24) and `spriteToAnsi` succeeds for every family.
 - **Gate:** `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build`.
 
@@ -139,14 +159,17 @@ The deliberate split — **generators produce a renderer-neutral `Field` (and, w
 2. **Replace, not coexist** — the formula field replaces the byte-mirror sprite as the thought avatar everywhere.
 3. **Size is a parameter, default 24×24** (even/positive; encoder needs even height).
 4. **`clusterId` derived from the seed, not stored** — hash bucket now; future real clustering adds a stored `semanticIdentity` facet (it depends on content, not uid).
-5. **`K` = number of registered families** (6 in SP8), so every cluster maps to a real model.
+5. **`K = CLUSTER_BUCKETS` = number of registered families** (6 in SP8), so every cluster maps to a real model.
 6. **Strong initial set, grow to 15** — ship 6 vetted, diverse generators; architecture accepts more.
-7. **Faithfulness is a vetting gate** — hand-port only verified-genuine math; the catalog's fake hover animations are not used as-is.
-8. **No runtime dependency on `~/d/natural-systems`** — parameter ranges/slugs are transcribed into the registry with provenance.
-9. **Continuous single-hue HSL colormap** keyed by cluster, themed by the active scheme; `hexToHsl`/`hslToHex` exported from `color.ts`.
-10. **Renderer-agnostic generators** — `Field` is the common currency; ANSI now, web/three.js deferred (§12); no WebGL dep added.
-11. **Generators may carry a time axis** but SP8 renders a single deterministic frame; animation playback deferred.
-12. **Empirical frequency weighting deferred** — cluster assignment is uniform (hash bucket) until the arXiv catalog matures.
+7. **Stub-era avatar stability is a non-goal (accepted).** Growing the family count remaps hash-bucket clusters; stability is guaranteed only once the stored `semanticIdentity` facet exists (§5). Freezing `CLUSTER_BUCKETS` at 6 was rejected — it would block incremental growth toward 15.
+8. **Faithfulness is a vetting gate** — hand-port only verified-genuine math; the catalog's fake hover animations are not used as-is.
+9. **No runtime dependency on `~/d/natural-systems`** — parameter ranges/slugs are transcribed into the registry with provenance; numerical constants are pinned in §7.1.
+10. **Continuous single-hue HSL colormap** keyed by cluster, themed by the active scheme; `hexToHsl`/`hslToHex` extracted into an internal `hsl.ts` (not barrel-exported), contract pinned by tests.
+11. **Byte-mirror fully deleted** — `spriteCells`/`renderSprite`/`CellValue`/`SpriteCells` removed; `sprite.ts` reduced to the `Sprite` type; affected tests rewritten (not left to implementer judgment).
+12. **Renderer rendered from the stored facet** — `Mindful.sprite` uses `visualIdentityOf(node)`; `deriveIdentity(uid)` is never called at render time.
+13. **Renderer-agnostic generators** — `Field` is the common currency; ANSI now, web/three.js deferred (§12); no WebGL dep added.
+14. **Generators may carry a time axis** but SP8 renders a single deterministic frame; animation playback deferred.
+15. **Empirical frequency weighting deferred** — cluster assignment is uniform (hash bucket) until the arXiv catalog matures.
 
 ## 14. Deferred / future SPs
 
