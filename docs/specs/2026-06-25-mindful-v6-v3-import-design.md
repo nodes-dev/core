@@ -26,7 +26,9 @@ This design covers a first importer slice:
 4. Preserve aliases/tags where they are valid and unique.
 5. Import v3 graph edges and resolved tags as v6 global relations.
 6. Fail the whole import before writing anything on malformed input, duplicate aliases, dangling
-   references, bad timestamps, or collisions.
+   references, bad timestamps, or collisions. This is **validation-atomic**: all domain checks pass
+   before any write. It is not a filesystem transaction; an unexpected I/O/runtime failure during
+   the write loop can still leave earlier nodes on disk.
 
 ## 2. Scope
 
@@ -39,7 +41,7 @@ This design covers a first importer slice:
 - Package `bin` entry for `mindful-import-v3`.
 - Dry-run mode that validates and reports without writing.
 - Import report with counts and ID mappings.
-- Tests for alias behavior and importer atomicity.
+- Tests for alias behavior and importer validation-atomicity.
 
 ### Out
 
@@ -68,6 +70,10 @@ This design covers a first importer slice:
   Mindful/import APIs, not by a normal kind invariant.
 - Storage is Markdown/frontmatter through `Corpus.add`; the importer should use validated v6 nodes,
   not write files by hand.
+- Relations are stored on the source node (`node.relations`). There is no public "append relation
+  to an existing node" import primitive, and `Corpus.add` is not a merge/update API for arbitrary
+  already-present nodes. This constrains imported edge sources: they must be part of the import
+  batch.
 
 ### v3/v5 Export Shape
 
@@ -123,6 +129,9 @@ input. The legacy importer uses `normalizeAliasInput` first, then passes the res
 `makeAlias`. This keeps new v6 writes explicit while still preserving old v3 handles that used
 minor formatting variants.
 
+`requireValidAlias` must short-circuit when the facet is absent. It validates only a present alias
+facet, matching the optional-facet contract.
+
 ### Shape
 
 The stored facet is:
@@ -172,6 +181,15 @@ Alias becomes a first-class resolver input:
 - Alias match wins over a title match. This gives aliases stable URL/tag semantics even when titles
   duplicate.
 
+Implementation requires replacing the current title-only `aliasIndex()` with an explicit resolver
+index:
+
+- `aliases: Map<string, string>` for unique aliases.
+- `titles: Map<string, string>` plus `ambiguousTitles: Set<string>` for exact/lowercase title
+  fallback.
+- Resolution checks `aliases` first, then title maps. This is necessary so an alias can win
+  deterministically over a same-string title.
+
 ## 5. Importer Architecture
 
 Add a package-local import module and thin executable:
@@ -210,23 +228,25 @@ export function importV3(payload: unknown, mindful: Mindful, options?: ImportV3O
 Additional transform/validation helpers may be exported for tests if useful, but `importV3` is the
 main embedding API.
 
-### Atomic Flow
+### Validation-Atomic Flow
 
-The importer is all-or-nothing:
+The importer validates all domain constraints before writing:
 
 1. Parse and validate the input payload shape.
 2. Transform all incoming thoughts into complete v6 `Node` objects in memory.
 3. Validate alias structure.
 4. Validate alias uniqueness within the batch and against existing thoughts.
-5. Validate ID/UID collisions against the existing corpus.
-6. Build all relations in memory.
-7. Validate relation endpoints.
-8. Validate every node with the same registry/corpus rules used by normal v6 writes.
-9. If `dryRun` is true, return the report and write nothing.
-10. Otherwise, write nodes.
+5. Validate ID/UID uniqueness within the batch.
+6. Validate ID/UID collisions against the existing corpus.
+7. Build all relations in memory.
+8. Validate relation sources and endpoints.
+9. Validate every node with the same registry/corpus rules used by normal v6 writes.
+10. If `dryRun` is true, return the report and write nothing.
+11. Otherwise, write nodes.
 
-No partial import is permitted. A bad thought, alias, timestamp, tag, edge, or collision stops the
-whole import before the first disk write.
+A bad thought, alias, timestamp, tag, edge, or collision stops the import before the first disk
+write. The implementation does not provide rollback for unexpected filesystem/runtime failures
+during the write loop; that residual partial-write risk is accepted for this slice.
 
 ## 6. Identity Mapping
 
@@ -240,10 +260,11 @@ v6 node id:       thought:550e8400e29b41d4a716446655440000
 v6 uid:           550e8400e29b41d4a716446655440000
 ```
 
-If a v3 ID is already a 32-character lowercase hex string, it maps directly to `thought:<id>` and
-`uid: <id>`.
+If a v3 ID is already a 32-character hex string, it is lowercased and maps directly to
+`thought:<id>` and `uid: <id>`.
 
-If a v3 ID is UUID-like, hyphens are stripped and the result must be 32 lowercase hex characters.
+If a v3 ID is UUID-like, hyphens are stripped, the result is lowercased, and the result must be 32
+hex characters.
 
 If a source ID cannot be normalized into a valid 32-character lowercase hex value, the import fails.
 This keeps import deterministic and avoids inventing hidden fallback IDs.
@@ -311,6 +332,10 @@ The stored output must pass `CapturedSchema`, including seconds and an explicit 
 `metadata.created` is set to `capturedDate(captured.at)`. `metadata.updated` stays `null` in this
 slice.
 
+Data-fidelity caveat: offset-less v3 datetimes may have represented local wall time. This importer
+does not infer historical local timezone; it treats naive datetimes as UTC to keep the transform
+deterministic and explicit.
+
 ## 8. Relations and Tags
 
 ### Edges
@@ -330,8 +355,16 @@ Mapping:
 Only relations whose endpoints resolve to imported or already-existing thoughts are valid. A
 dangling endpoint fails the import before writing.
 
+The relation source must be part of the import batch. Targets may be imported thoughts or existing
+corpus thoughts. If an edge's source resolves only to an already-existing corpus thought, the import
+fails before writing because this slice does not introduce a merge/update path for existing source
+nodes.
+
 Duplicate `(source, predicate, target)` relations are collapsed in memory. The report increments
 `duplicateRelations` for duplicates skipped.
+
+`type` is ignored for relation semantics. Unsupported edge `type` values are counted in
+`droppedUnsupportedFields` so the loss is visible in dry-run and import reports.
 
 Imported edges are global semantic relations. They never become mindmap `edges` form facets. This
 preserves the v6 distinction between the global relation graph and structure-local form edges.
@@ -350,6 +383,9 @@ Resolved tags become global `relatesTo` relations from the tagged thought to the
 thought.
 
 Generated tag relations and explicit edge relations are deduplicated together.
+
+Tag relation sources are always imported thoughts, because the tag list lives on an imported
+thought record.
 
 ## 9. CLI Wrapper
 
@@ -390,11 +426,12 @@ Fail early, no silent repair:
 
 - Malformed payload: fail.
 - Invalid source ID: fail.
-- ID/UID collision with existing corpus: fail.
+- ID/UID collision within the batch or with existing corpus: fail.
 - Invalid alias: fail.
 - Duplicate alias in batch or existing corpus: fail.
 - Bad timestamp with no usable fallback: fail.
 - Dangling edge endpoint: fail.
+- Edge source resolves only to an existing, non-batch thought: fail.
 - Dangling tag target: fail.
 - Ambiguous title fallback for a tag: fail.
 - Registry validation failure: fail.
@@ -425,10 +462,13 @@ No write occurs until all checks pass. Dry-run performs the same checks and writ
 - Import maps explicit edges to global relations.
 - Import maps `tags[]` through alias/title resolution.
 - Duplicate explicit/tag relations are collapsed and counted.
-- Duplicate aliases fail atomically.
-- Invalid aliases fail atomically.
-- Dangling edge endpoint fails atomically.
-- Dangling tag target fails atomically.
+- Duplicate aliases fail before any write.
+- Invalid aliases fail before any write.
+- Within-batch ID/UID collisions fail before any write.
+- Uppercase UUID/hex source IDs normalize to lowercase.
+- Dangling edge endpoint fails before any write.
+- Edge whose source is existing-only fails before any write.
+- Dangling tag target fails before any write.
 - Missing timestamp requires `fallbackAt`.
 - Date-only and naive timestamps normalize to explicit UTC.
 - Existing ID/UID collision fails before writing.
@@ -474,16 +514,19 @@ make imported references surprising.
 
 1. Preserve v3 IDs as v6 thought IDs where possible.
 2. Normalize UUID source IDs by stripping hyphens.
-3. Use the normalized v3 ID as both v6 `uid` and the id suffix.
-4. Add alias as an optional Mindful-owned thought facet, not a kernel field.
-5. Alias is unique when present.
-6. Alias uniqueness is enforced at Mindful/import boundaries.
-7. Duplicate aliases fail the whole import before writing.
-8. Alias/tag source precedence is `alias` then `tag` then none.
-9. Tags resolve by alias first, then title.
-10. Imported v3 edges become global relations, not mindmap form edges.
-11. v5 visual/activity/attractor fields are ignored in this slice.
-12. Journal-section expansion is deferred to a separate design.
-13. The importer consumes JSON exports only; it does not connect to v3 Postgres or v5 CouchDB.
-14. Dry-run performs full validation and writes nothing.
-15. The import is atomic: no partial disk writes on validation failure.
+3. Lowercase normalized UUID/hex source IDs.
+4. Use the normalized v3 ID as both v6 `uid` and the id suffix.
+5. Add alias as an optional Mindful-owned thought facet, not a kernel field.
+6. Alias is unique when present.
+7. Alias uniqueness is enforced at Mindful/import boundaries.
+8. Duplicate aliases fail the whole import before writing.
+9. Alias/tag source precedence is `alias` then `tag` then none.
+10. Tags resolve by alias first, then title.
+11. Imported v3 edges become global relations, not mindmap form edges.
+12. Imported edge sources must be in the import batch; targets may be existing thoughts.
+13. v5 visual/activity/attractor fields are ignored in this slice.
+14. Journal-section expansion is deferred to a separate design.
+15. The importer consumes JSON exports only; it does not connect to v3 Postgres or v5 CouchDB.
+16. Dry-run performs full validation and writes nothing.
+17. The import is validation-atomic: domain failures produce no disk writes, while unexpected
+    I/O/runtime failures during the write loop remain a residual partial-write risk.
