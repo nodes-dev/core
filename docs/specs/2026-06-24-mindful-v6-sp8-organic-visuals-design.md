@@ -46,7 +46,8 @@ node                              (the persisted thought)
  → clusterId = familyOf(seed)     ∈ [0, K)              hash bucket (stub for real clustering)
  → family    = REGISTRY[clusterId]                       { slug, name, paramSpecs, generate }
  → params    = paramSpecs.map(spec → mapSeed(seed, spec))   + a seeded PRNG for stochastic models
- → field     = family.generate(params, size, rng)       Field { width, height, values:number[][] in [0,1] }
+ → raw       = family.generate(params, size, rng)       number[][]  (raw, un-normalized)
+ → field     = normalizeField(raw, family.normalize)   Field { width, height, values:number[][] in [0,1] }
  → pixels    = field.values.map(v → colormap(v, clusterId, scheme))   per-pixel #rrggbb
  → sprite    = { width, height, pixels }                 (existing Sprite type)
  → spriteToAnsi(sprite)                                  (SP4, existing)
@@ -68,7 +69,7 @@ SP8 renders from the **stored** `visualIdentity` facet via `visualIdentityOf(nod
 
 `clusterId` is a single integer in `[0, K)`, one per thought, naming a "domain of thought." Each cluster owns **one model family + one color hue**, so all thoughts in a cluster are visually kin.
 
-- **Derivation (now):** `familyOf(seed)` reads a fixed 2-byte slice of the SHA-256 `seed` (distinct from the bytes used for model parameters, so adding/changing parameters never shifts a thought's cluster) and reduces it modulo `K`. Pure function of the uid; no storage, no migration of existing thoughts.
+- **Derivation (now):** `familyOf(seed)` reads the cluster bytes `0–1` of the SHA-256 `seed` (disjoint from the PRNG and parameter bytes — see the pinned layout in §7.2 — so adding/changing parameters never shifts a thought's cluster) and reduces them modulo `K`. Pure function of the uid; no storage, no migration of existing thoughts.
 - **`K = CLUSTER_BUCKETS` = number of registered families** (6 in SP8), so every `clusterId` maps to a real model. `clusterId = familyOf(seed) = readBucketBytes(seed) % K`.
 - **Stub avatars are not stable across registry growth (accepted).** Because `K` equals the family count, adding families 7…n later changes the modulus and remaps some existing thoughts to new families/hues. This is **explicitly accepted**: the hash-bucket cluster is a stub with no persisted state, and the future real-clustering SP overwrites every thought's cluster via the stored `semanticIdentity` facet regardless — so avatar stability is a non-goal during the stub era and becomes a guarantee only once `semanticIdentity` is stored. (The alternative, freezing `CLUSTER_BUCKETS` at 6, was rejected: it would block incremental family growth toward 15 until the full embeddings SP lands.)
 - **Future seam:** real semantic clustering depends on a thought's *content* (embeddings), not its uid, so it cannot be a uid-derived function. The future SP that introduces it will add a **stored** `semanticIdentity` facet plus a compute pipeline; SP8 deliberately does *not* store the stub, to avoid a facet migration now and a reshape later. `familyOf` is the single seam that future work replaces.
@@ -92,31 +93,56 @@ Mixing: two closed-form fields (Chladni, gravitational), one iterated map (logis
 
 ## 7. Field pipeline (`field.ts`)
 
-- **`Field` type (renderer-neutral):** `interface Field { width: number; height: number; values: number[][] }`, every value normalized to `[0,1]`, `values.length === height`, each row length `width`. This is the common currency every renderer consumes (§12).
-- **Parameter derivation `mapSeed(seed, spec)`:** each `paramSpec` declares `{ name, min, max, byteOffset }` (or an integer set for `n,m,M,N`); `mapSeed` reads bytes at `byteOffset` from the `seed` hex, forms a `u ∈ [0,1)`, and returns `min + (max−min)·u` (or selects from the integer set). Distinct offsets per parameter; offsets are disjoint from the cluster slice (§5).
-- **Seeded PRNG:** a small inline `mulberry32` (no dependency) seeded from a 32-bit uid-derived value, used for stochastic initial conditions / noise (Gray–Scott perturbations, Lorenz init jitter). Deterministic given the uid.
-- **Normalization:** each generator returns raw values; the pipeline normalizes to `[0,1]` (min–max, or a documented log scale for density fields) before colormapping.
-- **Generator signature:** `generate(params, size, rng) → Field`. Pure given its inputs.
+- **Raw vs normalized (one owner):** generators return **raw** `number[][]` (no range contract); `field.ts` owns `normalizeField(raw, mode) → Field`, the *only* place values become `[0,1]`. Generators never normalize.
+- **`Field` type (renderer-neutral):** `interface Field { width: number; height: number; values: number[][] }`, every value in `[0,1]`, `values.length === height`, each row length `width`. This is the common currency every renderer consumes (§12).
+- **Generator signature:** `generate(params, size, rng) → number[][]` (raw). Pure given its inputs. Each family entry also declares a `normalize` mode (see below).
+- **Normalization modes (`normalizeField`):** `'minmax'` → `(v−min)/(max−min)`; `'log1p-minmax'` → `minmax(log1p(v))` (density fields); `'invert-minmax'` → `1 − minmax(v)`. The **constant-field rule** (§7.1) applies inside every mode: if the min–max denominator `< 1e−9`, emit a flat `0.5`. Per-family mode assignments are in §7.1.
+- **Parameter derivation `mapSeed(seed, spec)`:** each `paramSpec` declares `{ name, min, max, byteOffset, byteWidth }` (or an integer set for `n,m,M,N`); `mapSeed` reads `byteWidth` bytes at `byteOffset` from the `seed` (big-endian) → `u ∈ [0,1)` → `min + (max−min)·u` (or selects from the integer set). Offsets follow the pinned **seed layout** in §7.2.
+- **Seeded PRNG:** a small inline `mulberry32` (no dependency) seeded from the 4 PRNG bytes of the seed (§7.2), used for stochastic initial conditions / noise (Gray–Scott patch positions, n-body masses/positions, Lorenz init jitter). Deterministic given the uid.
 
 ### 7.1 Pinned generator constants (deterministic contract)
 
 These are fixed constants in `families.ts`; the §11 golden tests depend on them. "Sim grid" is the internal simulation resolution; the result is block-averaged down to the render `size`. All cell sampling uses cell centers `x,y = (i+0.5)/size`.
 
-| Family | Pinned constants |
-|--------|------------------|
-| `gray-scott` | sim grid `48×48` (periodic); `dt=1.0`; `steps=1500`; `Dᵤ=0.16`, `Dᵥ=0.08`; `F∈[0.02,0.06]`, `k∈[0.05,0.07]` from seed; init `u=1, v=0` then `Mₚ∈{3..5}` seeded square patches (side `3`, `v=0.5, u=0.25`) at PRNG positions; snapshot `v`; block-average to `size`; min–max normalize. |
-| `modal-acoustics` | `n,m` two **distinct** ints in `{1..6}` from seed; field `=|cos(nπx)cos(mπy) − cos(mπx)cos(nπy)|`; normalize by `max|f|` (`≤2`). |
-| `logistic-map` | window center `r_c∈[3.2,3.9]` from seed, half-width `0.30`, clamped to `[2.8,4.0]`; column `c → r = r_lo + (r_hi−r_lo)·c/(size−1)`; `burn_in=200`; `samples=400`; accumulate visited `x∈[0,1]` into the column's rows; per-column max-normalize, then global min–max. |
-| `n-body-problem` | `M∈{2..5}` from seed; `mᵢ∈[0.5,2.0]`; positions `∈[0.15,0.85]²`; `G=1`; softening `ε=0.05`; `Φ=−Σ G mᵢ/√(r²+ε²)`; min–max normalize. |
-| `vogel-phyllotaxis` | `N∈{200..500}` from seed; angle `i·137.507°`; radius `rᵢ=0.9·√(i/N)` centered at `(0.5,0.5)`; field `= min_i dist((x,y),seedᵢ)`; min–max normalize, then invert (`1−v`) so seeds are bright. |
-| `lorenz-attractor` | `σ=10`, `β=8/3`, `ρ∈[24,30]` from seed; RK4 `dt=0.005`; `burn_in=1000` steps; `accum=20000` steps from seeded init `(≈0,1,0)+jitter`; project `(x,z)` with bounds `x∈[−25,25]`, `z∈[0,50]` (out-of-bounds clamped to edge bins); density `→ log1p →` min–max normalize. |
+| Family | `normalize` | Pinned constants |
+|--------|-------------|------------------|
+| `gray-scott` | `minmax` | sim grid `48×48` (periodic); `dt=1.0`; `steps=1500`; `Dᵤ=0.16`, `Dᵥ=0.08`; `F∈[0.02,0.06]`, `k∈[0.05,0.07]` from seed; init `u=1, v=0` then `Mₚ∈{3..5}` seeded square patches (side `3`, `v=0.5, u=0.25`) at PRNG positions; raw = snapshot `v` block-averaged to `size`. |
+| `modal-acoustics` | `minmax` | `n,m` two **distinct** ints in `{1..6}` from seed; raw `=|cos(nπx)cos(mπy) − cos(mπx)cos(nπy)|`. |
+| `logistic-map` | `minmax` | window center `r_c∈[3.2,3.9]` from seed, half-width `0.30`, clamped to `[2.8,4.0]`; column `c → r = r_lo + (r_hi−r_lo)·c/(size−1)`; `burn_in=200`; `samples=400`; accumulate visited `x∈[0,1]` into the column's rows; raw = per-column max-scaled density (the per-column scaling is internal to the raw field). |
+| `n-body-problem` | `minmax` | `M∈{2..5}` from seed; `mᵢ∈[0.5,2.0]`; positions `∈[0.15,0.85]²` (PRNG); `G=1`; softening `ε=0.05`; raw `= Φ = −Σ G mᵢ/√(r²+ε²)`. |
+| `vogel-phyllotaxis` | `invert-minmax` | `N∈{200..500}` from seed; angle `i·137.507°`; radius `rᵢ=0.9·√(i/N)` centered at `(0.5,0.5)`; raw `= min_i dist((x,y),seedᵢ)` (invert makes seeds bright). |
+| `lorenz-attractor` | `log1p-minmax` | `σ=10`, `β=8/3`, `ρ∈[24,30]` from seed; RK4 `dt=0.005`; `burn_in=1000` steps; `accum=20000` steps from seeded init `(≈0,1,0)+jitter`; project `(x,z)`, bounds `x∈[−25,25]`, `z∈[0,50]` (out-of-bounds clamped to edge bins); raw = projected density counts. |
 
 **Constant-field rule:** min–max normalization uses `den = max − min`; if `den < 1e−9` the field is set to all `0.5` (flat) — never a divide-by-zero or `NaN`.
+
+### 7.2 Seed byte layout (deterministic contract)
+
+The `seed` is the 32-byte SHA-256 digest (64 hex chars). Byte regions are reserved so the cluster, the PRNG, and each parameter read **disjoint** bytes — same uid ⇒ same avatar across implementations.
+
+| Region | Bytes (0-indexed) | Use |
+|--------|-------------------|-----|
+| cluster | `0–1` | `clusterId = uint16BE(b0,b1) % K` |
+| prng | `2–5` | `mulberry32` seed = `uint32BE(b2..b5)` |
+| params | `6–31` | per-family parameter words (below) |
+
+Each parameter consumes a 2-byte big-endian word from the param region; word `j` starts at byte `6 + 2j`. `u = word / 65536 ∈ [0,1)`. Continuous param → `min + (max−min)·u`; integer param over `{lo..hi}` → `lo + floor(u·(hi−lo+1))`. **Per-family word assignment** (word index → param):
+
+| Family | Words (from byte 6) | PRNG-driven (bytes 2–5) |
+|--------|---------------------|--------------------------|
+| `gray-scott` | `w0→F`, `w1→k`, `w2→Mₚ∈{3..5}` | patch positions |
+| `modal-acoustics` | `w0→n∈{1..6}`, `w1→m` = `floor(u·5)`-th element of `{1..6}\{n}` (guarantees `m≠n`) | — |
+| `logistic-map` | `w0→r_c∈[3.2,3.9]` | — |
+| `n-body-problem` | `w0→M∈{2..5}` | each mass `mᵢ∈[0.5,2.0]` and position `∈[0.15,0.85]²` |
+| `vogel-phyllotaxis` | `w0→N∈{200..500}` | — |
+| `lorenz-attractor` | `w0→ρ∈[24,30]` | init jitter on `(0,1,0)` |
+
+Variable-count stochastic data (Gray–Scott patches, n-body bodies) is drawn from the PRNG **stream** in a fixed order after `M`/`Mₚ` is known, so the byte budget never overflows regardless of count.
 
 ## 8. Colormap (`colormap.ts`)
 
 **Decision (ratified):** continuous single-hue HSL ramp keyed by cluster.
 
+- **Scheme validation (public boundary).** `Mindful.sprite(id, scheme?)` is public, so a caller can pass `{ colors: [] }` or non-`#rrggbb` colors. The colormap **validates the scheme before any indexing or HSL conversion**: an empty `scheme.colors`, or any entry failing `#rrggbb`, throws `ValidationError` (fail-early). Built-in schemes always pass; this guards caller-supplied ones.
 - `clusterId` picks a **base color** from the active scheme: `base = scheme.colors[clusterId % scheme.colors.length]`.
 - The colormap converts `base` to HSL and ramps **lightness** across the normalized value `v ∈ [0,1]` on the base hue/saturation: roughly `L(v) = lerp(L_low, L_high, v)` with `L_low ≈ 0.06` (near-black background for `v=0`) and `L_high ≈ 0.78`. Output via `hslToHex`. (Single-hue lightness ramp avoids hue-interpolation artifacts and keeps "color = cluster".)
 - `hexToHsl` / `hslToHex` are **extracted** from `color.ts` into a small internal `src/hsl.ts`, shared by `color.ts` and `colormap.ts`. They are **not** added to the `index.ts` barrel (not public API). Because two modules now depend on them, their contract is pinned by unit tests (§11): hue taken mod 360, saturation and lightness **clamped** to `[0,1]` (never throws on out-of-range numeric input), deterministic lowercase `#rrggbb` output, `hexToHsl ∘ hslToHex` round-trip within tolerance, and malformed hex input to `hexToHsl` → `ValidationError` (fail-early).
@@ -124,7 +150,7 @@ These are fixed constants in `families.ts`; the §11 golden tests depend on them
 
 ## 9. Rendering & integration
 
-- **`Mindful.sprite(id, scheme?, size = 24)`** reroutes to the pipeline: load thought → `visualIdentityOf` (existing) → `seed` → `clusterId` → `family.generate` → `colormap` → `Sprite`. `size` must be a positive **even** integer (the SP4 encoder requires even height); fail-early `ValidationError` otherwise. Default `24` → 24 wide × 12 tall in the terminal.
+- **`Mindful.sprite(id, scheme?, size = 24)`** reroutes to the pipeline: load thought → `visualIdentityOf` (existing) → `seed` → `clusterId` → `family.generate` (raw) → `normalizeField` → `colormap` → `Sprite`. `size` must be a positive **even** integer (the SP4 encoder requires even height); fail-early `ValidationError` otherwise. Default `24` → 24 wide × 12 tall in the terminal.
 - **CLI `add`/`show`** keep calling `Mindful.sprite(id, scheme)` (default size); no call-site changes. Exposing `size` as a CLI flag is deferred.
 - **`spriteToAnsi`** consumes the `Sprite` unchanged.
 
@@ -132,7 +158,7 @@ These are fixed constants in `families.ts`; the §11 golden tests depend on them
 
 - **Determinism:** the entire pipeline is a pure function of the uid (via the stored `seed`) + the chosen `size` + the active scheme. No `Date`, no `Math.random` (the inline PRNG is uid-seeded). Same inputs → byte-identical ANSI.
 - **Purity / deps:** no new runtime dependencies; no reading of external files; no `~/d/natural-systems` access at runtime. Only `ValidationError` (and existing types) from `@nodes/kernel`.
-- **Validation (fail-early):** invalid `size` (non-even / non-positive); any `Field` value outside `[0,1]` or `NaN`; malformed colormap output (`colormap` must return a valid `#rrggbb`); wrong `Field` dimensions — all `ValidationError`. `spriteToAnsi`'s existing strict validation remains the final gate.
+- **Validation (fail-early):** invalid `size` (non-even / non-positive); a caller-supplied scheme that is empty or has a non-`#rrggbb` color (rejected at the colormap boundary, §8, before indexing/conversion); any `Field` value outside `[0,1]` or `NaN`; malformed colormap output (`colormap` must return a valid `#rrggbb`); wrong `Field` dimensions — all `ValidationError`. `spriteToAnsi`'s existing strict validation remains the final gate.
 
 ## 11. Testing strategy
 
@@ -144,7 +170,7 @@ These are fixed constants in `families.ts`; the §11 golden tests depend on them
   - `gray-scott`: from a seeded perturbation the field develops non-trivial structure (variance grows; not uniform).
   - `vogel-phyllotaxis`: consecutive seeds differ by the golden angle; radius ∝ `√i`.
   - `lorenz-attractor`: trajectory stays bounded; projected density is bimodal (two lobes).
-- **Pipeline / units:** `mapSeed` covers its range and is stable; PRNG is deterministic; `Field` normalized to `[0,1]` with correct dims; the constant-field rule yields a flat `0.5` (no `NaN`); `colormap` returns valid lowercase `#rrggbb` and is monotonic in lightness; `size` validation rejects odd/non-positive.
+- **Pipeline / units:** `mapSeed` reads its pinned bytes (§7.2), covers its range, and is stable; `clusterId`/PRNG/param byte regions are disjoint; PRNG is deterministic; `normalizeField` produces `[0,1]` with correct dims for each mode; the constant-field rule yields a flat `0.5` (no `NaN`); `colormap` returns valid lowercase `#rrggbb`, is monotonic in lightness, and rejects an empty or non-`#rrggbb` scheme with `ValidationError`; `size` validation rejects odd/non-positive.
 - **HSL contract (`hsl.ts`):** hue mod 360, saturation/lightness clamped to `[0,1]`, lowercase `#rrggbb` output, `hexToHsl ∘ hslToHex` round-trip within tolerance, malformed hex → `ValidationError`.
 - **Integration:** `Mindful.sprite(id)` returns a valid `Sprite` (24×24) and `spriteToAnsi` succeeds for every family.
 - **Gate:** `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build`.
@@ -170,6 +196,9 @@ The deliberate split — **generators produce a renderer-neutral `Field` (and, w
 13. **Renderer-agnostic generators** — `Field` is the common currency; ANSI now, web/three.js deferred (§12); no WebGL dep added.
 14. **Generators may carry a time axis** but SP8 renders a single deterministic frame; animation playback deferred.
 15. **Empirical frequency weighting deferred** — cluster assignment is uniform (hash bucket) until the arXiv catalog matures.
+16. **Generators emit raw `number[][]`; `field.ts` owns `normalizeField`** — one normalization owner; each family declares a `normalize` mode (§7, §7.1).
+17. **Seed byte layout pinned (§7.2)** — disjoint cluster/PRNG/parameter regions so the avatar is implementation-independent.
+18. **Scheme validated at the colormap boundary** — empty or non-`#rrggbb` caller schemes → `ValidationError` before indexing/conversion (guards the public `Mindful.sprite` boundary).
 
 ## 14. Deferred / future SPs
 
