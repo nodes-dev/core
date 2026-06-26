@@ -78,6 +78,64 @@ describe("Corpus — CRUD", () => {
     c.delete("topic:a");
     expect(() => c.get("topic:a")).toThrow(RefError);
   });
+
+  it("lists live ids by kind from the structural index", () => {
+    const c = new Corpus(root);
+    c.add(makeNode({ id: "thought:b", kind: "thought", title: "B" }));
+    c.add(makeNode({ id: "mindmap:z", kind: "mindmap", title: "Z" }));
+    c.add(makeNode({ id: "mindmap:a", kind: "mindmap", title: "A" }));
+    c.add(makeNode({ id: "journal:j", kind: "journal", title: "J" }));
+
+    expect(c.idsByKind("mindmap")).toEqual(["mindmap:a", "mindmap:z"]);
+    expect(c.idsByKind("thought")).toEqual(["thought:b"]);
+    expect(c.idsByKind("missing")).toEqual([]);
+  });
+
+  it("loads only nodes matching the requested kind", () => {
+    const c = new Corpus(root);
+    c.add(makeNode({ id: "thought:a", kind: "thought", title: "Thought" }));
+    c.add(makeNode({ id: "mindmap:m", kind: "mindmap", title: "Map" }));
+
+    expect(c.allByKind("mindmap").map((node) => [node.id, node.title])).toEqual([["mindmap:m", "Map"]]);
+    expect(c.allByKind("thought").map((node) => [node.id, node.title])).toEqual([["thought:a", "Thought"]]);
+  });
+
+  it("idsByKind does not call Store.allNodes", () => {
+    const c = new Corpus(root);
+    c.add(makeNode({ id: "mindmap:m", kind: "mindmap", title: "Map" }));
+    c.store.allNodes = () => {
+      throw new Error("Store.allNodes should not be called by idsByKind");
+    };
+
+    expect(c.idsByKind("mindmap")).toEqual(["mindmap:m"]);
+  });
+
+  it("allByKind reads only matching node ids", () => {
+    const c = new Corpus(root);
+    c.add(makeNode({ id: "thought:a", kind: "thought", title: "Thought" }));
+    c.add(makeNode({ id: "mindmap:m", kind: "mindmap", title: "Map" }));
+    const readFile = c.store.readFile.bind(c.store);
+    const reads: string[] = [];
+    c.store.readFile = (id: string) => {
+      reads.push(id);
+      return readFile(id);
+    };
+
+    expect(c.allByKind("mindmap").map((node) => node.id)).toEqual(["mindmap:m"]);
+    expect(reads).toEqual(["mindmap:m"]);
+  });
+
+  it("updates by-kind enumeration after delete and rename", () => {
+    const c = new Corpus(root);
+    c.add(makeNode({ id: "mindmap:old", kind: "mindmap", title: "Old" }));
+    c.add(makeNode({ id: "thought:a", kind: "thought", title: "A" }));
+
+    c.rename("mindmap:old", "mindmap:new");
+    expect(c.idsByKind("mindmap")).toEqual(["mindmap:new"]);
+
+    c.delete("mindmap:new");
+    expect(c.idsByKind("mindmap")).toEqual([]);
+  });
 });
 
 describe("Corpus — graph queries", () => {

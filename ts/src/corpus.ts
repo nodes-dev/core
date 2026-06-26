@@ -216,6 +216,18 @@ export class Corpus {
     return this.store.allNodes();
   }
 
+  idsByKind(kind: string): string[] {
+    const ids: string[] = [];
+    for (const entry of this.index.byUid.values()) {
+      if (entry.kind === kind) ids.push(entry.id);
+    }
+    return ids.sort();
+  }
+
+  allByKind(kind: string): Node[] {
+    return this.idsByKind(kind).map((id) => this.store.readFile(id));
+  }
+
   outbound(ref: string): ResolvedEdge[] {
     return this.index.outboundEdges(this.requireUid(ref));
   }
