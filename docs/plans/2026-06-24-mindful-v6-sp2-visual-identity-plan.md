@@ -8,20 +8,24 @@
 
 **Tech Stack:** TypeScript (Node ≥20, ESM, `.js` import extensions), zod, biome (line width 120), vitest, `node:crypto` (SHA-256). Consumes `@nodes/kernel` over a `file:` dependency.
 
-**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp2-visual-identity-design.md` (committed `cd87acd`).
+**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp2-visual-identity-design.md`.
+
+## Current State Note
+
+This plan has since been implemented. The current `~/d/mindful/v6` package includes later SP work on top of this SP2 baseline: `captured` is now a required `thought` facet, `Mindful.capture` requires `at`, aliases are optional, and palette/sprite/CLI/catalog/semantic/import features exist. The task snippets below preserve the historical SP2 sequence where `visualIdentity` was the only new required `thought` facet and `capture` did not yet require `at`. When auditing or modifying current code, include `CAPTURED` in thought fixtures and use `capture({ at, ... })`.
 
 ## Global Constraints
 
 - **No kernel changes.** All work is in `~/d/mindful/v6`. Dependency stays one-way (`mindful → @nodes/kernel`); never edit `~/d/nodes/ts`.
 - **All git/npm/tooling via the `rtk` wrapper**, run from `~/d/mindful/v6`. Gate = `rtk npm test && rtk npm run typecheck && rtk npm run check`.
-- **TOOLING NOTE:** `grep`/`rg` give corrupted results in this environment — use file reads, not grep, to inspect code.
+- **Tooling:** use `rtk rg` for searches and read target files directly when validating exact snippets.
 - **Identity is intrinsic and immutable:** a pure deterministic function of the thought's persistent `uid`. `edit` must never change it.
 - **Stored facet is the source of truth:** validation checks structure only; never recompute-and-compare against the derivation.
 - **Color-free identity:** the facet holds `{ seed, slots }`; `slots[i].index` is a raw `0–255` selector, not a scheme position. `resolve` reduces it modulo scheme length.
 - **Fail early; shape errors are `FacetError`:** all structural constraints live in the zod schema, surfaced via a `load`-style accessor like `membershipOf`. No `InvariantError` path in SP2.
 - **`resolve` fails fast** (a thrown `Error`) on an empty scheme or a selected color that is not a valid `#rrggbb` string — no fall-through to undefined HSL behavior.
 - **Atomic capture preserved:** `capture` keeps SP1's single-write, resolve-tags-first pattern; the identity is attached before the one `corpus.add`.
-- **Greenfield, no migration:** the mindful store has no persisted data (only temp-dir tests).
+- **Historical SP2 context:** greenfield, no migration; the mindful store had no persisted data beyond temp-dir tests at the time. Current package state may include persisted data and later required facets.
 - **biome will reformat** transcribed code (tabs, import sorting) on `--fix`; that is expected and self-corrects. Production HSL helpers (`hexToHsl`/`hslToHex`) stay module-private (not exported, not imported by tests).
 
 ---
@@ -66,6 +70,8 @@ cd ~/d/mindful/v6 && rtk node -e "console.log(require.resolve('zod'))"
 Expected: prints a path under `~/d/mindful/v6/node_modules/zod` (or a hoisted location the package controls), exit 0.
 
 - [ ] **Step 2: Write the failing test `tests/identity.test.ts`**
+
+Current-code note: later SP work made `captured` required on `thought`, so current `identity.test.ts` fixtures include `[CAPTURED]`. Preserve that if editing the implemented package.
 
 ```ts
 import { createHash } from "node:crypto";
@@ -507,6 +513,8 @@ rtk git commit -m "feat: Colorscheme + default chiptune-16 scheme + pure resolve
 
 - [ ] **Step 1: Write the failing test `tests/identity-integration.test.ts`**
 
+Current-code note: these are SP2-era tests. The current `Mindful.capture` API requires an `at` timestamp and attaches `CAPTURED` as well as `VISUAL_IDENTITY`; current integration tests should keep asserting both facets survive validation and reload.
+
 ```ts
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -582,6 +590,8 @@ Expected: FAIL — `m.palette` is not a function (and capture does not yet attac
 
 - [ ] **Step 3: Wire the facet onto `thoughtSpec` in `src/kinds.ts`**
 
+Historical SP2 snippet: at this point `visualIdentity` was the only required `thought` facet. In current code, do not remove later required facets such as `CAPTURED` or optional facets such as `ALIAS`.
+
 Replace the entire contents of `~/d/mindful/v6/src/kinds.ts` with:
 
 ```ts
@@ -604,6 +614,8 @@ export const journalSpec: KindSpec = { name: JOURNAL, shape: "list" };
 ```
 
 - [ ] **Step 4: Attach the identity in `capture` and add `palette` in `src/api.ts`**
+
+Historical SP2 snippet: the current `capture` signature is broader than this and requires `at`; keep the later captured-facet write path intact when changing current code.
 
 In `~/d/mindful/v6/src/api.ts`, add to the imports from local modules (after the existing `./kinds.js` / `./profile.js` imports):
 
@@ -669,3 +681,5 @@ After all three tasks, from `~/d/mindful/v6`:
   - Identity is color-free; `resolve` is scheme-size independent (`index % length`) and re-themes under any scheme; it fails fast on an empty scheme or a malformed selected color.
   - `thought` now requires exactly the `visualIdentity` facet; a thought built without it fails validation.
   - No kernel changes were made (`~/d/nodes/ts` untouched); dependency stays one-way.
+
+Current-code note: later SPs expanded the `thought` facet contract. In the implemented package, "exactly the `visualIdentity` facet" should be read as the SP2 baseline, not as a current-state instruction to remove `captured` or `alias` support.
