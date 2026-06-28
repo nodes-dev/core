@@ -8,12 +8,18 @@
 
 **Tech Stack:** TypeScript (ESM, `.js` import specifiers), vitest, the `yaml` package (already a direct dependency), `@nodes/kernel` (consumed as built JS — **no kernel changes**), biome.
 
+## Current State Note
+
+This plan has since been implemented and is still mostly accurate for `schemes.ts`, `config.ts`, and the `scheme list/set/show` command. Later CLI work expanded the surrounding architecture: current `runCli` is `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`, catalog-backed commands avoid constructing `Mindful` when possible, `add` receives `now` for the required `captured` facet, and the CLI now includes editor, journal, index, mindmap, semantic search/similar, import, and catalog refresh behavior.
+
+Treat the snippets below as the SP6 transition steps from the earlier SP5 CLI. When auditing or modifying current code, preserve the current root/env/now/factory/editor signature, catalog-backed show/list/search paths, `CAPTURED` timestamp behavior, and later command set.
+
 ## Global Constraints
 
 - **No kernel changes.** All work is in `~/d/mindful/v6`. `@nodes/kernel` is consumed as built JS.
 - **Gate (run from `~/d/mindful/v6`):** `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build` — all four must pass at the end of every task.
 - **All tooling via `rtk`:** `rtk npm …`, `rtk node …`, `rtk npx …`. Never bare `npm`/`node`/`git` for the build/test loop.
-- **grep/rg give corrupted output under rtk** — read files with the editor, not shell grep.
+- **Tooling:** use `rtk rg` for searches and read target files directly when validating exact snippets.
 - **biome:** tabs, line width 120, organizes/sorts imports, flags duplicate imports from the same module. `check` is read-only; fix diffs with `rtk npx @biomejs/biome check --write <files>`.
 - **Fail early / no silent fallback.** Unknown scheme names and ill-shaped config throw; reads never invent a default value silently except the documented "nothing set → built-in default" precedence.
 - **Explicit > defensive; composition > inheritance.** No "legacy"/"compatibility" layers, no "Unified" prefixes.
@@ -27,10 +33,12 @@
 
 - **Create `src/schemes.ts`** — catalog: the 5 new `Colorscheme` palettes + `chiptune-16` (by reference), a name→scheme registry, `DEFAULT_SCHEME_NAME`, `schemeNames()`, `getScheme(name)`.
 - **Create `src/config.ts`** — `MindfulConfig`, `ConfigError`, `readConfig`, `writeConfig`, `resolveActiveScheme`.
-- **Modify `src/cli.ts`** — new `runCli` signature `(argv, mindful, root, env, out, err)`; thread active scheme into `add`/`show`; add the `scheme` command + `SCHEME_USAGE`; `CliUsageError` gains an optional per-error usage string; catch `ConfigError` → exit 1.
+- **Modify `src/cli.ts`** — historical SP6 signature `(argv, mindful, root, env, out, err)`; thread active scheme into `add`/`show`; add the `scheme` command + `SCHEME_USAGE`; `CliUsageError` gains an optional per-error usage string; catch `ConfigError` → exit 1.
 - **Modify `src/bin.ts`** — pass `root` and `process.env` through.
 - **Modify `src/index.ts`** — barrel-export the new public symbols.
 - **Create `tests/schemes.test.ts`**, **`tests/config.test.ts`**; **modify `tests/cli.test.ts`** (migrate both `run` helpers; add scheme-command, render-threading, malformed-config tests).
+
+Current-code note: the file set still exists, but `src/cli.ts`, `src/bin.ts`, and `tests/cli.test.ts` now include later catalog, semantic, journal, mindmap, editor, and import-adjacent behavior. Do not collapse them back to the SP6-only shape.
 
 ## Task Dependency Order
 
@@ -53,6 +61,8 @@ Task 1 (schemes) → Task 2 (config, uses schemes) → Task 3 (cli signature + r
   - `getScheme(name: string): Colorscheme` — returns a **defensive copy** `{ name, colors: [...] }`; throws a plain `Error` on unknown name.
 
 - [ ] **Step 1: Write the failing test**
+
+Current-code note: the current scheme catalog still uses this six-palette order and defensive-copy contract.
 
 Create `tests/schemes.test.ts`:
 
@@ -255,6 +265,8 @@ rtk git commit -m "feat(scheme): built-in colorscheme catalog (6 palettes)"
   - `resolveActiveScheme(root: string, env: NodeJS.ProcessEnv): { name: string; scheme: Colorscheme; source: "env" | "config" | "default" }`
 
 - [ ] **Step 1: Write the failing test**
+
+Current-code note: the current config module still uses this strict `config.yaml` schema and `MINDFUL_SCHEME > config.yaml > default` precedence.
 
 Create `tests/config.test.ts`:
 
@@ -488,9 +500,13 @@ rtk git commit -m "feat(config): config.yaml read/write + active-scheme resoluti
 - Consumes: `resolveActiveScheme`, `ConfigError` from `src/config.ts`.
 - Produces: new exported signature `runCli(argv: string[], mindful: Mindful, root: string, env: NodeJS.ProcessEnv, out: Sink, err: Sink): number`. `add`/`show` now render with the resolved active scheme. (The `scheme` command arrives in Task 4.)
 
+Current-code note: this is the historical SP6 signature. The implemented signature has since expanded to `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`.
+
 > **Note:** this task changes `runCli`'s arity, so **`bin.ts` and every `runCli` call-site in `tests/cli.test.ts` must be updated in this same task** or the build breaks. There are two `run` helpers in `tests/cli.test.ts` (one per `describe` block) — both call `runCli(argv, m, out, err)` today.
 
 - [ ] **Step 1: Migrate existing call-sites to the new signature (keep tests green-able)**
+
+Historical SP6 snippet: current tests call `runCli(argv, root, env, now, out, err, () => mindful, runEditor?)`, and direct `thought` fixtures include `CAPTURED`. The historical render-diff probe below must include `CAPTURED` if recreated against current code.
 
 In `tests/cli.test.ts`:
 
@@ -585,6 +601,8 @@ Expected: FAIL — `runCli` is called with 6 args but currently takes 4 (type er
 
 - [ ] **Step 4: Update `runCli` and the rendering commands in `src/cli.ts`**
 
+Historical SP6 snippet: current `cmdAdd` already receives `now`, calls `Mindful.capture({ at: now, ... })`, refreshes the catalog, and resolves the active scheme before rendering. Current `cmdShow` renders from catalog rows via `spriteForIdentity(row.visualIdentity, scheme)` rather than loading a node through `Mindful`.
+
 1. Add to the imports (keep them sorted; biome will enforce order):
    ```ts
    import { ConfigError, resolveActiveScheme } from "./config.js";
@@ -666,6 +684,8 @@ Expected: FAIL — `runCli` is called with 6 args but currently takes 4 (type er
 
 - [ ] **Step 5: Update `src/bin.ts`**
 
+Historical SP6 snippet: current `bin.ts` passes `localIso(new Date())`, a lazy `Mindful` factory, and an editor runner into `runCli`; keep those later seams intact.
+
 Pass the already-computed `root` and `process.env` into `runCli`:
 
 ```ts
@@ -722,6 +742,8 @@ rtk git commit -m "feat(cli): thread active scheme into add/show; runCli takes r
 - Produces: a top-level `scheme` command dispatching `list`/`set`/`show`; `CliUsageError` carries an optional per-error usage string so scheme errors print `SCHEME_USAGE`.
 
 - [ ] **Step 1: Write the failing tests**
+
+Current-code note: the `scheme` command behavior here remains current, but the surrounding test harness now uses the expanded `runCli` signature and shares fixtures with later CLI suites.
 
 Add the `node:fs`/config imports needed by the new tests to the top of `tests/cli.test.ts` (merge into existing import lines; biome will sort):
 ```ts
@@ -1004,3 +1026,5 @@ rtk git commit -m "feat(cli): scheme list/set/show command"
 **2. Placeholder scan:** No "TBD"/"add error handling"/"similar to" placeholders; every code and test step carries complete code; all hex values are literal.
 
 **3. Type consistency:** `runCli(argv, mindful, root, env, out, err)` is used identically in `bin.ts`, both migrated `run` helpers, and both new `runEnv`/`run` helpers. `resolveActiveScheme` returns `{ name, scheme, source }` consistently in Task 2 (definition), Task 3 (`{ scheme }` destructure), and Task 4 (`{ name, source }` and `.name`). `getScheme`/`schemeNames`/`DEFAULT_SCHEME_NAME`, `ConfigError`/`writeConfig`/`readConfig`/`MindfulConfig` names match across definition, barrel, and call-sites. Source labels (`env`/`config`/`default`) map to `MINDFUL_SCHEME`/`config.yaml`/`default` in exactly one place (`cmdSchemeShow`).
+
+Current-code note: the implemented `runCli` contract has since expanded to `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`, with catalog-backed helpers and additional domain errors/commands layered on top of this SP6 baseline.
