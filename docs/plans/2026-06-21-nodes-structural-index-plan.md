@@ -8,14 +8,28 @@
 
 **Tech Stack:** Python ≥3.11, Pydantic v2, PyYAML, `uv` (runner), pytest, ruff (line-length 120), pyright (basic), `src/` layout. Index/Corpus add **no** new third-party dependencies.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Plan-2 rollout for the Python structural index and the `Corpus` coordinator. The main design contract is still current: `Store` is file mechanics only, `Index` is pure in-memory structural data, and `Corpus` is the primary API for CRUD, resolution, graph queries, and rename.
+
+The repo and kernel have grown since this checklist was written:
+
+- Python now lives under `~/d/nodes/python/`. Historical paths like `src/nodes/kernel/...` and `tests/...` mean `python/src/nodes/kernel/...` and `python/tests/...` in the current checkout.
+- The current `Corpus` also builds and maintains `SearchIndex`, an optional `VectorIndex`, a live manifest, and disposable snapshot persistence. `Index` now exposes `to_dict()` / validating `from_dict()` for snapshots, but still does no file I/O.
+- `Store.all_nodes()` now scans through `iter_corpus_files()` so corpus scans share the snapshot file-walk rules, including ignoring `.nodes-index/`.
+- The `docs/format.md` update in Task 6 has been superseded by later sections for shapes, knowledge vocab, TypeScript parity, full-text search, similarity, and per-language snapshot persistence. Do not replace current `docs/format.md` with the historical snippet below.
+- Current shell commands should use the repository's `rtk` wrapper. From `~/d/nodes/python`, run Python gates with `rtk uv run --frozen pytest`, `rtk uv run --frozen ruff check .`, and `rtk uv run --frozen pyright src`.
+
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `index.py`, `store.py`, or `docs/format.md`.
+
 **Spec:** `docs/specs/2026-06-21-nodes-structural-index-design.md` (approved). Read it for rationale; this plan is self-contained for implementation.
 
 ## Global Constraints
 
 - Every module starts with `from __future__ import annotations`.
 - Python ≥3.11; Pydantic v2; PyYAML; no new third-party dependencies in this plan.
-- Run everything through `uv`: `uv run pytest`, `uv run ruff check .`, `uv run pyright src`.
-- ruff line-length is 120; code must pass `ruff check .` and `pyright src` clean.
+- Historical commands below use raw `uv`/`git`; current shell usage should prefix commands with `rtk`, and Python commands should target `python/`.
+- ruff line-length is 120; code must pass ruff and pyright clean.
 - The index lives in `nodes.kernel` (it is domain-free). No `nodes.vocab` / `nodes.domains` code in this plan.
 - **No compatibility/legacy shim.** When logic moves out of `Store`, delete it from `Store`; do not leave deprecated wrappers. This is a greenfield, local-only repo with no external consumers.
 - **Public graph queries are relations-only.** `outbound`/`inbound`/`dangling`/`neighbors` expose `Relation`-primitive edges only. Membership members/edges are tracked internally for rename completeness but are NOT exposed as public graph edges.
@@ -27,6 +41,8 @@
 ---
 
 ## File Structure
+
+Historical path note: this checklist predates the repo split. In the current checkout, prefix Python implementation and test paths with `python/`.
 
 - `src/nodes/kernel/store.py` — **modified** (slimmed to file mechanics).
 - `src/nodes/kernel/index.py` — **created** (`Index` + value types).
@@ -42,6 +58,8 @@ Existing modules consumed as-is: `node.py` (`Node`), `relations.py` (`Relation`,
 ---
 
 ## Task 1: Slim `Store` to file mechanics
+
+Current-code note: the slim `Store` shape from this task is implemented, with one later persistence-driven change: `Store.all_nodes()` uses `iter_corpus_files()` instead of a direct `root.rglob("*.md")` so it follows the same corpus-file rules as snapshot reconciliation.
 
 **Files:**
 - Modify: `src/nodes/kernel/store.py` (replace entire file)
@@ -651,6 +669,8 @@ git commit -m "feat(index): relations-only graph queries — outbound, inbound, 
 
 ## Task 4: `Corpus` coordinator — CRUD, resolution, graph delegation
 
+Current-code note: this task describes the original `Corpus(root)` coordinator. Current `Corpus(root, registry=None, embedder=None)` still owns the structural index, and also owns full-text search, optional similarity, manifest reconciliation, and `flush_index()` snapshot persistence.
+
 **Files:**
 - Create: `src/nodes/kernel/corpus.py`
 - Create: `tests/test_corpus.py`
@@ -1079,6 +1099,8 @@ git commit -m "feat(corpus): O(degree) rename — targeted referrer rewrite via 
 ---
 
 ## Task 6: Rebuild-equivalence property test + docs update
+
+Current-code note: the structural rebuild-equivalence property is implemented, and later persistence tests extend the same idea across snapshot load/reconcile. The `docs/format.md` replacement below is historical; current `docs/format.md` already includes later Plan-3+ sections and snapshot persistence language.
 
 **Files:**
 - Create: `tests/test_index_rebuild_equivalence.py`
