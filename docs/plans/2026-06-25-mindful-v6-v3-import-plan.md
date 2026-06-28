@@ -8,7 +8,21 @@
 
 **Tech Stack:** TypeScript ESM (`.js` import specifiers), zod, `@nodes/kernel`, yaml/frontmatter storage via `Corpus`, Node built-ins (`node:fs`, `node:util`, `node:path`), vitest, biome. Tooling through `rtk`.
 
-**Spec:** `~/d/nodes/docs/specs/2026-06-25-mindful-v6-v3-import-design.md` (committed through `2d49296`).
+**Spec:** `~/d/nodes/docs/specs/2026-06-25-mindful-v6-v3-import-design.md`.
+
+## Current State Note
+
+This plan has since been implemented and is still mostly accurate for `alias.ts`, `resolve.ts`, alias-aware `Mindful.capture`/`tag`, `import-v3.ts`, `bin-import-v3.ts`, and the `mindful-import-v3` package bin.
+
+Later work expanded the surrounding system. Current CLI resolution is catalog-backed (`ensureCatalog` / `resolveCatalogRef`) instead of scanning `Mindful.allThoughts()` for most commands, `runCli` now has the expanded `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)` signature, and the package exports catalog and semantic-index APIs as well as the importer surface. Treat the snippets below as the original import rollout, not as replacement code for current `cli.ts` or `index.ts`.
+
+Current importer behavior is stricter and broader in a few places:
+
+- Alias syntax is Unicode-aware: lowercase Unicode letters/numbers separated by single hyphens. Legacy import normalization preserves non-English aliases.
+- The resolver tracks `ambiguousAliases` as well as `ambiguousTitles`; alias ambiguity fails before title fallback.
+- Present non-string `title`, `body`, `alias`, `tag`, edge `relation`, and edge `weight` values fail before any write.
+- Unresolved free-form `tags[]` labels are counted as `tag.unresolved` and skipped instead of failing the whole import.
+- Non-dry-run import refreshes the kernel snapshot and thought catalog after writing. If that refresh fails, the importer reports partial success and tells the user to run `mindful index rebuild`. It does not refresh the semantic index.
 
 ---
 
@@ -17,14 +31,14 @@
 - Work in `~/d/mindful/v6`; no kernel changes.
 - Use `rtk` wrappers for commands.
 - Preserve v3 source IDs as `thought:<normalized-id>` and `uid: <normalized-id>`, where normalization is `strip hyphens -> lowercase -> assert /^[0-9a-f]{32}$/`.
-- Alias facet is optional. When present, shape is strict `{ name: string }`, and name must match `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+- Alias facet is optional. When present, shape is strict `{ name: string }`. Historical plan syntax was ASCII (`^[a-z0-9]+(?:-[a-z0-9]+)*$`); current code uses lowercase Unicode letters/numbers separated by single hyphens.
 - Direct v6 API writes are strict: `capture({ alias })` validates the supplied alias and does not normalize it.
-- Legacy import normalizes `alias`/`tag` input before strict validation.
+- Legacy import normalizes `alias`/`tag` input before strict validation. Current normalization preserves Unicode letters/numbers.
 - Alias uniqueness is enforced at Mindful/import boundaries, not in the registry.
 - Resolver order: alias first, then title fallback. Alias wins over same-string titles.
 - Import is validation-atomic: all domain validation completes before any disk write. Do not promise rollback for unexpected I/O/runtime failures during the write loop.
 - Imported explicit edge sources must be in the import batch. Targets may be in the batch or already existing.
-- Tags on imported thoughts become global `relatesTo` relations and always have imported sources.
+- Tags on imported thoughts become global `relatesTo` relations and always have imported sources when they resolve. Current code treats unresolved free-form labels as dropped unsupported data (`tag.unresolved`) rather than dangling refs.
 - Ignore v5 visual/activity/attractor fields; count unsupported fields in the import report.
 - Gate from `~/d/mindful/v6`: `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build`.
 
@@ -53,6 +67,8 @@
 - Test: `tests/alias.test.ts`
 
 **Purpose:** Introduce the optional `alias` facet and make the `thought` kind accept/validate it. Do not change `Mindful.capture` yet.
+
+Current-code note: `AliasSchema` now uses Unicode property escapes (`\p{L}` / `\p{N}`) and a lowercase refinement instead of the original ASCII-only regex. `normalizeAliasInput` strips punctuation but preserves Unicode letters/numbers, and `tests/import-v3.test.ts` covers imported Unicode aliases.
 
 - [ ] **Step 1: Write the failing alias facet tests**
 
@@ -266,6 +282,10 @@ rtk git commit -m "feat: add optional alias facet"
 - Test: `tests/cli.test.ts`
 
 **Purpose:** Add the shared alias-first/title-fallback resolver, then use it in `Mindful` and the CLI. This prevents the alias precedence rule from being duplicated in the API and importer.
+
+Current-code note: `ThoughtResolverIndex` now includes `ambiguousAliases`; `resolveThoughtName` checks ambiguous aliases before alias lookup and before title fallback. `Mindful.requireUniqueAlias` rejects aliases present in either `idx.aliases` or `idx.ambiguousAliases`.
+
+Later catalog work changed the CLI side: current `resolveId(root, ref)` uses `ensureCatalog(root)` and `resolveCatalogRef(catalog, ref)` instead of `buildThoughtResolverIndex(thoughts)` directly. Preserve that catalog-backed path when editing current `cli.ts`.
 
 - [ ] **Step 1: Append API alias behavior tests**
 
@@ -576,6 +596,8 @@ rtk git commit -m "feat: resolve thoughts by alias"
 
 **Purpose:** Add the importer module with validation-atomic thought import, ID preservation, timestamp normalization, alias normalization/uniqueness, unsupported-field counting, and dry-run behavior. Explicit edges/tags are added in Task 4.
 
+Current-code note: current importer tests add stricter validation cases beyond this original task text: invalid date-only timestamps such as `2026-02-30`, non-string `title`/`body`, non-string `alias`/`tag`, and dry-run not writing derived indexes.
+
 - [ ] **Step 1: Write core importer tests**
 
 Create `tests/import-v3.test.ts`:
@@ -765,6 +787,7 @@ import { z } from "zod";
 import { ALIAS, aliasOf, makeAlias, normalizeAliasInput } from "./alias.js";
 import { type Mindful } from "./api.js";
 import { CAPTURED, capturedDate, makeCaptured } from "./captured.js";
+import { rebuildCatalog } from "./catalog.js";
 import { VISUAL_IDENTITY, deriveIdentity } from "./identity.js";
 import { THOUGHT } from "./kinds.js";
 
@@ -866,24 +889,38 @@ function sourceTimestamp(thought: V3Thought, fallbackAt: string | undefined): st
 	return normalizeV3Timestamp(raw);
 }
 
-function textField(value: unknown, fallback: string): string {
-	if (typeof value !== "string") return fallback;
-	const trimmed = value.trim();
-	return trimmed === "" ? fallback : value;
+function titleField(value: unknown, thoughtId: string): string {
+	if (value === undefined) return "Untitled";
+	if (typeof value !== "string") {
+		throw new ValidationError(`thought ${JSON.stringify(thoughtId)} title must be a string`);
+	}
+	return value.trim() === "" ? "Untitled" : value;
 }
 
-function bodyField(value: unknown): string {
-	return typeof value === "string" ? value : "";
+function bodyField(value: unknown, thoughtId: string): string {
+	if (value === undefined) return "";
+	if (typeof value !== "string") {
+		throw new ValidationError(`thought ${JSON.stringify(thoughtId)} body must be a string`);
+	}
+	return value;
 }
 
 function aliasSource(thought: V3Thought): string | undefined {
-	for (const raw of [thought.alias, thought.tag]) {
-		if (typeof raw !== "string") continue;
+	function normalizePresent(field: "alias" | "tag", raw: unknown): string | undefined {
+		if (raw === undefined) return undefined;
+		if (typeof raw !== "string") {
+			throw new ValidationError(`thought ${JSON.stringify(thought.id)} ${field} must be a string`);
+		}
 		const normalized = normalizeAliasInput(raw);
-		if (normalized === "") throw new ValidationError(`thought ${JSON.stringify(thought.id)} has an empty alias after normalization`);
+		if (normalized === "") {
+			throw new ValidationError(`thought ${JSON.stringify(thought.id)} has an empty alias after normalization`);
+		}
 		return normalized;
 	}
-	return undefined;
+
+	const alias = normalizePresent("alias", thought.alias);
+	const tag = normalizePresent("tag", thought.tag);
+	return alias ?? tag;
 }
 
 function increment(map: Record<string, number>, key: string): void {
@@ -958,8 +995,8 @@ function buildCore(payload: unknown, mindful: Mindful, options: ImportV3Options)
 			id: nodeId,
 			uid,
 			kind: THOUGHT,
-			title: textField(thought.title, "Untitled"),
-			body: bodyField(thought.body),
+			title: titleField(thought.title, thought.id),
+			body: bodyField(thought.body, thought.id),
 			metadata: { created: capturedDate(at) },
 		});
 		node.facets[VISUAL_IDENTITY] = deriveIdentity(uid);
@@ -1002,6 +1039,13 @@ export function importV3(payload: unknown, mindful: Mindful, options: ImportV3Op
 	}
 	if (built.report.dryRun) return built.report;
 	for (const node of built.nodes) mindful.corpus.add(node);
+	try {
+		mindful.corpus.flushIndex();
+		rebuildCatalog(mindful.corpus.store.root);
+	} catch (error) {
+		const cause = error instanceof Error ? error.message : String(error);
+		throw new Error(`import wrote thoughts but failed to refresh derived indexes; run mindful index rebuild: ${cause}`);
+	}
 	return built.report;
 }
 ```
@@ -1048,6 +1092,8 @@ rtk git commit -m "feat: import v3 thoughts"
 - Test: `tests/import-v3.test.ts`
 
 **Purpose:** Import explicit v3 edges and thought `tags[]` as global relations, with source restrictions, alias/title resolution, endpoint validation, dedupe, and unsupported edge type reporting.
+
+Current-code note: relation import is stricter than the original snippets. Present edge `weight` must be a finite number and present edge `relation` must be a non-empty string. Unknown edge keys are counted as `edge.<key>` in `droppedUnsupportedFields`, and `edge.type` is counted even though it is accepted in the schema. Unresolved free-form `tags[]` labels are counted as `tag.unresolved` and skipped; ambiguous tags still fail.
 
 - [ ] **Step 1: Append relation importer tests**
 
@@ -1156,11 +1202,14 @@ describe("importV3 relations and tags", () => {
 		expect(mindful.allThoughts()).toEqual([]);
 	});
 
-	it("fails on dangling tag targets before writing", () => {
-		expect(() =>
-			importV3(payload([{ id: UUID_A, title: "A", tags: ["missing"], time_created: "2026-06-24T12:00:00Z" }]), mindful),
-		).toThrow(ValidationError);
-		expect(mindful.allThoughts()).toEqual([]);
+	it("counts unresolved free-form tag labels without creating relations", () => {
+		const report = importV3(
+			payload([{ id: UUID_A, title: "A", tags: ["simplicity"], time_created: "2026-06-24T12:00:00Z" }]),
+			mindful,
+		);
+		expect(report.relations).toBe(0);
+		expect(report.droppedUnsupportedFields).toMatchObject({ "tag.unresolved": 1 });
+		expect(mindful.related(`thought:${ID_A}`)).toEqual([]);
 	});
 
 	it("fails on ambiguous title fallback before writing", () => {
@@ -1218,7 +1267,7 @@ import {
 	type Node,
 	type Relation,
 } from "@nodes/kernel";
-import { buildThoughtResolverIndex, resolveThoughtName } from "./resolve.js";
+import { type ThoughtResolverIndex, buildThoughtResolverIndex } from "./resolve.js";
 ```
 
 Add edge schema near `V3ThoughtSchema`:
@@ -1254,11 +1303,45 @@ Add helper functions:
 type V3Edge = z.infer<typeof V3EdgeSchema>;
 
 function finiteWeight(raw: unknown): number | null {
-	return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+	if (raw === undefined) return null;
+	if (typeof raw !== "number" || !Number.isFinite(raw)) {
+		throw new ValidationError("edge weight must be a finite number");
+	}
+	return raw;
 }
 
 function predicate(raw: unknown): string {
-	return typeof raw === "string" && raw !== "" ? raw : RELATES_TO;
+	if (raw === undefined) return RELATES_TO;
+	if (typeof raw !== "string" || raw === "") {
+		throw new ValidationError("edge relation must be a non-empty string");
+	}
+	return raw;
+}
+
+const SUPPORTED_EDGE_FIELDS = new Set(["source", "target", "relation", "weight", "type"]);
+
+function countDroppedEdgeFields(edge: V3Edge, droppedUnsupportedFields: Record<string, number>): void {
+	for (const key of Object.keys(edge)) {
+		if (!SUPPORTED_EDGE_FIELDS.has(key)) increment(droppedUnsupportedFields, `edge.${key}`);
+	}
+	if (edge.type !== undefined) increment(droppedUnsupportedFields, "edge.type");
+}
+
+function resolveImportTagTarget(tag: string, resolver: ThoughtResolverIndex): string | null {
+	const cleaned = tag.replace(/^#+/, "");
+	if (resolver.ambiguousAliases.has(cleaned) || resolver.ambiguousAliases.has(cleaned.toLowerCase())) {
+		throw new ValidationError(`ambiguous tag ${JSON.stringify(cleaned)}: multiple thoughts share that alias`);
+	}
+	const aliasTarget = resolver.aliases.get(cleaned) ?? resolver.aliases.get(cleaned.toLowerCase());
+	if (aliasTarget !== undefined) return aliasTarget;
+
+	const titleTarget = resolver.titles.get(cleaned) ?? resolver.titles.get(cleaned.toLowerCase());
+	if (titleTarget !== undefined) return titleTarget;
+
+	if (resolver.ambiguousTitles.has(cleaned) || resolver.ambiguousTitles.has(cleaned.toLowerCase())) {
+		throw new ValidationError(`ambiguous tag ${JSON.stringify(cleaned)}: multiple thoughts share that title`);
+	}
+	return null;
 }
 ```
 
@@ -1328,7 +1411,7 @@ In `buildCore`, after `nodes` are built and before returning, add relation const
 	}
 
 	for (const edge of parsed.data.edges) {
-		if (edge.type !== undefined) increment(droppedUnsupportedFields, "edge.type");
+		countDroppedEdgeFields(edge, droppedUnsupportedFields);
 		const source = resolveImportedSource(edge.source, sourceToNodeId);
 		const target = resolveTarget(edge.target, sourceToNodeId, existingIdSet);
 		addRelation({
@@ -1349,14 +1432,15 @@ In `buildCore`, after `nodes` are built and before returning, add relation const
 		if (!Array.isArray(tags)) throw new ValidationError(`thought ${JSON.stringify(thought.id)} tags must be an array`);
 		for (const tag of tags) {
 			if (typeof tag !== "string") throw new ValidationError(`thought ${JSON.stringify(thought.id)} tag must be a string`);
+			const target = resolveImportTagTarget(tag, resolver);
+			if (target === null) {
+				increment(droppedUnsupportedFields, "tag.unresolved");
+				continue;
+			}
 			addRelation({
 				source,
 				predicate: RELATES_TO,
-				target: resolveThoughtName(tag, resolver, {
-					missing: (cleaned) => new ValidationError(`tag ${JSON.stringify(cleaned)} does not resolve to a known node`),
-					ambiguous: (cleaned) =>
-						new ValidationError(`ambiguous tag ${JSON.stringify(cleaned)}: multiple thoughts share that title`),
-				}),
+				target,
 				directed: true,
 				weight: null,
 				attrs: {},
@@ -1416,6 +1500,8 @@ rtk git commit -m "feat: import v3 relations"
 - Test: `tests/import-v3.test.ts`
 
 **Purpose:** Add the thin executable wrapper and package bin entry. Keep subprocess testing out; verify by build and a direct helper test where useful.
+
+Current-code note: `src/bin-import-v3.ts` does not explicitly create the resolved root directory with `mkdirSync`; it resolves the root, constructs `Mindful`, and lets the corpus write path create directories on import.
 
 - [ ] **Step 1: Add a small report formatter export and test**
 
@@ -1508,7 +1594,7 @@ Create `src/bin-import-v3.ts`:
 
 ```ts
 #!/usr/bin/env node
-import { mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { NodesError } from "@nodes/kernel";
 import { Mindful } from "./api.js";
@@ -1542,7 +1628,6 @@ function main(argv: string[], env: NodeJS.ProcessEnv): number {
 
 	try {
 		const root = resolveDataDir(env);
-		mkdirSync(root, { recursive: true });
 		const payload = JSON.parse(readFileSync(parsed.positionals[0], "utf8")) as unknown;
 		const mindful = new Mindful(root);
 		const report = importV3(payload, mindful, {
