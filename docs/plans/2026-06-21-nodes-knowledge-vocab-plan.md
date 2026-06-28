@@ -8,6 +8,19 @@
 
 **Tech Stack:** Python ≥3.11, Pydantic v2, pytest, ruff (line-length 120), pyright (basic), `uv` runner, src/ layout.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Plan-3 rollout for the Python `nodes.vocab` layer and registry-backed `Corpus` validation. The layering contract is still current: `nodes.vocab` imports from `nodes.kernel`, the kernel never imports `nodes.vocab`, and a caller opts into vocabulary enforcement by passing a registered `Registry` to `Corpus`.
+
+The repo and kernel have grown since this checklist was written:
+
+- Python now lives under `~/d/nodes/python/`. Historical paths like `src/nodes/vocab/...`, `src/nodes/kernel/...`, and `tests/...` mean `python/src/nodes/vocab/...`, `python/src/nodes/kernel/...`, and `python/tests/...` in the current checkout.
+- Current `Corpus` is `Corpus(root, registry=None, embedder=None)`. Registry validation still runs before disk writes on `add` and before any rename writes, but the current rename path also prepares and commits full-text search, optional similarity vectors, and the live snapshot manifest.
+- The `docs/format.md` appendix from Task 6 is already integrated and has since been extended with TypeScript parity, full-text search, similarity, and index-persistence sections. Do not append the historical snippet below again.
+- Current shell commands should use the repository's `rtk` wrapper. From `~/d/nodes/python`, run Python gates with `rtk uv run --frozen pytest`, `rtk uv run --frozen ruff check .`, and `rtk uv run --frozen pyright src`.
+
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `vocab/`, tests, or `docs/format.md`.
+
 ## Global Constraints
 
 - Every module starts with `from __future__ import annotations`.
@@ -17,11 +30,13 @@
 - The roster is exactly seven kinds: prose `note`, `idea`, `question`, `topic` (bare); source `paper`, `book`, `dataset` (require the `source` facet + `require_identifiable_source`).
 - `Corpus(registry=None)` preserves today's behavior exactly — the existing 86-test suite stays green.
 - Predicate constants and values: `ABOUT="about"`, `CITES="cites"`, `ANSWERS="answers"`, `ASKS="asks"`, `REFINES="refines"`.
-- Gates per task: `rtk uv run pytest -q`, `rtk uv run ruff check src tests`, `rtk uv run pyright src` all clean before commit.
+- Historical gates below assume the old root Python package. Current gates should run from `python/` with `rtk uv run --frozen ...`.
 
 ---
 
 ### Task 1: `Source` facet
+
+Historical path note: this checklist predates the repo split. In the current checkout, prefix Python implementation and test paths with `python/`.
 
 **Files:**
 - Create: `src/nodes/vocab/__init__.py` (empty package marker for now; populated in Task 6)
@@ -404,6 +419,8 @@ rtk git commit -m "feat(vocab): canonical relation predicates + helper construct
 
 ### Task 4: Wire optional registry into `Corpus.add`
 
+Current-code note: `Corpus.add` still validates a registry-backed node before collision checks and before disk writes. Current code then also prepares similarity vectors when configured, writes the node, updates structural/search/vector indexes, and records the live manifest.
+
 **Files:**
 - Modify: `src/nodes/kernel/corpus.py` (imports; `__init__`; `add`)
 - Test: `tests/test_corpus_registry.py`
@@ -537,6 +554,8 @@ rtk git commit -m "feat(corpus): optional registry validates on add (fail-early,
 ---
 
 ### Task 5: Validate on `rename` (prepare-all → validate-all → commit-all)
+
+Current-code note: the validate-all-before-write contract from this task is still current. Later plans extended the commit phase so renamed nodes and referrers also refresh `SearchIndex`, optional `VectorIndex`, and manifest entries; the historical replacement method below is incomplete for current `corpus.py`.
 
 **Files:**
 - Modify: `src/nodes/kernel/corpus.py` (`rename`)
@@ -702,6 +721,8 @@ rtk git commit -m "feat(corpus): validate-all-before-write rename (no partial re
 ---
 
 ### Task 6: Package exports + docs
+
+Current-code note: package exports are implemented, and the `docs/format.md` section below is already present in current docs with later additions around TypeScript, search, similarity, and snapshot persistence.
 
 **Files:**
 - Modify: `src/nodes/vocab/__init__.py` (populate re-exports)
