@@ -4,26 +4,32 @@
 
 **Goal:** Build the `mindful` one-shot subcommand CLI (`add`/`show`/`list`/`search`/`edit`/`delete`/`tag`) — the first runnable app over the headless `Mindful` API and the first consumer of `spriteToAnsi`.
 
-**Architecture:** A testable core `runCli(argv, mindful, out, err): number` in `src/cli.ts` holds all parsing, dispatch, formatting, and error handling, writing only through injected sinks and returning an exit code. A thin `src/bin.ts` resolves the data dir, constructs `Mindful`, and calls `runCli`. The package gains a real `tsc` build to `dist/` (mirroring `@nodes/kernel`) so `bin` points at emitted JS.
+**Architecture (SP5 baseline):** A testable core `runCli(argv, mindful, out, err): number` in `src/cli.ts` holds all parsing, dispatch, formatting, and error handling, writing only through injected sinks and returning an exit code. A thin `src/bin.ts` resolves the data dir, constructs `Mindful`, and calls `runCli`. The package gains a real `tsc` build to `dist/` (mirroring `@nodes/kernel`) so `bin` points at emitted JS.
 
 **Tech Stack:** TypeScript (Node ≥20, ESM, `.js` import extensions), `node:util` `parseArgs` for argument parsing, vitest, biome. No new runtime or dev dependencies.
+
+## Current State Note
+
+This plan has since been implemented and later CLI work expanded it substantially. The historical SP5 baseline below used `runCli(argv, mindful, out, err): number` and seven commands over a live `Mindful` instance. Current `~/d/mindful/v6` uses `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`, keeps list/show/search paths catalog-backed, passes `now` into `add` so `Mindful.capture` receives `at`, supports editor-driven edits, and includes later commands/features: `scheme`, `journal`, `index`, `mindmap`, `similar`, `search --semantic`, aliases/display refs, config/env scheme resolution, catalog refresh, and semantic index maintenance.
+
+Treat the task snippets below as historical SP5 implementation steps, not as replacement code for the current CLI. When auditing or modifying current code, preserve the root/env/now/factory signature, `CAPTURED` timestamp behavior, catalog-backed reads, partial-refresh error boundary, editor runner seam, and later command set.
 
 ## Global Constraints
 
 - **No kernel changes.** All work is in `~/d/mindful/v6`; dependency stays one-way (`mindful → @nodes/kernel`).
 - **No new dependencies (runtime or dev).** `parseArgs` is built into `node:util`; the build uses the already-present `typescript`. No CLI framework, no TS runner.
 - **All tooling via `rtk`.** `rtk npm test`, `rtk npm run typecheck`, `rtk npm run check`, `rtk npm run build`, `rtk git ...`, `rtk npx @biomejs/biome ...`.
-- **`rg`/`grep` give corrupted output in the rtk env** — use file reads, not shell search.
+- **Tooling:** use `rtk rg` for searches and read target files directly when validating exact snippets.
 - **biome:** tabs, line width 120, organizes/sorts imports (flags duplicate imports from the same module). `check` is read-only; fix diffs with `rtk npx @biomejs/biome check --write <files>`.
 - **Testable core, thin wrapper.** All logic in `runCli`; tests drive it directly against a temp-dir `Mindful` with array sinks — **no subprocess spawning, no dependence on build output in tests**. `bin.ts` is untested wiring.
 - **Exit-code taxonomy.** Usage problems → exit `2`; any `NodesError` (the kernel base class all kernel errors extend, incl. `InvariantError`) plus CLI domain failures → `error: <msg>` to `err`, exit `1`; success → `0`. The catch tests `instanceof NodesError`, not leaf subclasses. Unexpected (non-usage, non-domain) errors are rethrown (fail-early), not masked as exit 1.
 - **Sink contract.** `out`/`err` receive complete, newline-terminated strings (one call per result/error, trailing `\n` included). `spriteToAnsi` stays no-trailing-newline; the CLI appends the `\n` when embedding it. **Commands with no output make no sink call** (no empty `"\n"`).
-- **Scheme boundary.** `show`/`add` render via `defaultColorscheme` only (`Mindful.sprite()` default) — no scheme flag, config, or persistence; identity never mutated.
+- **Historical SP5 scheme boundary.** `show`/`add` render via `defaultColorscheme` only (`Mindful.sprite()` default) — no scheme flag, config, or persistence; identity never mutated. Current code has since added scheme config/env resolution and `scheme` commands.
 - **`--tag` is the only repeatable flag** (`parseArgs` `multiple: true`); `--body`/`--title`/`--limit` are single-valued, and repeating one is a usage error (exit 2), detected by scanning `parseArgs` tokens (`{ tokens: true }`).
 - **Pinned output.** `list` sorted by id ascending; `search` preserves the kernel's order (do **not** re-sort); `show` prints sprite then stable `id:`/`title:`/`body:`/`related:` fields, `body:` verbatim (multiline as-is), `related: []` when empty; `<score>` is raw `String(hit.score)`.
 - **`add --tag` does not auto-create tags** — an unknown tag target fails the command (exit 1) and nothing is persisted (SP1 fail-early; `Mindful.capture` writes atomically).
 
-**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp5-cli-shell-design.md` (committed `7567b90`).
+**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp5-cli-shell-design.md`.
 
 ---
 
@@ -40,6 +46,8 @@
 | `.gitignore` | Add `dist/` | 4 |
 | `src/index.ts` | Export `runCli`, `resolveDataDir` | 4 |
 
+Current-code note: the file set still exists, but `src/cli.ts`, `tests/cli.test.ts`, and `src/bin.ts` now include later catalog, scheme, semantic, journal, mindmap, and editor code. Do not collapse them back to the SP5-only shape.
+
 ---
 
 ## Task 1: `resolveDataDir` + CLI module scaffold
@@ -53,6 +61,8 @@
 - Produces: `export function resolveDataDir(env: NodeJS.ProcessEnv): string` — resolves the corpus root from `MINDFUL_HOME` ?? `$XDG_DATA_HOME/mindful` ?? `$HOME/.local/share/mindful`, treating empty strings as absent, throwing a plain `Error` if none resolvable. Creates the `src/cli.ts` module that Tasks 2–3 extend.
 
 - [ ] **Step 1: Write the failing test**
+
+Current-code note: this pure `resolveDataDir` surface is still current, but the current test suite also asserts plain `Error` prototype behavior.
 
 Create `~/d/mindful/v6/tests/cli.test.ts`:
 
@@ -149,6 +159,8 @@ rtk git commit -m "feat(cli): resolveDataDir — XDG-aware corpus root resolutio
   - Module-private: `CliUsageError`, `CliError`, `parse(rest, options)`, `resolveId(mindful, ref)`, and handlers `cmdList`/`cmdShow`/`cmdDelete`/`cmdTag`. `argv` is `process.argv.slice(2)`. The dispatch `switch` routes `add`/`edit`/`search` to the `default` (usage, exit 2) until Task 3 adds them.
 
 - [ ] **Step 1: Write the failing tests**
+
+Historical SP5 snippet: current tests call `runCli(argv, root, env, now, out, err, () => mindful, runEditor?)` and all direct `Mindful.capture` setup passes `at: CAPTURE_AT`. Current ref resolution also goes through the thought catalog and supports aliases/display refs.
 
 Append to `~/d/mindful/v6/tests/cli.test.ts`. First extend the imports at the top of the file to:
 
@@ -274,6 +286,8 @@ Run: `rtk npx vitest run tests/cli.test.ts`
 Expected: FAIL — `runCli` is not exported from `../src/cli.js`.
 
 - [ ] **Step 3: Implement `runCli`, error model, dispatch, and no-flag commands**
+
+Historical SP5 snippet: the implemented CLI no longer resolves refs from `mindful.allThoughts()` on every command. Current code uses `ensureCatalog(root)`/`resolveCatalogRef`, maps `CatalogError`/`ConfigError`/`SemanticError`/`EditorError` to exit 1, and keeps construction behind `makeMindful`.
 
 Edit `~/d/mindful/v6/src/cli.ts`. Update the top imports to:
 
@@ -430,6 +444,8 @@ rtk git commit -m "feat(cli): runCli dispatch + error model + list/show/delete/t
 
 - [ ] **Step 1: Write the failing tests**
 
+Historical SP5 snippet: current `add` output includes the captured date, current `capture` requires `at`, and current tests include additional editor, alias, catalog, semantic, and partial-refresh cases.
+
 Append this suite to `~/d/mindful/v6/tests/cli.test.ts` (its own `describe` with the same harness):
 
 ```ts
@@ -549,6 +565,8 @@ Run: `rtk npx vitest run tests/cli.test.ts`
 Expected: FAIL — `add`/`edit`/`search` currently hit the `default` case (exit 2), so the success-path assertions fail.
 
 - [ ] **Step 3: Implement `parseFlags` + the three handlers + extend the switch**
+
+Historical SP5 snippet: current `cmdAdd` receives `now`, calls `Mindful.capture({ at: now, ... })`, refreshes the catalog after mutations, and resolves the active scheme before rendering. Current `cmdSearch` also supports `--semantic`, and `cmdEdit` supports `--editor`.
 
 Edit `~/d/mindful/v6/src/cli.ts`. Add `parseFlags` after `parse`:
 
@@ -695,6 +713,8 @@ Create `~/d/mindful/v6/tsconfig.build.json` (mirrors `@nodes/kernel`):
 
 - [ ] **Step 2: Create the thin executable wrapper**
 
+Historical SP5 snippet: current `bin.ts` passes `root`, `process.env`, `localIso(new Date())`, a lazy `Mindful` factory, and an `EditorRunner` that shells out to `VISUAL`/`EDITOR`; it sets `process.exitCode` rather than calling `process.exit`.
+
 Create `~/d/mindful/v6/src/bin.ts` (the shebang MUST be the first line; `tsc` preserves it on emit):
 
 ```ts
@@ -840,3 +860,5 @@ rtk git commit -m "feat(cli): runnable mindful bin + dist build + package metada
 **Placeholder scan:** none — every code/test step carries complete code; the only manual-only step (Task 4 Step 7 smoke test) is explicitly not a committed test.
 
 **Type consistency:** `runCli(argv, mindful, out, err): number`, `Sink = (s: string) => void`, `resolveDataDir(env): string`, `resolveId(mindful, ref): string`, `parse`/`parseFlags` return the `parseArgs` result shape, handlers `cmd*(mindful, rest, out): number` — names and signatures match across Tasks 1–4 and the barrel export in Task 4.
+
+Current-code note: the current type contract is `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`, with root/catalog-based helpers and additional domain errors/commands layered on top of this SP5 baseline.
