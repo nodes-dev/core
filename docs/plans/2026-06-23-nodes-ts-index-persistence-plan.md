@@ -8,6 +8,16 @@
 
 **Tech Stack:** TypeScript (ESM, `.js` import extensions), Node ≥20, vitest, biome (format + lint, line width 120), `tsc --noEmit` typecheck. No new runtime dependencies — `snapshot.ts` uses only Node built-ins (`node:crypto` `createHash`, `node:fs`, `node:path`) plus the existing kernel modules; `zod` (already a dependency) validates deserialized relations.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical TypeScript index-persistence port. Current `ts/src/snapshot.ts` owns the per-language snapshot cache, `Corpus.flushIndex()` is the explicit writer, and `Store.allNodes()` shares the same `iterCorpusFiles()` walker as reconcile/full rebuild.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- The plan intentionally follows the hardened Python implementation, not only the design spec. Current `fromDict()` methods validate per-index section shape and local invariants; `loadSnapshot()` validates top-level and cross-index agreement.
+- Mutations do not auto-flush. If a process mutates files and exits without `flushIndex()`, the next startup reconciles the stale snapshot against file hashes and pays rebuild/reparse cost only for changed files.
+- No-embedder corpus construction ignores any vectors section, while an embedder-configured corpus requires a matching vector namespace or falls back to a full rebuild.
+
 ## Global Constraints
 
 - **Parity source is the implemented Python, not the spec.** Where the Python code is stricter than `docs/specs/2026-06-23-nodes-index-persistence-design.md`, follow the code. The two kernels must stay behaviorally equivalent (the `cross_parity.test.ts` discipline).

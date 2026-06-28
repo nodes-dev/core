@@ -8,6 +8,16 @@
 
 **Tech Stack:** Python ≥3.11, pydantic v2, pyyaml, stdlib `hashlib`/`json`/`os`. Tests: pytest. Lint: ruff (line-length 120). Types: pyright (basic). All commands run through the `rtk` wrapper from `~/d/nodes/python`.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Python index-persistence rollout. Current `python/src/nodes/kernel/snapshot.py` owns snapshot I/O and manifest reconciliation; `Corpus.flush_index()` is the explicit snapshot writer; and `Store.all_nodes()` uses the shared `iter_corpus_files()` walker so `.nodes-index/` is excluded consistently.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Each index `from_dict()` is a validating deserializer for its own section. `load_snapshot()` handles top-level and cross-index agreement, including manifest/index/search/vector uid and id consistency.
+- Mutations do not auto-flush. If a process mutates files and exits without `flush_index()`, the next startup reconciles the stale snapshot against file hashes and pays rebuild/reparse cost only for changed files.
+- No-embedder corpus construction ignores any vectors section, while an embedder-configured corpus requires a matching vector namespace or falls back to a full rebuild.
+
 ## Global Constraints
 
 - The snapshot is a **disposable, private, per-language cache**; files are the single source of truth. Every load reconciles the snapshot against the current files by content hash, so a stale or absent snapshot never affects correctness, only speed.

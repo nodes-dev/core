@@ -8,6 +8,16 @@
 
 **Tech Stack:** Python ≥3.11, stdlib only for the new code (`hashlib`, `json`, `math`, `os`, `re`, `dataclasses`, `typing.Protocol`, `pathlib`) plus existing Pydantic; pytest, ruff (line-length 120), pyright (basic), `uv` runner, src/ layout.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Python similarity-index rollout. Current `python/src/nodes/kernel/similarity.py` owns the embedder seam, raw vector cache, normalized in-memory `VectorIndex`, exact cosine ranking, and the `SimilarHit` result shape. `Corpus(root, registry=None, embedder=None)` still gates similarity APIs on an embedder.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later snapshot persistence added `VectorIndex.to_dict()` / `from_dict()` and snapshot namespace/dimension validation. Current construction may load/reconcile persisted normalized vectors rather than always rebuilding from raw cache entries.
+- The shared `score_key` extraction to `ranking.py` is already complete and used by both search and similarity.
+- The `docs/format.md` update in the parity/docs task has already been applied and later extended with TypeScript similarity and snapshot persistence sections.
+
 ## Global Constraints
 
 - Every module starts with `from __future__ import annotations`.
@@ -1004,6 +1014,8 @@ rtk git commit -m "feat(similarity): cosine query/ranking — query_vector, simi
 ---
 
 ### Task 6: `Corpus` integration + `EmbedderRequiredError`
+
+Current-code note: the embedder gating and prepare/commit ordering remain current. Current `Corpus` also maintains a snapshot manifest and `SearchIndex`, so the mutation snippets here are the similarity-specific additions, not the full present-day method bodies.
 
 **Files:**
 - Modify: `python/src/nodes/kernel/errors.py` (add `EmbedderRequiredError`)

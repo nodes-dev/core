@@ -10,6 +10,16 @@
 
 This is **Plan A-py**, the first of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`). It is followed by **Plan A-ts** (the TypeScript port, using this finished Python as its oracle) and then **Plan B** (the mindful package). Both kernels land before mindful is scaffolded.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Plan A-py rollout for the structural-shape redesign. Current Python and TypeScript kernels both use the split model described here: scope-only `membership.members`, shape-owned form facets (`edges`, `order`, `keys`), shape registration through `ShapeSpec`, and registry-independent structural-ref extraction for rename and snapshot integrity.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later plans added full-text search, similarity, and snapshot persistence. Current `Corpus(root, registry=None, embedder=None)` therefore does more during construction and mutation than the snippets in this plan show.
+- Current structural `Index.to_dict()` / `from_dict()` serializes generic `structural_refs` rather than the old bundled membership snapshot shape, and `from_dict()` is a validating deserializer used by snapshot persistence.
+- The `docs/format.md` update in Task 5 has already been applied and later extended with TypeScript parity, full-text search, similarity, and snapshot persistence sections.
+
 ## Global Constraints
 
 - **Structure contract:** `Structure = shape/kind + membership facet + shape-specific form facet(s)`. `Relation` is the universal **binary** primitive, but `Structure` is NOT defined in terms of it.
@@ -495,6 +505,8 @@ rtk git commit -m "feat(shapes-py): scope-only membership + edges/order/keys for
 
 ### Task 3: Structural index — form-facet ref extraction + generic `structural_refs` persistence
 
+Current-code note: the generic `structural_refs` shape from this task is the current Python snapshot representation for structural refs. Later persistence work added broader snapshot integrity checks around it, so treat the snippets here as the original migration steps, not the full current `Index.from_dict()` contract.
+
 **Files:**
 - Modify: `python/src/nodes/kernel/index.py`
 - Test: `python/tests/test_index.py`, `python/tests/test_index_snapshot.py`, `python/tests/test_index_rebuild_equivalence.py` (fixture migration), `python/tests/test_snapshot_load.py` (cache-malformation migration)
@@ -962,6 +974,8 @@ rtk git commit -m "feat(shapes-py): index extracts structural refs from form fac
 ---
 
 ### Task 4: Corpus rename — rewrite refs across the form facets
+
+Current-code note: the no-registry rewrite contract is still current. Current `Corpus.rename` also maintains `SearchIndex`, optional `VectorIndex`, and the snapshot manifest after the structural rewrite succeeds.
 
 **Files:**
 - Modify: `python/src/nodes/kernel/corpus.py:12,25-46`

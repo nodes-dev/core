@@ -10,6 +10,16 @@
 
 **Reference (read before starting):** the spec is `docs/format.md` §"Knowledge vocab (Plan 3)" (the roster, the `Source` facet, the predicates, the enforcement contract). The oracle this mirrors is the Python source `~/d/nodes/python/src/nodes/vocab/{source,kinds,predicates,__init__}.py` and its tests `~/d/nodes/python/tests/test_vocab_{source,kinds,predicates,exports}.py`. The kernel surface the port consumes lives in `~/d/nodes/ts/src/{errors,node,registry,relations,corpus}.ts`.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical TypeScript knowledge-vocab rollout. The current TS vocab layer lives under `ts/src/vocab/`, remains separately importable from the kernel, and mirrors the Python `nodes.vocab` roster, `Source` facet, predicate constants, and registry-backed validation contract.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later plans added structural shapes, full-text search, similarity, and snapshot persistence to the TypeScript kernel. Current `Corpus(root, registry?, embedder?)` has a larger construction and mutation path than this vocab-only plan needed.
+- The "no kernel code" constraint was correct for this plan's scope. Do not infer from it that the current kernel has not changed since; it now includes search, similarity, ranking, and snapshot modules.
+- The `docs/format.md` and `ts/README.md` edits in Task 5 have already been applied and later extended by subsequent plans.
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
@@ -472,6 +482,8 @@ rtk git commit -m "feat(ts): vocab predicates (constants + relation constructors
 ---
 
 ### Task 4: Vocab barrel + exports test + Corpus integration test
+
+Current-code note: `Corpus(root, registry?)` in this task is the historical surface at the time of the vocab port. Current construction is `Corpus(root, registry?, embedder?)` and may load/reconcile snapshots while still honoring the same registry-validation behavior.
 
 **Files:**
 - Create: `ts/src/vocab/index.ts`

@@ -8,6 +8,16 @@
 
 **Tech Stack:** TypeScript (ESM, `.js` import extensions), Node ≥20, vitest, biome (format + lint, line width 120), `tsc --noEmit` typecheck. No new runtime dependencies — `similarity.ts` uses only Node built-ins (`node:crypto` `createHash`, `node:fs`, `node:path`, `Math`).
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical TypeScript similarity-index port. Current `ts/src/similarity.ts` owns the embedder seam, raw vector cache, normalized in-memory `VectorIndex`, exact cosine ranking, and `SimilarHit`; current `ts/src/ranking.ts` owns the shared `scoreKey`.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later snapshot persistence added `VectorIndex.toDict()` / `fromDict()` and snapshot namespace/dimension validation. Current `Corpus` construction may load/reconcile persisted normalized vectors.
+- The `scoreKey` extraction described in Task 1 is already complete, so older search-plan snippets that import it from `search.ts` are historical.
+- The `docs/format.md` update in Task 7 has already been applied and later extended with snapshot persistence sections.
+
 ## Global Constraints
 
 These bind every task. Values are copied verbatim from the spec (`docs/specs/2026-06-22-nodes-similarity-index-design.md`) and the committed Python implementation (`python/src/nodes/kernel/similarity.py`, `ranking.py`, `corpus.py`).
@@ -978,6 +988,8 @@ rtk git commit -m "feat(ts-similarity): cosine query/ranking — queryVector, si
 ---
 
 ### Task 6: Opt-in `Corpus` integration
+
+Current-code note: the embedder gating and prepare/commit ordering remain current. Current `Corpus` also maintains a snapshot manifest and may reconcile indexes from `snapshot.ts.json`, so the snippets here are the similarity-specific additions, not the full present-day constructor or mutation methods.
 
 Mirror of Python commit `45157cc`. Wire the vector index into `Corpus` with the fail-before-mutation ordering and export the new public surface from the barrel.
 

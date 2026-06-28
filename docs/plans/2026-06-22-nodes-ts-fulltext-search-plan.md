@@ -8,6 +8,16 @@
 
 **Tech Stack:** TypeScript (ESM, `.js` import extensions), Node ≥20, vitest, biome (format + lint, line width 120), `tsc --noEmit` typecheck. No new runtime dependencies — `search.ts` is pure language built-ins (`String.prototype.normalize`, Unicode-property regex, `Math`).
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical TypeScript full-text search port. Current `ts/src/search.ts` still owns canonical tokenization, BM25F scoring, `SearchIndex`, and `SearchHit`, and `Corpus.search(query, limit?)` remains the public query surface.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later similarity work extracted `scoreKey` to `ts/src/ranking.ts`; import it from `../src/ranking.js` or `./ranking.js`, not from `search.ts`.
+- Later snapshot persistence added `SearchIndex.toDict()` / `fromDict()` and changed `Corpus` construction so it may load/reconcile snapshots instead of always building from `Store.allNodes()`.
+- The `docs/format.md` update in Task 5 has already been applied and later extended with similarity and snapshot persistence sections.
+
 ## Global Constraints
 
 These bind every task. Values are copied verbatim from the spec (`docs/specs/2026-06-22-nodes-fulltext-search-design.md`) and the committed Python implementation (`python/src/nodes/kernel/search.py`).
@@ -33,6 +43,8 @@ These bind every task. Values are copied verbatim from the spec (`docs/specs/202
 ---
 
 ### Task 1: Tokenizer + parity helpers + tokenizer oracle
+
+Current-code note: this task originally placed `scoreKey` in `search.ts`. Current code exports `scoreKey` from `ts/src/ranking.ts`; the tokenizer helpers still live in `search.ts`.
 
 **Files:**
 - Create: `ts/src/search.ts`
@@ -597,6 +609,8 @@ rtk git commit -m "feat(ts/search): BM25F scoring + ranked search query API"
 ---
 
 ### Task 4: `Corpus` integration + barrel exports
+
+Current-code note: current `Corpus` construction is no longer just `const nodes = this.store.allNodes(); this.index = Index.build(nodes); this.searchIndex = SearchIndex.build(nodes)`. Snapshot load/reconcile and optional vector-index construction now participate in initialization.
 
 **Files:**
 - Modify: `ts/src/corpus.ts`

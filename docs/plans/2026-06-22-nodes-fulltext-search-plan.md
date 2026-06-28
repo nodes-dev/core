@@ -8,6 +8,16 @@
 
 **Tech Stack:** Python ≥3.11, stdlib only for the new code (`re`, `math`, `unicodedata`, `dataclasses`) plus existing Pydantic; pytest, ruff (line-length 120), pyright (basic), `uv` runner, src/ layout.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Python full-text search rollout. Current `python/src/nodes/kernel/search.py` still owns canonical tokenization, BM25F scoring, `SearchIndex`, and `SearchHit`, and `Corpus.search(query, limit=None)` remains the public query surface.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later similarity work extracted the parity rounding helper to `python/src/nodes/kernel/ranking.py`; import `score_key` from `nodes.kernel.ranking`, not from `nodes.kernel.search`.
+- Later snapshot persistence added `SearchIndex.to_dict()` / `from_dict()` and validating snapshot-load paths. Current construction may load/reconcile a snapshot rather than always building search from a fresh `Store.all_nodes()` scan.
+- The `docs/format.md` update in Task 5 has already been applied and later extended with TypeScript search, similarity, and snapshot persistence sections.
+
 ## Global Constraints
 
 - Every module starts with `from __future__ import annotations`.
@@ -399,6 +409,8 @@ rtk git commit -m "feat(search): SearchIndex build/upsert/remove with rebuild-eq
 
 ### Task 3: BM25F scoring + `search` query API
 
+Current-code note: this task originally introduced `score_key` inside `search.py`. Current code moved that shared ranking key to `nodes.kernel.ranking` so search and similarity do not import each other.
+
 **Files:**
 - Modify: `python/src/nodes/kernel/search.py` (add constants, `score_key`, `SearchHit`, `SearchIndex.search`)
 - Create: `python/tests/test_search_query.py`
@@ -622,6 +634,8 @@ rtk git commit -m "feat(search): BM25F scoring + ranked search query API"
 ---
 
 ### Task 4: Corpus integration
+
+Current-code note: the `SearchIndex` mutation hooks remain current, but `Corpus.__init__` is no longer just `nodes = self.store.all_nodes(); Index.build(nodes); SearchIndex.build(nodes)`. Snapshot load/reconcile and optional vector-index construction now sit in front of or beside that full-rebuild path.
 
 **Files:**
 - Modify: `python/src/nodes/kernel/corpus.py` (`__init__`, `add`, `delete`, `rename`, new `search`)

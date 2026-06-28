@@ -10,6 +10,16 @@
 
 This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is the **oracle** for this port. This TS port has since been implemented on `main`; the red/green expectations below are the historical implementation sequence, not the current suite state. Plan B (the mindful package) follows.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical TypeScript structural-shape redesign port. Current Python and TypeScript kernels both use the split structural model described here: scope-only `membership.members`, shape-owned `edges`/`order`/`keys` form facets, registry-composed shape validation, and registry-independent structural-ref extraction for rename plus snapshot integrity.
+
+There are three current-code details to keep in mind when reading the task snippets below:
+
+- Later plans added and/or persisted full-text search, similarity, and snapshots. Current `Corpus(root, registry?, embedder?)` has more initialization and mutation bookkeeping than the snippets in this shape-focused plan show.
+- Current TS snapshots use the `structuralRefs` container described here, with role strings shared with Python and camelCase keys on disk.
+- `docs/format.md` was already updated by Plan A-py and later extended by TS parity, search, similarity, and persistence plans; Task 5 remains historical verification guidance.
+
 ## The Oracle
 
 The Python kernel on `main` is the source of truth. For each task, the corresponding Python file is the behavioural reference — when this plan says "mirror the oracle," read it:
@@ -993,6 +1003,8 @@ rtk git commit -m "feat(shapes-ts): index extracts structural refs from form fac
 ---
 
 ### Task 4: Corpus rename — rewrite refs across the form facets
+
+Current-code note: the no-registry structural-ref rewrite contract is still current. Current `Corpus.rename` also refreshes search, optional vector state, and snapshot manifest entries after the structural rewrite succeeds.
 
 **Files:**
 - Modify: `ts/src/corpus.ts` (`rewriteRefs`)
