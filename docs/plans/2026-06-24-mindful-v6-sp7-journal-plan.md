@@ -8,7 +8,13 @@
 
 **Tech Stack:** TypeScript (ESM, `.js` import specifiers), zod, `@nodes/kernel` (file: dep, no kernel changes), vitest, biome. Tooling via the `rtk` wrapper.
 
-**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp7-journal-design.md` (committed `79477d6`).
+**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp7-journal-design.md`.
+
+## Current State Note
+
+This plan has since been implemented and is still mostly accurate for `captured.ts`, `journal.ts`, required `captured` facets on `thought`, and the `journal` CLI command. The current implementation is stricter in a few places: `CapturedSchema` also requires seconds, rejects compact offsets, and `localIso` rejects invalid `Date` values with `ValidationError`.
+
+Later CLI work expanded the surrounding architecture. Current `runCli` is `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`, catalog-backed commands avoid constructing `Mindful` when possible, and the CLI now includes editor, scheme, index, mindmap, semantic search/similar, import, and catalog refresh behavior. Treat the snippets below as the SP7 transition steps from the earlier SP6 CLI, not as replacement code for the current CLI.
 
 ## Global Constraints
 
@@ -18,13 +24,13 @@
 - **No raw `ZodError` escapes a boundary.** `makeCaptured` → `ValidationError`; `capturedOf` → `FacetError`; `journalView` bounds → `ValidationError`; CLI date args → `CliUsageError`. Never call a bare `schema.parse` on a value that can reach `runCli`.
 - **`at` is required** on `capture({ title, body?, tags?, at })`; the clock is injected, never read inside `Mindful`.
 - **`metadata.created = capturedDate(at)`** — a derived coarse projection, never the source of truth; **`metadata.updated` untouched**.
-- **`runCli(argv, mindful, root, env, now, out, err)`** — `now` injected between `env` and the sinks.
+- **Historical SP7 `runCli` baseline:** `runCli(argv, mindful, root, env, now, out, err)` — `now` injected between `env` and the sinks. Current code has since expanded this to `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`.
 - **Centralized datetime contract:** `capturedDate`/`capturedTime`/`capturedSortKey` validate through `CapturedSchema` first; CLI/journal never slice a raw datetime string.
 - **`journalView` is pure** (no `Corpus`, no I/O, not a `Mindful` method); the CLI composes `journalView(mindful.allThoughts(), window)`. It filters `kind === THOUGHT` internally, sorts by stored wall clock (tie-break `id`), and omits empty days.
 - **Sink contract (from SP5):** sinks receive complete newline-terminated strings; usage errors → exit 2, `NodesError`/`CliError`/`ConfigError` → exit 1, success → 0.
 - **Clean break (pre-release, single-user):** making `captured` required means pre-existing thoughts and `makeNode` thought fixtures without it now fail validation — fix the fixtures (enumerated in Task 3).
 - **Gate (run from `~/d/mindful/v6`):** `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build`. biome is read-only in `check`; fix formatting with `rtk npx @biomejs/biome check --write <files>`.
-- **Use Read/file tools, not shell `grep`/`rg`** (corrupted output under the `rtk` env).
+- **Tooling:** use `rtk rg` for searches and read target files directly when validating exact snippets.
 
 ---
 
@@ -49,6 +55,8 @@
   - `localIso(date: Date): string`
 
 - [ ] **Step 1: Write the failing test**
+
+Current-code note: the current captured tests add coverage for minute-only datetimes, compact offsets, malformed stored facets, and invalid runtime values. Preserve those stricter cases if editing current code.
 
 Create `tests/captured.test.ts`:
 
@@ -151,6 +159,8 @@ Run: `rtk npx vitest run tests/captured.test.ts`
 Expected: FAIL — cannot resolve `../src/captured.js` (module does not exist yet).
 
 - [ ] **Step 3: Write the implementation**
+
+Historical SP7 snippet: current `CapturedSchema` also applies a regex requiring seconds and `Z` or `±HH:MM`; current `localIso` rejects invalid `Date` values before formatting. Do not weaken those checks when comparing against current code.
 
 Create `src/captured.ts`:
 
@@ -290,6 +300,8 @@ git commit -m "feat(captured): captured facet — schema, validated helpers, sor
   - `journalView(thoughts: Node[], window: DateWindow): DayGroup[]`
 
 - [ ] **Step 1: Write the failing test**
+
+Current-code note: current `journal.test.ts` also tests `JournalDateSchema` directly, filters `MINDMAP` nodes without reading `captured`, and asserts malformed bounds do not leak raw zod errors.
 
 Create `tests/journal.test.ts`:
 
@@ -503,6 +515,8 @@ This task makes `captured` a required `thought` facet, makes `capture()` stamp i
 
 - [ ] **Step 1: Add the required facet + invariant to `kinds.ts`**
 
+Historical SP7 snippet: current `thoughtSpec` also includes optional `ALIAS`; keep later optional facets intact when editing current `kinds.ts`.
+
 In `src/kinds.ts`, add the import and extend `thoughtSpec`:
 
 ```ts
@@ -525,6 +539,8 @@ export const journalSpec: KindSpec = { name: JOURNAL, shape: "list" };
 ```
 
 - [ ] **Step 2: Stamp `captured` in `capture()`**
+
+Historical SP7 snippet: current `capture` also accepts optional `alias`, validates uniqueness, writes the alias facet, and still attaches `CAPTURED` plus `VISUAL_IDENTITY` before the single write. Preserve the alias path and catalog expectations.
 
 In `src/api.ts`, add to the existing local imports:
 
@@ -551,6 +567,8 @@ Replace the `capture` method body so it takes a required `at`, attaches the face
 ```
 
 - [ ] **Step 3: Thread `now` through `runCli` + stamp in `cmdAdd`**
+
+Historical SP7 snippet: current `cmdAdd` receives `makeMindful`, `root`, `env`, and `now`, constructs lazily, refreshes the catalog after mutation, and resolves the active scheme before rendering. Keep the current partial-refresh error boundary and factory-based signature.
 
 In `src/cli.ts`:
 
@@ -632,6 +650,8 @@ export function runCli(
 (The `journal` case is added in Task 4; leave the switch otherwise as-is.)
 
 - [ ] **Step 4: Inject the clock in `bin.ts`**
+
+Historical SP7 snippet: current `bin.ts` passes `localIso(new Date())`, a lazy `Mindful` factory, and an editor runner into `runCli`; keep those later seams intact.
 
 In `src/bin.ts`, import `localIso` and compute `now`:
 
@@ -750,6 +770,8 @@ In `tests/profile.test.ts`, add `import { CAPTURED } from "../src/captured.js";`
 
 - [ ] **Step 9: Migrate the `cli.test.ts` `runCli` helpers + the `add` output assertion**
 
+Historical SP7 snippet: current CLI tests use `runCli(argv, root, env, NOW, out, err, () => mindful, runEditor?)`. Do not revert them to direct `Mindful` arguments.
+
 In `tests/cli.test.ts`:
 
 (a) Import the fixture: `import { CAPTURE_AT, NOW } from "./fixtures.js";` (add `CAPTURE_AT` here too if Step 6 needs it in this file).
@@ -833,6 +855,8 @@ git commit -m "feat(capture): captured is a required thought facet; inject the c
 - Produces: a top-level `journal` command.
 
 - [ ] **Step 1: Write the failing tests**
+
+Current-code note: the journal command behavior here remains current, but current tests use the expanded `runCli` signature and sit alongside later semantic/scheme/index/mindmap CLI suites.
 
 Append a new `describe` block to `tests/cli.test.ts` (uses the Task 3 fixture import):
 
@@ -933,6 +957,8 @@ Run: `rtk npx vitest run tests/cli.test.ts -t "journal command"`
 Expected: FAIL — `journal` is an unknown command (exit 2 for the happy-path cases, which expect 0).
 
 - [ ] **Step 3: Implement the command**
+
+Historical SP7 snippet: current `cmdJournal` reads through `ensureCatalog(root).rows` and `catalogRowsToJournalGroups(...)`, so it can serve from the catalog without constructing `Mindful`. Preserve that current fast path if editing the implemented CLI.
 
 In `src/cli.ts`:
 
@@ -1065,6 +1091,8 @@ git commit -m "feat(cli): journal command — today / <date> / --since..--until,
 **Placeholder scan:** none — every code step shows complete code. Step 6/7 of Task 3 are a TS-guided/enumerated mechanical transform with the exact value (`CAPTURE_AT`) and an explicit file/fixture list, not a vague "fix the rest."
 
 **Type consistency:** `capture({…, at})` (T3) matches the `at: now` call in `cmdAdd` (T3) and `at: CAPTURE_AT` in tests; `runCli(argv, mindful, root, env, now, out, err)` is identical across `bin.ts` (T3), the migrated helpers (T3), and `cmdJournal`'s `now` (T4); `journalView(thoughts, window)` / `DateWindow` / `capturedTime` / `capturedDate` names match between T2, T4, and the spec.
+
+Current-code note: the implemented `runCli` contract has since expanded to `runCli(argv, root, env, now, out, err, makeMindful, runEditor?)`, and the implemented journal command is catalog-backed.
 
 ## Execution Handoff
 
