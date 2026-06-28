@@ -35,10 +35,12 @@ cache: deleting it only costs startup time.
 - snapshot deserialization and integrity validation,
 - the manifest shape.
 
-The index classes stay pure data and expose only `toDict()` / `fromDict()` for
-serialization. `Corpus` owns load/reconcile/full-rebuild behavior and the in-memory
-manifest. `Store.allNodes()` uses the same `iterCorpusFiles()` walker as `Corpus`, so
-private `.nodes-index` files never become corpus nodes.
+The index classes stay pure data with no file I/O. They expose `toDict()` plus
+validating `fromDict()` deserializers: each index validates its own snapshot shape and
+internal invariants, while `loadSnapshot()` validates the top-level document and
+cross-index agreement. `Corpus` owns load/reconcile/full-rebuild behavior and the
+in-memory manifest. `Store.allNodes()` uses the same `iterCorpusFiles()` walker as
+`Corpus`, so private `.nodes-index` files never become corpus nodes.
 
 ### File layout
 
@@ -92,7 +94,9 @@ Mutation paths keep the manifest live without re-reading:
 
 ## 4. Load & reconcile
 
-`new Corpus(root, registry?, embedder?)` tries `loadSnapshot(root, namespace)`.
+`new Corpus(root, registry?, embedder?)` tries
+`loadSnapshot(root, embedderNamespace)`, where `embedderNamespace` is
+`embedder.cacheNamespace` or `null`.
 
 - If the snapshot is absent or unusable, construction falls back to a full rebuild from
   `iterCorpusFiles()`.
@@ -115,11 +119,17 @@ Construction never writes `snapshot.ts.json`. `corpus.flushIndex()` is the only 
 write API; it serializes current indexes plus the current manifest and writes atomically
 with `<path>.tmp` followed by rename.
 
+If a process mutates the corpus and exits without `flushIndex()`, only the cache is stale.
+The next construction reconciles the old snapshot against file hashes and pays the
+changed-file parse/index cost; no corpus data is lost because files remain authoritative.
+
 ---
 
 ## 5. Integrity validation
 
-`loadSnapshot()` validates the cache before returning live index objects:
+Validation is split deliberately: per-index `fromDict()` methods validate local snapshot
+shape and internal invariants, then `loadSnapshot()` validates the top-level cache and
+cross-index agreement before returning live index objects.
 
 - `version === 1`, `lang === "ts"`.
 - Manifest rows have valid root-relative POSIX `.md` paths, 64-lowercase-hex sha256
