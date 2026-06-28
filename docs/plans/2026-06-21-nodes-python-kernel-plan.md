@@ -8,14 +8,28 @@
 
 **Tech Stack:** Python ≥3.11, Pydantic ≥2, PyYAML, `uv` (deps + runner), pytest, ruff (line-length 120), pyright (basic), hatchling build, `src/` layout.
 
+## Current State Note
+
+This plan has since been implemented and is still accurate as the historical Python kernel baseline for `errors.py`, `ids.py`, `relations.py`, `node.py`, `registry.py`, `shapes.py`, `frontmatter.py`, and the initial markdown on-disk format.
+
+The repo and kernel have grown substantially since this plan:
+
+- Python now lives under `~/d/nodes/python/` after the later TS-port repo restructure. Historical paths like `src/nodes/kernel/...`, `tests/...`, and `pyproject.toml` mean `python/src/nodes/kernel/...`, `python/tests/...`, and `python/pyproject.toml` in current checkout.
+- The root now also contains `ts/` plus shared docs. Run Python gates from `~/d/nodes/python`.
+- `Corpus` now owns the primary high-level API and coordinates `Store`, the structural `Index`, full-text `SearchIndex`, optional similarity `VectorIndex`, and index persistence snapshots.
+- `Store` is now narrow file CRUD (`write_file`, `read_file`, `delete_file`, `all_nodes`, `path_for`); ref resolution, rename, inbound ref rewriting, and derived-index updates live in `Corpus`.
+- Later plans added `nodes.vocab`, structural index, full-text search, similarity/vector cache, and snapshot persistence. So "No derived index" and "reserved vocab" below are historical Plan-1 scope statements, not current package state.
+
+Treat code snippets below as the original greenfield rollout, not as replacement code for current `corpus.py`, `store.py`, or package layout.
+
 ## Global Constraints
 
 - Python `requires-python = ">=3.11"`; type-check mode `basic`.
 - Every module starts with `from __future__ import annotations`.
 - Pydantic v2 `BaseModel`; snake_case field names (no camelCase aliases).
 - ruff `line-length = 120`.
-- Import package is `nodes`; kernel code lives under `src/nodes/kernel/`; tests under `tests/`.
-- All commands run through `uv` (e.g. `uv run pytest …`).
+- Import package is `nodes`; historical kernel code lived under `src/nodes/kernel/` and tests under `tests/`. Current paths are `python/src/nodes/kernel/` and `python/tests/`.
+- All commands run through `uv` from the Python package dir (e.g. current checkout: `cd ~/d/nodes/python && uv run pytest …`).
 - Canonical id form `kind:slug` is the stored **and** display ref form; `uid` is an immutable UUID anchor on every node (spec §3.1, §3.5).
 - One `Relation` primitive; on disk `source` is implied by location (spec §3.2): node-relations omit `source`, graph edges keep both endpoints.
 - Facets serialize as a nested `facets:` map (spec §4).
@@ -118,7 +132,7 @@ def test_all_errors_subclass_base(exc):
 
 - [ ] **Step 4: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_errors.py -v`
+Run: `rtk uv run pytest tests/test_errors.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.errors'`.
 
 - [ ] **Step 5: Write minimal implementation**
@@ -162,15 +176,15 @@ class ValidationError(NodesError):
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_errors.py -v`
+Run: `rtk uv run pytest tests/test_errors.py -v`
 Expected: PASS (7 parametrized cases).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd ~/d/nodes
-git add pyproject.toml src/nodes tests/test_errors.py
-git commit -m "feat(kernel): scaffold nodes package + error hierarchy"
+cd ~/d/nodes/python
+rtk git add pyproject.toml src/nodes tests/test_errors.py
+rtk git commit -m "feat(kernel): scaffold nodes package + error hierarchy"
 ```
 
 ---
@@ -231,7 +245,7 @@ def test_parse_rejects_empty_slug():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_ids.py -v`
+Run: `rtk uv run pytest tests/test_ids.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.ids'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -283,14 +297,14 @@ class NodeId(BaseModel):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_ids.py -v`
+Run: `rtk uv run pytest tests/test_ids.py -v`
 Expected: PASS (5 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/ids.py tests/test_ids.py
-git commit -m "feat(kernel): NodeId canonical id parse/validate"
+rtk git add src/nodes/kernel/ids.py tests/test_ids.py
+rtk git commit -m "feat(kernel): NodeId canonical id parse/validate"
 ```
 
 ---
@@ -361,7 +375,7 @@ def test_tag_unresolved_raises():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_relations.py -v`
+Run: `rtk uv run pytest tests/test_relations.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.relations'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -431,14 +445,14 @@ Note: `to_serialized` emits `predicate` before `target` by insertion order; the 
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_relations.py -v`
+Run: `rtk uv run pytest tests/test_relations.py -v`
 Expected: PASS (6 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/relations.py tests/test_relations.py
-git commit -m "feat(kernel): Relation primitive with serialized forms + tag/relatesTo sugar"
+rtk git add src/nodes/kernel/relations.py tests/test_relations.py
+rtk git commit -m "feat(kernel): Relation primitive with serialized forms + tag/relatesTo sugar"
 ```
 
 ---
@@ -500,7 +514,7 @@ def test_id_must_be_wellformed():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_node.py -v`
+Run: `rtk uv run pytest tests/test_node.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.node'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -553,14 +567,14 @@ class Node(BaseModel):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_node.py -v`
+Run: `rtk uv run pytest tests/test_node.py -v`
 Expected: PASS (5 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/node.py tests/test_node.py
-git commit -m "feat(kernel): Node model with uid anchor + id/kind consistency"
+rtk git add src/nodes/kernel/node.py tests/test_node.py
+rtk git commit -m "feat(kernel): Node model with uid anchor + id/kind consistency"
 ```
 
 ---
@@ -635,7 +649,7 @@ def test_invariant_runs():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_registry.py -v`
+Run: `rtk uv run pytest tests/test_registry.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.registry'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -695,14 +709,14 @@ class Registry:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_registry.py -v`
+Run: `rtk uv run pytest tests/test_registry.py -v`
 Expected: PASS (5 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/registry.py tests/test_registry.py
-git commit -m "feat(kernel): kind registry + facet/invariant validation"
+rtk git add src/nodes/kernel/registry.py tests/test_registry.py
+rtk git commit -m "feat(kernel): kind registry + facet/invariant validation"
 ```
 
 ---
@@ -784,7 +798,7 @@ def test_tree_rejects_multiple_parents(reg):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_shapes.py -v`
+Run: `rtk uv run pytest tests/test_shapes.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.shapes'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -878,14 +892,14 @@ def register_builtin_shapes(reg: Registry) -> None:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_shapes.py -v`
+Run: `rtk uv run pytest tests/test_shapes.py -v`
 Expected: PASS (5 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/shapes.py tests/test_shapes.py
-git commit -m "feat(kernel): structural shapes + membership facet + invariants"
+rtk git add src/nodes/kernel/shapes.py tests/test_shapes.py
+rtk git commit -m "feat(kernel): structural shapes + membership facet + invariants"
 ```
 
 ---
@@ -984,7 +998,7 @@ def test_plain_relatesto_serializes_into_related_only():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_frontmatter.py -v`
+Run: `rtk uv run pytest tests/test_frontmatter.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.frontmatter'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1072,14 +1086,14 @@ def node_to_markdown(node: Node) -> str:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_frontmatter.py -v`
+Run: `rtk uv run pytest tests/test_frontmatter.py -v`
 Expected: PASS (5 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/frontmatter.py tests/test_frontmatter.py
-git commit -m "feat(kernel): markdown frontmatter parse/serialize with source-implied relations"
+rtk git add src/nodes/kernel/frontmatter.py tests/test_frontmatter.py
+rtk git commit -m "feat(kernel): markdown frontmatter parse/serialize with source-implied relations"
 ```
 
 ---
@@ -1089,6 +1103,8 @@ git commit -m "feat(kernel): markdown frontmatter parse/serialize with source-im
 **Files:**
 - Create: `src/nodes/kernel/store.py`
 - Test: `tests/test_store.py`
+
+Current-code note: this task's `Store` API is historical. Current `Store` intentionally only owns file-path mapping and file CRUD; current `Corpus` owns live/deprecated-id resolution, collision checks through the structural index, rename, inbound relation/facet rewrites, search/vector index updates, and manifest maintenance. Do not paste the historical monolithic `Store` back into current code.
 
 **Interfaces:**
 - Consumes: `Node` from `nodes.kernel.node`; `node_from_markdown`, `node_to_markdown` from `nodes.kernel.frontmatter`; `NodeId` from `nodes.kernel.ids`; `MEMBERSHIP` from `nodes.kernel.shapes`; `CollisionError`, `RefError` from `nodes.kernel.errors`.
@@ -1198,7 +1214,7 @@ def test_rename_rewrites_membership_refs(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_store.py -v`
+Run: `rtk uv run pytest tests/test_store.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'nodes.kernel.store'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1342,14 +1358,14 @@ Note: `_rewrite_inbound` rewrites both `related`/`relations` (which live in `nod
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_store.py -v`
+Run: `rtk uv run pytest tests/test_store.py -v`
 Expected: PASS (9 cases).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/nodes/kernel/store.py tests/test_store.py
-git commit -m "feat(kernel): file store with CRUD, collision detection, rename"
+rtk git add src/nodes/kernel/store.py tests/test_store.py
+rtk git commit -m "feat(kernel): file store with CRUD, collision detection, rename"
 ```
 
 ---
@@ -1360,6 +1376,8 @@ git commit -m "feat(kernel): file store with CRUD, collision detection, rename"
 - Create: `~/d/nodes/docs/format.md`
 - Create: `tests/test_format_golden.py`
 - Create: `tests/fixtures/gene_phf19.md`
+
+Current-code note: the format reference has since been superseded by the committed shared fixtures and parity tests used by Python and TypeScript. The "Known kernel limitations" in the historical snippet were intentionally resolved by later structural-index, search, similarity, and persistence plans.
 
 **Interfaces:**
 - Consumes: `node_from_markdown`, `node_to_markdown` from `nodes.kernel.frontmatter`.
@@ -1417,7 +1435,7 @@ def test_serialize_is_idempotent():
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_format_golden.py -v`
+Run: `rtk uv run pytest tests/test_format_golden.py -v`
 Expected: FAIL — fixture missing or assertion error until the fixture + parser align.
 
 - [ ] **Step 4: Write the format reference doc**
@@ -1456,19 +1474,19 @@ Shapes: `set`, `list`, `dict`, `graph`, `dag`, `tree` (invariants per spec §3.4
 
 - [ ] **Step 5: Run the whole suite**
 
-Run: `uv run pytest -v`
+Run: `rtk uv run pytest -v`
 Expected: PASS — all tests across tasks 1–9 green.
 
 - [ ] **Step 6: Lint + type-check**
 
-Run: `uv run ruff check src tests` then `uv run pyright src` (if pyright available; otherwise skip).
+Run: `rtk uv run ruff check src tests` then `rtk uv run pyright src` (if pyright available; otherwise skip).
 Expected: no errors.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add docs/format.md tests/test_format_golden.py tests/fixtures/gene_phf19.md
-git commit -m "docs(kernel): on-disk format reference + golden round-trip test"
+rtk git add docs/format.md tests/test_format_golden.py tests/fixtures/gene_phf19.md
+rtk git commit -m "docs(kernel): on-disk format reference + golden round-trip test"
 ```
 
 ---
@@ -1483,12 +1501,12 @@ git commit -m "docs(kernel): on-disk format reference + golden round-trip test"
 - §3.4 structural shapes + membership facet + invariants → Task 6.
 - §3.5 identity/rename contract (stored=id, uid anchor, `resolve()` via deprecated_ids, ref rewrite incl. membership, collisions) → Tasks 2, 4, 8.
 - §4 on-disk format (nested facets, top-level created/updated/version, source-implied) → Tasks 7, 9.
-- §5 derived index → **out of scope (Plan 2)**, flagged in `format.md`.
-- §6 Python lib (CRUD) → Tasks 4–8; TS port out of scope.
+- §5 derived index → **historically out of scope (Plan 2)**, flagged in `format.md`; now implemented by later structural-index/search/similarity/persistence plans.
+- §6 Python lib (CRUD) → Tasks 4–8; TS port was historically out of scope and now lives under `~/d/nodes/ts`.
 - §10 `uid` backfill → **out of scope (science-migration plan)**; kernel mints uuid4 for new nodes (Task 4).
 
 **Placeholder scan:** none — every code/test step shows complete content.
 
 **Type consistency:** `Node`, `Relation`, `Membership`, `Registry`, `KindSpec`, `Store` signatures match across Interfaces blocks and usage. `node.relations` holds the merged related+typed relations everywhere (Tasks 4, 7, 8). `MEMBERSHIP` facet key consistent (Tasks 6, 9).
 
-**Known deferrals (intentional, flagged in `docs/format.md`):** derived index (incl. O(1) ref resolution); TS port; `uid` backfill migration. Membership-edge rewrite on rename is **in scope** and implemented in Task 8.
+**Historical deferrals (intentional, flagged in `docs/format.md`):** derived index (incl. O(1) ref resolution); TS port; `uid` backfill migration. The derived indexes and TS port have since been implemented by later plans. Membership-edge rewrite on rename was **in scope** for this baseline and now lives at the `Corpus` layer.
