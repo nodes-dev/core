@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript 5.5+, zod v3, vitest, biome (width 120). Source under `~/d/nodes/ts/src/`, tests under `~/d/nodes/ts/tests/`. All commands run from `~/d/nodes/ts` via the `rtk` wrapper.
 
-This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is **already merged** (`main` @ `a7dd55b`) and is the **oracle** for this port. Plan B (the mindful package) follows. The mindful package is not scaffolded until both kernels match.
+This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is the **oracle** for this port. This TS port has since been implemented on `main`; the red/green expectations below are the historical implementation sequence, not the current suite state. Plan B (the mindful package) follows.
 
 ## The Oracle
 
@@ -34,18 +34,18 @@ This plan contains the full TypeScript for every changed function. The oracle is
 - **Singular shape:** a kind adopts zero or one shape (`KindSpec.shape?: string`).
 - **Snapshot key casing:** the TS snapshot uses **camelCase** keys on disk (`deprecatedIds`, etc.). The new structural-refs container key is therefore **`structuralRefs`** (NOT `structural_refs`). The **role string values** (`relation_source`, `membership_member`, `edges_source`, `edges_target`, `order_member`, `keys_value`) are snake-case literals identical to Python's — they are the shared role vocabulary.
 - **Parity is behavioural, not byte-identical:** the TS and Python snapshots are separate files (`snapshot.ts.json` vs `snapshot.py.json`); key casing differs by language. The one cross-language fixture parity is `corpus_parity.test.ts` against the shared `fixtures/` oracle (see Baseline).
-- **Gate (run from `~/d/nodes/ts`):** `rtk npm test` (vitest), `rtk npm run typecheck` (`tsc --noEmit`), `rtk npm run check` (biome) must all pass before a task is complete — subject to the per-task baseline below.
+- **Gate (run from `~/d/nodes/ts`):** `rtk npm test` (vitest), `rtk npm run typecheck` (`tsc --noEmit`), `rtk npm run check` (biome) must all pass before a task is complete. During the original red/green implementation, only the explicitly named historical `corpus_parity` failure below was tolerated before Task 4.
 
-## Baseline — the suite is NOT fully green at the start
+## Historical Baseline
 
-The A-py merge migrated the **shared** top-level `fixtures/corpus/graph/g.md` and `fixtures/corpus.rename.canonical.json` to the new split-facet model. `ts/tests/corpus_parity.test.ts` reads that shared `fixtures/` dir, so **on `main` (`a7dd55b`) the TS suite has exactly one pre-existing failure**:
+Before this TypeScript port landed, the A-py merge migrated the **shared** top-level `fixtures/corpus/graph/g.md` and `fixtures/corpus.rename.canonical.json` to the new split-facet model. `ts/tests/corpus_parity.test.ts` reads that shared `fixtures/` dir, so the TS suite had exactly one expected pre-existing failure at the start of the original implementation:
 
 ```
 FAIL tests/corpus_parity.test.ts > TS Corpus.rename over the fixture corpus matches the shared oracle
 Tests  1 failed | 269 passed (270)
 ```
 
-This is expected: the shared oracle requires split-facet rename rewriting that TS `corpus.ts` does not yet do. **Task 4 fixes it.** Per-task expected suite state:
+That historical failure was expected: the shared oracle required split-facet rename rewriting that TS `corpus.ts` did not yet do. Task 4 fixed it. Per-task expected suite state during the original implementation:
 
 | After task | Expected `rtk npm test` | Notes |
 |---|---|---|
@@ -56,7 +56,7 @@ This is expected: the shared oracle requires split-facet rename rewriting that T
 | Task 4 (corpus) | **0 failed, all passed** | `corpus_parity` goes green |
 | Task 5 (finalize) | 0 failed, all passed | barrel/vocab/docs |
 
-`tsc --noEmit` and `biome` must be **fully clean after every task** (a compile error or lint error is never an acceptable intermediate state — only the one named runtime test failure is). Each task that removes or renames an exported symbol MUST update the barrel `ts/src/index.ts` in the same task so `tsc` stays clean.
+`tsc --noEmit` and `biome` had to be **fully clean after every task** (a compile error or lint error was never an acceptable intermediate state — only the one named runtime test failure was). Each task that removes or renames an exported symbol MUST update the barrel `ts/src/index.ts` in the same task so `tsc` stays clean.
 
 ---
 
@@ -272,7 +272,7 @@ Run: `cd ~/d/nodes/ts && rtk npx vitest run tests/registry.test.ts`
 Expected: PASS (all registry tests).
 
 Run: `rtk npm run typecheck && rtk npm run check && rtk npm test`
-Expected: `tsc` clean, biome clean. `rtk npm test` → **1 failed (`corpus_parity`), rest passed** (the documented baseline; no new failures).
+Historical expected output during the original implementation: `tsc` clean, biome clean. `rtk npm test` → **1 failed (`corpus_parity`), rest passed** (the documented pre-Task-4 baseline; no new failures).
 
 - [ ] **Step 6: Commit**
 
@@ -675,7 +675,7 @@ Run: `cd ~/d/nodes/ts && rtk npx vitest run tests/shapes.test.ts tests/corpus.te
 Expected: PASS (shapes fully; corpus.test.ts — the migrated validation tests pass, the not-yet-migrated rename tests at L138–179 still pass because `rewriteRefs` is unchanged and they still use bundled membership).
 
 Run: `rtk npm run typecheck && rtk npm run check && rtk npm test`
-Expected: `tsc` clean, biome clean. `rtk npm test` → 1 failed (`corpus_parity`), rest passed (baseline unchanged).
+Historical expected output during the original implementation: `tsc` clean, biome clean. `rtk npm test` → 1 failed (`corpus_parity`), rest passed (same pre-Task-4 state).
 
 - [ ] **Step 7: Commit**
 
@@ -981,7 +981,7 @@ Run: `cd ~/d/nodes/ts && rtk npx vitest run tests/structural-index.test.ts tests
 Expected: PASS.
 
 Run: `rtk npm run typecheck && rtk npm run check && rtk npm test`
-Expected: `tsc` clean, biome clean. `rtk npm test` → 1 failed (`corpus_parity`), rest passed (baseline unchanged — corpus still uses old `rewriteRefs`).
+Historical expected output during the original implementation: `tsc` clean, biome clean. `rtk npm test` → 1 failed (`corpus_parity`), rest passed (same pre-Task-4 state — corpus still used old `rewriteRefs`).
 
 - [ ] **Step 5: Commit**
 
@@ -1162,7 +1162,7 @@ In `ts/src/vocab/kinds.ts`, the JSDoc on `registerKnowledgeVocab` (≈line 16) s
 
 Read `ts/tests/smoke.test.ts` (it asserts `typeof registerBuiltinShapes === "function"` from the barrel) and `ts/tests/vocab-exports.test.ts`. Confirm:
 - `registerBuiltinShapes` is still exported from `ts/src/index.ts` (it is — kept through Tasks 2).
-- No removed symbol (`requireDictKeys`, the old bundled `Membership` type, `membership_edge_*` roles) is referenced anywhere in `ts/src/index.ts` or any test. Search the repo: `grep -rn "requireDictKeys\|membership_edge" ts/` should return nothing (remember the repo's grep can misreport — cross-check by reading `ts/src/index.ts` directly).
+- No removed symbol (`requireDictKeys`, the old bundled `Membership` type, `membership_edge_*` roles) is referenced anywhere in `ts/src/index.ts` or any test. Search the repo: `rtk rg -n "requireDictKeys|membership_edge" ts` should return nothing; cross-check by reading `ts/src/index.ts` directly.
 
 If smoke/vocab-exports reference a removed symbol, fix the test to the new surface. If everything is already consistent (expected), this step changes nothing.
 

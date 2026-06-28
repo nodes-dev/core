@@ -4,7 +4,7 @@
 
 **Goal:** Port the Python on-disk index-persistence subsystem to the TypeScript kernel so that constructing a `Corpus` over an unchanged corpus loads a persisted snapshot and reconciles only what changed on disk, instead of re-parsing and re-indexing every `*.md` file.
 
-**Architecture:** Mirror the *implemented* Python (`python/src/nodes/kernel/snapshot.py`, `index.py`, `search.py`, `similarity.py`, `corpus.py`) — not just the design spec, which the Python code hardened beyond (manifest-path↔structural-id cross-check, search/vector `idByUid` must equal structural-derived ids, JSON-constant rejection, broken-symlink handling). A new `ts/src/snapshot.ts` owns all on-disk concerns (file location, atomic write, version/lang gate, integrity validation, the manifest type, the byte-level file walk, and the reconcile inputs). The three index classes stay pure data, gaining only `toDict()`/`fromDict()`. `Corpus` keeps an in-memory manifest synced across every write path and exposes `flushIndex()`.
+**Architecture:** Mirror the *implemented* Python (`python/src/nodes/kernel/snapshot.py`, `index.py`, `search.py`, `similarity.py`, `corpus.py`) — not just the design spec, which the Python code hardened beyond (manifest-path↔structural-id cross-check, search/vector `idByUid` must equal structural-derived ids, JSON-constant rejection, broken-symlink handling). A new `ts/src/snapshot.ts` owns all on-disk concerns (file location, atomic write, version/lang gate, integrity validation, the manifest type, the byte-level file walk, and the reconcile inputs). The three index classes stay pure data and file-I/O-free, gaining `toDict()` plus validating `fromDict()` deserializers. Each `fromDict()` validates its own snapshot shape and local invariants; `loadSnapshot()` validates top-level and cross-index agreement. `Corpus` keeps an in-memory manifest synced across every write path and exposes `flushIndex()`. `Store.allNodes()` uses the same `iterCorpusFiles()` walker as `Corpus`, so `.nodes-index` is excluded consistently.
 
 **Tech Stack:** TypeScript (ESM, `.js` import extensions), Node ≥20, vitest, biome (format + lint, line width 120), `tsc --noEmit` typecheck. No new runtime dependencies — `snapshot.ts` uses only Node built-ins (`node:crypto` `createHash`, `node:fs`, `node:path`) plus the existing kernel modules; `zod` (already a dependency) validates deserialized relations.
 
@@ -20,7 +20,7 @@
 - **Shared-`Relation` identity invariant (structural):** a relation's source and target `OutRef`s must share ONE `Relation` object, because the graph queries dedup on object reference (the TS analog of Python's `id(relation)`). `fromDict` must replay extraction (`outRefsFrom`), never deserialize the two `OutRef`s independently.
 - **TS conventions:** camelCase fields/methods (`toDict`, `fromDict`, `hashBytes`, `iterCorpusFiles`, `loadSnapshot`, `flushIndex`, `idByUid`, `hashByUid`), SCREAMING_CASE module constants, `.js` import extensions, `type`-only imports for types, biome line width 120. Maps serialize via `Object.fromEntries` and deserialize via `new Map(Object.entries(...))`. Deep-copy plain JSON values with `structuredClone`.
 
-**Gate for every task:** from `~/d/nodes/ts`, `rtk npm test` (vitest) green, `rtk npm run typecheck` (`tsc --noEmit`) clean, `rtk npm run check` (biome) clean. All commands run from `~/d/nodes/ts`. The branch for this work is `feat/ts-index-persistence` (create it off `main` before Task 1).
+**Gate for every task:** from `~/d/nodes/ts`, `rtk npm test` (vitest) green, `rtk npm run typecheck` (`tsc --noEmit`) clean, `rtk npm run check` (biome) clean. All commands run from `~/d/nodes/ts`. This work was implemented on `main`.
 
 ---
 
@@ -317,7 +317,7 @@ rtk git commit -m "feat(ts-persistence): snapshot I/O foundations — file walk,
 
 ### Task 2: `SearchIndex.toDict` / `fromDict`
 
-Add pure serialization to `SearchIndex`. `toDict` emits `postings`/`lengths`/`idByUid` as plain objects (with `[number, number]` arrays preserved). `fromDict` validates self-consistency (every `lengths` key equals every `idByUid` key; every posting uid is present in `lengths`; every tf/length pair is a non-negative int pair) and recomputes `totalTitle`/`totalBody` by summing `lengths` — the single source of truth, no stored-total drift. Mirrors `search.py` `to_dict`/`from_dict` (lines 108–160).
+Add pure serialization to `SearchIndex`. `toDict` emits `postings`/`lengths`/`idByUid` as plain objects (with `[number, number]` arrays preserved). `fromDict` is a validating deserializer: every `lengths` key equals every `idByUid` key; every posting uid is present in `lengths`; every tf/length pair is a non-negative int pair; posting buckets are non-empty; tf pairs are not `[0, 0]`; and each field tf is ≤ that uid's stored field length. It recomputes `totalTitle`/`totalBody` by summing `lengths` — the single source of truth, no stored-total drift.
 
 **Files:**
 - Modify: `ts/src/search.ts`
@@ -379,6 +379,27 @@ describe("SearchIndex snapshot", () => {
     const d = seed().toDict();
     const term = Object.keys(d.postings)[0];
     d.postings[term].ghost = [1, 0];
+    expect(() => SearchIndex.fromDict(d)).toThrow();
+  });
+
+  it("rejects an empty posting bucket", () => {
+    const d = seed().toDict();
+    d.postings.ghost = {};
+    expect(() => SearchIndex.fromDict(d)).toThrow();
+  });
+
+  it("rejects a zero posting tf pair", () => {
+    const d = seed().toDict();
+    const uid = Object.keys(d.lengths)[0];
+    d.postings.ghost = { [uid]: [0, 0] };
+    expect(() => SearchIndex.fromDict(d)).toThrow();
+  });
+
+  it("rejects a posting tf greater than the field length", () => {
+    const d = seed().toDict();
+    const uid = Object.keys(d.lengths)[0];
+    const [titleLen] = d.lengths[uid];
+    d.postings.ghost = { [uid]: [titleLen + 1, 0] };
     expect(() => SearchIndex.fromDict(d)).toThrow();
   });
 
@@ -456,12 +477,29 @@ Then add the methods inside the class:
     const postings = new Map<string, Map<string, [number, number]>>();
     for (const [term, docs] of Object.entries(raw.postings as Record<string, unknown>)) {
       if (typeof docs !== "object" || docs === null) throw new Error("search snapshot: postings bucket must be an object");
+      if (Object.keys(docs).length === 0)
+        throw new Error(`search snapshot: postings bucket for term ${JSON.stringify(term)} must not be empty`);
       const bucket = new Map<string, [number, number]>();
       for (const [uid, tf] of Object.entries(docs as Record<string, unknown>)) {
         if (!lengths.has(uid)) {
           throw new Error(`search snapshot: posting uid ${JSON.stringify(uid)} absent from lengths`);
         }
-        bucket.set(uid, nonNegativeIntPair(tf, `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)}`));
+        const tfPair = nonNegativeIntPair(
+          tf,
+          `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)}`,
+        );
+        if (tfPair[0] === 0 && tfPair[1] === 0) {
+          throw new Error(
+            `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)} must not be all zero`,
+          );
+        }
+        const [titleLen, bodyLen] = lengths.get(uid) as [number, number];
+        if (tfPair[0] > titleLen || tfPair[1] > bodyLen) {
+          throw new Error(
+            `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)} exceeds field length`,
+          );
+        }
+        bucket.set(uid, tfPair);
       }
       postings.set(term, bucket);
     }
@@ -751,22 +789,24 @@ rtk git commit -m "feat(ts-persistence): VectorIndex toDict/fromDict (dim null|i
 
 ### Task 4: structural `Index.toDict` / `fromDict`
 
-Refactor extraction into a reusable `outRefsFrom(relations, membership)` (the input `extractOutRefs` consumes), add a `membership` field to `IndexEntry`, and add `toDict`/`fromDict`. `toDict` serializes per entry `{uid, id, kind, deprecatedIds (sorted), relations (one row per `relation_source` outRef), membership}`. `fromDict` validates every entry, parses each relation through `RelationSchema`, validates membership shape, **replays `outRefsFrom`** so each relation's source+target `OutRef`s share one `Relation` object, enforces identity-claim uniqueness across entries, and rebuilds `idToUid`/`deprecatedToUid`/`inRefs`. Mirrors `index.py` (`_out_refs_from`, `IndexEntry.membership`, `to_dict`/`from_dict`, lines 25–325).
+Add pure serialization to `Index` using the post-structural-shapes snapshot shape. The snapshot stores relations once per entry and stores built-in structure refs in a generic `structuralRefs` array, not as a copied `membership` facet. This preserves the structural-shapes redesign: `members`, graph `edges`, list `order`, and dict `keys` refs are tracked for rename + snapshot integrity, but they are not relation-graph edges and they do not require snapshot-schema changes for every shape facet.
+
+`fromDict` is a validating deserializer. It validates every entry, parses each relation through `RelationSchema`, validates structural-ref roles, rebuilds `idToUid` / `deprecatedToUid` / `inRefs`, enforces identity-claim uniqueness across entries, and replays relation extraction so each relation's source and target `OutRef`s share one `Relation` object.
 
 **Files:**
 - Modify: `ts/src/structural-index.ts`
 - Test: `ts/tests/index-snapshot.test.ts`
 
 **Interfaces:**
-- Consumes: `Relation`, `RelationSchema` from `./relations.js`; `MEMBERSHIP` from `./shapes.js`.
+- Consumes: `Relation`, `RelationSchema` from `./relations.js`; `MEMBERSHIP`, `EDGES`, `ORDER`, `KEYS` from `./shapes.js`; `NodeId` / `IdError`.
 - Produces:
-  - `IndexEntry` gains `membership?: Record<string, unknown>`.
-  - `Index.toDict(): { entries: Array<{ uid: string; id: string; kind: string; deprecatedIds: string[]; relations: Array<Record<string, unknown>>; membership: Record<string, unknown> | null }> }`.
-  - `static Index.fromDict(d: unknown): Index` — throws `Error` on any violation.
+  - Structural roles: `"membership_member"`, `"edges_source"`, `"edges_target"`, `"order_member"`, `"keys_value"` in addition to relation roles.
+  - `Index.toDict(): { entries: Array<{ uid: string; id: string; kind: string; deprecatedIds: string[]; relations: Array<Record<string, unknown>>; structuralRefs: Array<{ ref: string; role: Role }> }> }`.
+  - `static Index.fromDict(d: unknown): Index` — throws `Error` on any structural/integrity violation.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `ts/tests/index-snapshot.test.ts`. It reuses the `normalize` equivalence helper pattern from `index-rebuild-equivalence.test.ts`:
+Create `ts/tests/index-snapshot.test.ts`. It reuses the `normalize` equivalence helper pattern from `index-rebuild-equivalence.test.ts` and covers every structural-ref role:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -798,7 +838,12 @@ function normalize(index: Index): unknown {
       .map((r) => JSON.stringify([r.sourceUid, r.outRef.ref, r.outRef.role, relationSignature(r.outRef)]))
       .sort();
   }
-  return { byUid, idToUid: Object.fromEntries(index.idToUid), deprecatedToUid: Object.fromEntries(index.deprecatedToUid), inRefs };
+  return {
+    byUid,
+    idToUid: Object.fromEntries(index.idToUid),
+    deprecatedToUid: Object.fromEntries(index.deprecatedToUid),
+    inRefs,
+  };
 }
 
 function seed(): Index {
@@ -810,12 +855,21 @@ function seed(): Index {
       kind: "graph",
       title: "G",
       facets: {
-        membership: {
-          shape: "graph",
-          members: ["topic:a", "topic:missing"],
-          edges: [{ source: "topic:a", predicate: "to", target: "topic:b" }],
-        },
+        membership: { members: ["topic:a", "topic:missing"] },
+        edges: { edges: [{ source: "topic:a", predicate: "to", target: "topic:b" }] },
       },
+    }),
+    makeNode({
+      id: "list:l",
+      kind: "list",
+      title: "L",
+      facets: { membership: { members: ["topic:a"] }, order: { order: ["topic:a"] } },
+    }),
+    makeNode({
+      id: "dict:d",
+      kind: "dict",
+      title: "D",
+      facets: { membership: { members: ["topic:a"] }, keys: { keys: { label: "topic:a" } } },
     }),
   ]);
 }
@@ -829,12 +883,8 @@ describe("structural Index snapshot", () => {
   it("preserves shared-Relation identity so inbound/dangling dedup correctly", () => {
     const idx = seed();
     const restored = Index.fromDict(idx.toDict());
-    // topic:a -> topic:b relation: one Relation object backs both source and target outRefs.
     const aUid = restored.idToUid.get("topic:a") as string;
-    const out = restored.outboundEdges(aUid);
-    expect(out.length).toBe(1);
-    // topic:missing is dangling (membership_member role does not produce a relation edge,
-    // but the graph edge a->b resolves; the relatesTo a->b resolves too). Confirm no spurious dup.
+    expect(restored.outboundEdges(aUid).length).toBe(1);
     const bUid = restored.idToUid.get("topic:b") as string;
     expect(restored.inboundEdges(bUid).length).toBe(idx.inboundEdges(idx.idToUid.get("topic:b") as string).length);
   });
@@ -863,8 +913,22 @@ describe("structural Index snapshot", () => {
 
   it("rejects an identity claim already in use by another entry", () => {
     const d = seed().toDict();
-    d.entries[1].deprecatedIds = ["topic:a"]; // topic:a is entry 0's live id
+    d.entries[1].deprecatedIds = ["topic:a"];
     expect(() => Index.fromDict(d)).toThrow();
+  });
+
+  it("persists structural refs under structuralRefs (not membership) for every role", () => {
+    const d = seed().toDict();
+    for (const entry of d.entries) {
+      expect("membership" in entry).toBe(false);
+      expect(Array.isArray(entry.structuralRefs)).toBe(true);
+    }
+    const allRoles = new Set(d.entries.flatMap((e) => e.structuralRefs.map((r) => r.role)));
+    expect(allRoles).toContain("membership_member");
+    expect(allRoles).toContain("edges_source");
+    expect(allRoles).toContain("edges_target");
+    expect(allRoles).toContain("order_member");
+    expect(allRoles).toContain("keys_value");
   });
 });
 ```
@@ -878,59 +942,75 @@ Expected: FAIL — `Index.toDict`/`fromDict` are not defined.
 
 In `ts/src/structural-index.ts`:
 
-1. Update imports — add `RelationSchema` (a value) to the existing `./relations.js` import:
+1. Define the structural roles and accepted snapshot roles:
 
 ```ts
-import { type Relation, RelationSchema } from "./relations.js";
+export type Role =
+  | "relation_source"
+  | "relation_target"
+  | "membership_member"
+  | "edges_source"
+  | "edges_target"
+  | "order_member"
+  | "keys_value";
+
+const STRUCTURAL_ENTRY_KEYS = ["uid", "id", "kind", "deprecatedIds", "relations", "structuralRefs"] as const;
+const STRUCTURAL_REF_ROLES = new Set<Role>([
+  "membership_member",
+  "edges_source",
+  "edges_target",
+  "order_member",
+  "keys_value",
+]);
 ```
 
-2. Add `membership` to `IndexEntry`:
+2. Extract relation refs separately from structure refs. Relation refs keep the shared `Relation` object; structure refs are raw `{ref, role}` rows with no `relation`.
 
 ```ts
-export interface IndexEntry {
-  uid: string;
-  id: string;
-  kind: string;
-  deprecatedIds: ReadonlySet<string>;
-  outRefs: OutRef[];
-  membership?: Record<string, unknown>;
-}
-```
-
-3. Add `NodeId` and `IdError` imports (for `fromDict`'s id validation) — extend the existing imports:
-
-```ts
-import { CollisionError, IdError, RefError } from "./errors.js";
-import { NodeId } from "./ids.js";
-```
-
-4. Refactor `extractOutRefs` to delegate to `outRefsFrom`. Replace the existing `extractOutRefs` function with:
-
-```ts
-function outRefsFrom(relations: Relation[], membership: unknown): OutRef[] {
+function relationOutRefs(relations: Relation[]): OutRef[] {
   const refs: OutRef[] = [];
   for (const rel of relations) {
     refs.push({ ref: rel.source, role: "relation_source", relation: rel });
     refs.push({ ref: rel.target, role: "relation_target", relation: rel });
   }
-  if (membership !== undefined && membership !== null && typeof membership === "object") {
-    const m = membership as Record<string, unknown>;
-    const members = m.members;
+  return refs;
+}
+
+function structuralOutRefs(node: Node): OutRef[] {
+  const refs: OutRef[] = [];
+  const mem = node.facets[MEMBERSHIP];
+  if (mem !== null && typeof mem === "object") {
+    const members = (mem as Record<string, unknown>).members;
     if (Array.isArray(members)) {
-      for (const x of members) if (typeof x === "string") refs.push({ ref: x, role: "membership_member" });
-    } else if (members !== null && typeof members === "object") {
-      for (const v of Object.values(members as Record<string, unknown>)) {
-        if (typeof v === "string") refs.push({ ref: v, role: "membership_member" });
-      }
+      for (const m of members) if (typeof m === "string") refs.push({ ref: m, role: "membership_member" });
     }
-    const edges = m.edges;
+  }
+  const eg = node.facets[EDGES];
+  if (eg !== null && typeof eg === "object") {
+    const edges = (eg as Record<string, unknown>).edges;
     if (Array.isArray(edges)) {
       for (const edge of edges) {
         if (edge !== null && typeof edge === "object") {
           const e = edge as Record<string, unknown>;
-          if (typeof e.source === "string") refs.push({ ref: e.source, role: "membership_edge_source" });
-          if (typeof e.target === "string") refs.push({ ref: e.target, role: "membership_edge_target" });
+          if (typeof e.source === "string") refs.push({ ref: e.source, role: "edges_source" });
+          if (typeof e.target === "string") refs.push({ ref: e.target, role: "edges_target" });
         }
+      }
+    }
+  }
+  const od = node.facets[ORDER];
+  if (od !== null && typeof od === "object") {
+    const order = (od as Record<string, unknown>).order;
+    if (Array.isArray(order)) {
+      for (const m of order) if (typeof m === "string") refs.push({ ref: m, role: "order_member" });
+    }
+  }
+  const ky = node.facets[KEYS];
+  if (ky !== null && typeof ky === "object") {
+    const keys = (ky as Record<string, unknown>).keys;
+    if (keys !== null && typeof keys === "object") {
+      for (const v of Object.values(keys as Record<string, unknown>)) {
+        if (typeof v === "string") refs.push({ ref: v, role: "keys_value" });
       }
     }
   }
@@ -938,38 +1018,11 @@ function outRefsFrom(relations: Relation[], membership: unknown): OutRef[] {
 }
 
 function extractOutRefs(node: Node): OutRef[] {
-  return outRefsFrom(node.relations, node.facets[MEMBERSHIP]);
+  return [...relationOutRefs(node.relations), ...structuralOutRefs(node)];
 }
 ```
 
-5. Set `membership` in `upsert`. Replace the entry construction inside `upsert` with:
-
-```ts
-  upsert(node: Node): void {
-    if (this.byUid.has(node.uid)) this.drop(node.uid);
-    const membership = node.facets[MEMBERSHIP];
-    const entry: IndexEntry = {
-      uid: node.uid,
-      id: node.id,
-      kind: node.kind,
-      deprecatedIds: new Set(node.deprecatedIds),
-      outRefs: extractOutRefs(node),
-      membership: membership !== undefined && membership !== null && typeof membership === "object"
-        ? (membership as Record<string, unknown>)
-        : undefined,
-    };
-    this.byUid.set(node.uid, entry);
-    this.idToUid.set(node.id, node.uid);
-    for (const dep of node.deprecatedIds) this.deprecatedToUid.set(dep, node.uid);
-    for (const oref of entry.outRefs) {
-      const rows = this.inRefs.get(oref.ref) ?? [];
-      rows.push({ sourceUid: node.uid, outRef: oref });
-      this.inRefs.set(oref.ref, rows);
-    }
-  }
-```
-
-6. Add `toDict`/`fromDict` to the `Index` class (place after `upsert`):
+3. Implement `toDict()` so structural refs are serialized as `structuralRefs` and `membership` is never emitted:
 
 ```ts
   toDict(): {
@@ -979,7 +1032,7 @@ function extractOutRefs(node: Node): OutRef[] {
       kind: string;
       deprecatedIds: string[];
       relations: Array<Record<string, unknown>>;
-      membership: Record<string, unknown> | null;
+      structuralRefs: Array<{ ref: string; role: Role }>;
     }>;
   } {
     const entries = [];
@@ -1004,160 +1057,33 @@ function extractOutRefs(node: Node): OutRef[] {
         kind: entry.kind,
         deprecatedIds: [...entry.deprecatedIds].sort(),
         relations,
-        membership: entry.membership !== undefined ? structuredClone(entry.membership) : null,
+        structuralRefs: entry.outRefs
+          .filter((o) => !o.role.startsWith("relation_"))
+          .map((o) => ({ ref: o.ref, role: o.role })),
       });
     }
     return { entries };
   }
-
-  static fromDict(d: unknown): Index {
-    if (typeof d !== "object" || d === null) throw new Error("structural snapshot: document must be an object");
-    const raw = d as Record<string, unknown>;
-    if (!("entries" in raw)) throw new Error("structural snapshot: missing entries");
-    if (!Array.isArray(raw.entries)) throw new Error("structural snapshot: entries must be an array");
-    const idx = new Index();
-    for (const rawEntry of raw.entries) {
-      if (typeof rawEntry !== "object" || rawEntry === null) throw new Error("structural snapshot: entry must be an object");
-      const e = rawEntry as Record<string, unknown>;
-      for (const key of ["uid", "id", "kind", "deprecatedIds", "relations", "membership"]) {
-        if (!(key in e)) throw new Error(`structural snapshot: entry missing ${key}`);
-      }
-      const { uid, id: entryId, kind } = e;
-      if (typeof uid !== "string") throw new Error("structural snapshot: entry uid must be a string");
-      if (typeof entryId !== "string") throw new Error("structural snapshot: entry id must be a string");
-      if (typeof kind !== "string") throw new Error("structural snapshot: entry kind must be a string");
-      let parsed: NodeId;
-      try {
-        parsed = NodeId.parse(entryId);
-      } catch (err) {
-        if (err instanceof IdError) throw new Error("structural snapshot: entry id must be a valid node id");
-        throw err;
-      }
-      if (parsed.kind !== kind) throw new Error("structural snapshot: entry id kind must match entry kind");
-      if (!Array.isArray(e.relations)) throw new Error("structural snapshot: entry relations must be an array");
-      if (idx.byUid.has(uid)) throw new Error(`structural snapshot: duplicate uid ${JSON.stringify(uid)}`);
-      const deprecatedIds = validatedDeprecatedIds(e.deprecatedIds, entryId);
-      const relations: Relation[] = [];
-      for (const rawRel of e.relations) {
-        if (typeof rawRel !== "object" || rawRel === null) throw new Error("structural snapshot: relation row must be an object");
-        const rr = rawRel as Record<string, unknown>;
-        validateSnapshotDirected(rr, "relation row");
-        validateSnapshotWeight(rr, "relation row");
-        const relData = { ...rr, attrs: structuredClone(rr.attrs ?? {}) };
-        const result = RelationSchema.safeParse(relData);
-        if (!result.success) throw new Error("structural snapshot: invalid relation row");
-        relations.push(result.data);
-      }
-      const membership = validatedMembership(e.membership);
-      const outRefs = outRefsFrom(relations, membership);
-      const entry: IndexEntry = {
-        uid,
-        id: entryId,
-        kind,
-        deprecatedIds: new Set(deprecatedIds),
-        outRefs,
-        membership,
-      };
-      for (const claim of [entry.id, ...entry.deprecatedIds]) {
-        const owner = idx.resolveUid(claim);
-        if (owner !== null) {
-          throw new Error(`structural snapshot: identity claim ${JSON.stringify(claim)} already in use by uid ${JSON.stringify(owner)}`);
-        }
-      }
-      idx.byUid.set(uid, entry);
-      idx.idToUid.set(entry.id, uid);
-      for (const dep of entry.deprecatedIds) idx.deprecatedToUid.set(dep, uid);
-      for (const oref of outRefs) {
-        const rows = idx.inRefs.get(oref.ref) ?? [];
-        rows.push({ sourceUid: uid, outRef: oref });
-        idx.inRefs.set(oref.ref, rows);
-      }
-    }
-    return idx;
-  }
 ```
 
-7. Add the module-private validation helpers (place near the top of the file, after `outRefsFrom`/`extractOutRefs`):
+4. Implement `fromDict()` by validating `STRUCTURAL_ENTRY_KEYS`, parsing relations through `RelationSchema`, validating `structuralRefs` with `STRUCTURAL_REF_ROLES`, then rebuilding the maps. Use `relationOutRefs(relations)` plus the validated structural refs to preserve the shared-`Relation` invariant.
 
-```ts
-function validatedDeprecatedIds(raw: unknown, entryId: string): string[] {
-  if (!Array.isArray(raw)) throw new Error("structural snapshot: deprecatedIds must be an array of strings");
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const dep of raw) {
-    if (typeof dep !== "string") throw new Error("structural snapshot: deprecatedIds must be an array of strings");
-    if (dep === entryId) throw new Error(`structural snapshot: identity claim ${JSON.stringify(dep)} is both live and deprecated in one entry`);
-    if (seen.has(dep)) throw new Error(`structural snapshot: duplicate deprecated identity claim ${JSON.stringify(dep)} in one entry`);
-    seen.add(dep);
-    out.push(dep);
-  }
-  return out;
-}
-
-function validateSnapshotWeight(raw: Record<string, unknown>, label: string): void {
-  if (!("weight" in raw)) return;
-  const weight = raw.weight;
-  if (typeof weight !== "number" || !Number.isFinite(weight)) {
-    throw new Error(`structural snapshot: ${label} weight must be a finite number`);
-  }
-}
-
-function validateSnapshotDirected(raw: Record<string, unknown>, label: string): void {
-  if ("directed" in raw && typeof raw.directed !== "boolean") {
-    throw new Error(`structural snapshot: ${label} directed must be a boolean`);
-  }
-}
-
-function validatedMembership(raw: unknown): Record<string, unknown> | undefined {
-  if (raw === null || raw === undefined) return undefined;
-  if (typeof raw !== "object") throw new Error("structural snapshot: entry membership must be an object or null");
-  const m = raw as Record<string, unknown>;
-  if (typeof m.shape !== "string") throw new Error("structural snapshot: membership shape must be a string");
-  const members = m.members;
-  if (members !== undefined && members !== null) {
-    if (Array.isArray(members)) {
-      if (members.some((x) => typeof x !== "string")) throw new Error("structural snapshot: membership members must be strings");
-    } else if (typeof members === "object") {
-      if (Object.values(members as Record<string, unknown>).some((v) => typeof v !== "string")) {
-        throw new Error("structural snapshot: membership member values must be strings");
-      }
-    } else {
-      throw new Error("structural snapshot: membership members must be an array or object");
-    }
-  }
-  const edges = m.edges;
-  if (edges !== undefined && edges !== null) {
-    if (!Array.isArray(edges)) throw new Error("structural snapshot: membership edges must be an array");
-    for (const edge of edges) {
-      if (typeof edge !== "object" || edge === null) throw new Error("structural snapshot: membership edge must be an object");
-      const e = edge as Record<string, unknown>;
-      if (typeof e.source !== "string") throw new Error("structural snapshot: membership edge source must be a string");
-      if (typeof e.predicate !== "string") throw new Error("structural snapshot: membership edge predicate must be a string");
-      if (typeof e.target !== "string") throw new Error("structural snapshot: membership edge target must be a string");
-      validateSnapshotDirected(e, "membership edge");
-      validateSnapshotWeight(e, "membership edge");
-      if ("attrs" in e && (typeof e.attrs !== "object" || e.attrs === null)) {
-        throw new Error("structural snapshot: membership edge attrs must be an object");
-      }
-      if (!RelationSchema.safeParse(e).success) throw new Error("structural snapshot: invalid membership edge");
-    }
-  }
-  return structuredClone(m);
-}
-```
-
-> Note on the `membership` type guard in `upsert`: the live path stores the raw facet object only when it is a non-null object (matching Python's `isinstance(membership, dict)`), so the serialized `membership` is `null` exactly when the live entry had none. `validatedMembership` returns `undefined` for `null`, keeping the round-trip symmetric.
+5. Add module-private helpers:
+   - `validatedDeprecatedIds(raw, entryId)` — array of unique strings, no live-id duplicate.
+   - `validateSnapshotWeight(raw, label)` — optional finite number.
+   - `validateSnapshotDirected(raw, label)` — optional boolean.
+   - `validatedStructuralRefs(raw)` — array of `{ref: string, role: one of STRUCTURAL_REF_ROLES}`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `rtk npm test -- index-snapshot`
-Expected: PASS. Then `rtk npm test` (full — `index-rebuild-equivalence.test.ts`, `structural-index.test.ts`, `corpus*.test.ts`, `cross_parity.test.ts` must all stay green, confirming the extraction refactor and the new `membership` field changed no behavior), `rtk npm run typecheck`, `rtk npm run check` clean.
+Expected: PASS. Then `rtk npm test` (full — `index-rebuild-equivalence.test.ts`, `structural-index.test.ts`, `corpus*.test.ts`, `cross_parity.test.ts` must all stay green, confirming the extraction refactor and `structuralRefs` snapshot shape changed no behavior), `rtk npm run typecheck`, `rtk npm run check` clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 rtk git add ts/src/structural-index.ts ts/tests/index-snapshot.test.ts
-rtk git commit -m "feat(ts-persistence): structural Index toDict/fromDict with shared-Relation replay"
+rtk git commit -m "feat(ts-persistence): structural Index toDict/fromDict with structural refs"
 ```
 
 ---
@@ -1787,18 +1713,20 @@ rtk git commit -m "feat(ts-persistence): Corpus load/reconcile/full-rebuild + fl
 
 ---
 
-### Task 7: Manifest maintenance across `add`/`delete`/`rename` + docs
+### Task 7: Manifest maintenance across `add`/`delete`/`rename`, Store walker parity + docs
 
-Wire the in-memory manifest into every write path so `flushIndex()` needs no re-reads, and document the TS index-persistence subsection. `add` records the node after its upserts; `delete` removes the path entry; `rename` removes the old path when the node moves and re-records the renamed node plus every rewritten referrer (their bytes changed). Mirrors `corpus.py` `add`/`delete`/`rename` manifest lines (147, 169, 277–281) and adds the docs subsection.
+Wire the in-memory manifest into every write path so `flushIndex()` needs no re-reads, route `Store.allNodes()` through the same `iterCorpusFiles()` walker as `Corpus`, and document the TS index-persistence subsection. `add` records the node after its upserts; `delete` removes the path entry; `rename` removes the old path when the node moves and re-records the renamed node plus every rewritten referrer (their bytes changed). The shared walker keeps `.nodes-index` private for both corpus construction and the lower-level store listing API.
 
 **Files:**
 - Modify: `ts/src/corpus.ts`
+- Modify: `ts/src/store.ts`
 - Modify: `docs/format.md`
 - Test: `ts/tests/corpus-persistence-rename.test.ts`
+- Test: `ts/tests/store.test.ts`
 
 **Interfaces:**
-- Consumes: `recordManifest`, `relPath`, `manifest` (Task 6); `iterCorpusFiles` (for the test's disk-vs-memory check).
-- Produces: no new public surface — `add`/`delete`/`rename` keep `manifest` consistent with disk.
+- Consumes: `recordManifest`, `relPath`, `manifest` (Task 6); `iterCorpusFiles` (for the test's disk-vs-memory check and `Store.allNodes()`).
+- Produces: no new public surface — `add`/`delete`/`rename` keep `manifest` consistent with disk, and `Store.allNodes()` ignores `.nodes-index`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1976,7 +1904,26 @@ In `ts/src/corpus.ts`:
 
 > Note: the existing TS `rename` upserts referrers into the structural index but did NOT previously call `searchIndex.upsert(referrer)` or commit referrer vectors — the Python `rename` does (a referrer's body is unchanged by a rename, so its search/vector state is unchanged, but Python refreshes it for the externally-edited-referrer case). This step brings TS `rename` to parity with Python by upserting referrers into search and committing their vectors, and preparing referrer vectors before any disk write. Confirm `corpus-similarity.test.ts`'s rename test stays green after this change.
 
-4. Append the index-persistence subsection to `docs/format.md`. Add this section at the end of the file (match the file's existing heading style — read the file first to confirm the heading level and tone, then append):
+4. Route `Store.allNodes()` through `iterCorpusFiles()` and add a store-level regression test. In `ts/src/store.ts`, import `iterCorpusFiles` and replace the recursive scan with:
+
+```ts
+  allNodes(): Node[] {
+    return iterCorpusFiles(this.root).map((f) => nodeFromMarkdown(f.data.toString("utf-8")));
+  }
+```
+
+Append this test to `ts/tests/store.test.ts`:
+
+```ts
+  it("allNodes ignores the private .nodes-index tree", () => {
+    store.writeFile(n("topic:a", "topic"));
+    mkdirSync(join(root, ".nodes-index"));
+    writeFileSync(join(root, ".nodes-index", "cache.md"), "not a node");
+    expect(store.allNodes().map((x) => x.id)).toEqual(["topic:a"]);
+  });
+```
+
+5. Append the index-persistence subsection to `docs/format.md`. Add this section at the end of the file (match the file's existing heading style — read the file first to confirm the heading level and tone, then append):
 
 ```markdown
 ### Index persistence (TypeScript)
@@ -1996,15 +1943,15 @@ an unchanged corpus skips the full parse + re-index pass.
   correctness — only the startup-speed benefit.
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `rtk npm test -- corpus-persistence-rename`
+Run: `rtk npm test -- corpus-persistence-rename store`
 Expected: PASS. Then `rtk npm test` (full — every existing test, especially `corpus-similarity.test.ts`'s rename test and `corpus.test.ts`, must stay green), `rtk npm run typecheck`, `rtk npm run check` clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-rtk git add ts/src/corpus.ts docs/format.md ts/tests/corpus-persistence-rename.test.ts
+rtk git add ts/src/corpus.ts ts/src/store.ts docs/format.md ts/tests/corpus-persistence-rename.test.ts ts/tests/store.test.ts
 rtk git commit -m "feat(ts-persistence): manifest maintenance across add/delete/rename + docs"
 ```
 
@@ -2020,16 +1967,16 @@ rtk git commit -m "feat(ts-persistence): manifest maintenance across add/delete/
 - §3 manifest byte-level invariant on both rebuild and reconcile; write-path hashing of `nodeToMarkdown`; rename referrer re-hash + old-path removal: Tasks 6, 7.
 - §4 load/reconcile; §4.1 full `build()` collision contract (duplicate-uid reject before `assertAddable`): Task 6 `reconcile`.
 - §4 error scoping (silent only for cache; corpus/collision errors propagate): Task 5 `loadSnapshot` catch is cache-only; Task 6 reconcile/fullRebuild let parse + `CollisionError` propagate — covered by the malformed-file and uid-collision tests.
-- §5 integrity validation (dup manifest uids, structural bijection, search bijection incl. posting-uid membership, vector uid-map + dim + namespace, manifest-path↔id, idByUid↔structural): Tasks 2, 3, 5.
+- §5 integrity validation (dup manifest uids, structural bijection, search bijection incl. posting uid presence and field-length bounds, vector uid-map + dim + namespace, manifest-path↔id, idByUid↔structural): Tasks 2, 3, 5.
 - §6 embedder rules (no-embedder ignores vectors; embedder requires matching namespace section): Task 5 `loadSnapshot` (vectors only read when `embedderNamespace !== null`), covered by the corrupt-vectors-ignored and namespace-mismatch tests.
 - §7 per-index serialization incl. shared-`Relation` invariant: Tasks 2 (search totals recompute), 3 (vectors verbatim + normalization check), 4 (structural replay).
 - §8 `flushIndex` (atomic write, vectors null without embedder); construction never writes: Tasks 5, 6.
 - §9 error-handling summary: Tasks 5, 6 (and the propagation tests in Task 6).
 - §10 testing matrix: every listed scenario maps to a test in Tasks 1–7 (round-trip, on-disk mutation, rename manifest, invalidation → silent rebuild, no-embedder tolerance, error propagation, full collision contract, empty-embedder corpus via Task 3's empty round-trip + Task 5's no-vectors-with-embedder, relation identity, integrity guards).
-- §11 module/file map: `snapshot.ts` created (Tasks 1, 5); `search.ts`/`similarity.ts`/`structural-index.ts` modified (Tasks 2–4); `corpus.ts` modified (Tasks 6, 7); `docs/format.md` extended (Task 7).
+- §11 module/file map: `snapshot.ts` created (Tasks 1, 5); `search.ts`/`similarity.ts`/`structural-index.ts` modified (Tasks 2–4); `corpus.ts` modified (Tasks 6, 7); `store.ts` modified (Task 7); `docs/format.md` extended (Task 7).
 
-**2. Placeholder scan:** No "TBD"/"add error handling"/"similar to Task N" — every step carries its full code. The `docs/format.md` step instructs reading the file first to match heading level, with the exact content to append provided.
+**2. Placeholder scan:** No unresolved placeholders or hand-wavy "similar to Task N" steps — every step carries its full code. The `docs/format.md` step instructs reading the file first to match heading level, with the exact content to append provided.
 
-**3. Type consistency:** Method names are stable across tasks — `toDict`/`fromDict` (camelCase, matching TS convention; Python uses `to_dict`/`from_dict`), `flushIndex`, `loadSnapshot`, `writeSnapshot`, `iterCorpusFiles`, `hashBytes`, `pathForNodeId`, `recordManifest`, `relPath`, `fullRebuild`, `reconcile`. `ManifestEntry`/`CorpusFile`/`Snapshot` shapes are defined in Task 1/5 and consumed unchanged in Task 6. The `Corpus.manifest` field (Task 6) is the type read by Task 7's tests. `IndexEntry.membership` (Task 4) is set in `upsert` and read by `toDict`.
+**3. Type consistency:** Method names are stable across tasks — `toDict`/`fromDict` (camelCase, matching TS convention; Python uses `to_dict`/`from_dict`), `flushIndex`, `loadSnapshot`, `writeSnapshot`, `iterCorpusFiles`, `hashBytes`, `pathForNodeId`, `recordManifest`, `relPath`, `fullRebuild`, `reconcile`. `ManifestEntry`/`CorpusFile`/`Snapshot` shapes are defined in Task 1/5 and consumed unchanged in Task 6. The `Corpus.manifest` field (Task 6) is the type read by Task 7's tests. Structural snapshot entries use `structuralRefs`, never a copied `membership` object.
 
 One parity adjustment is called out explicitly (Task 7, step 3 note): the existing TS `rename` did not refresh referrers' search/vector state; this plan brings it to parity with Python. This is intentional and verified by keeping `corpus-similarity.test.ts` green.
