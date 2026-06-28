@@ -10,6 +10,22 @@
 
 **Spec:** `docs/specs/2026-06-21-nodes-ts-kernel-design.md`
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical Plan-4 rollout for the TypeScript kernel baseline and the `python/` + `ts/` repo split. The base parity contract is still current: TypeScript uses camelCase APIs, writes the shared snake_case on-disk format, and semantic parity is pinned by shared fixtures/oracles rather than byte-identical YAML.
+
+The TypeScript kernel has grown substantially since this checklist:
+
+- The current `ts/` package now includes `Corpus`, structural `Index` (`structural-index.ts`), knowledge vocab, full-text `SearchIndex`, optional similarity `VectorIndex`, and per-language snapshot persistence. Historical statements below like "no Corpus", "no Index", "no knowledge vocab", and "`Store` is the full CRUD surface" describe Plan-4 scope, not current package boundaries.
+- Current `Store` is slim file mechanics (`writeFile`, `readFile`, `deleteFile`, `allNodes`, `pathFor`), matching the later Python boundary. Cross-corpus logic lives in `Corpus` and `Index`.
+- `Store.allNodes()` now uses `iterCorpusFiles()` so TS scans share snapshot file-walk behavior, including ignoring `.nodes-index/`.
+- `ts/src/index.ts` now exports later modules too: `Corpus`, snapshot helpers, `Index`, `SearchIndex`, `VectorIndex`, ranking, and similarity helpers.
+- `ts/package.json` now exposes built `dist/` artifacts and includes a `build` script in addition to the original test/typecheck/check scripts.
+- The shapes implementation in this plan was superseded by the structural-shapes redesign: current TS shapes split `membership`, `edges`, `order`, and `keys` into separate form facets, mirroring current Python.
+- The `docs/format.md` and `ts/README.md` snippets in Task 10 have already been integrated and later extended with structural index, vocab, search, similarity, and snapshot persistence. Do not replace current docs with the historical snippets below.
+
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `ts/src`, tests, package config, README, or `docs/format.md`.
+
 ## Global Constraints
 
 - **Behavioral + format parity, NOT identifier parity.** TS API is idiomatic camelCase; on-disk YAML keys are identical to Python. The **only** field differing API-vs-disk is `deprecatedIds` (API) ↔ `deprecated_ids` (disk). All relation/metadata/facet payload keys (`source`, `predicate`, `target`, `directed`, `weight`, `attrs`, `created`, `updated`, `version`, `members`, `edges`, `shape`, …) stay exactly as on disk.
@@ -27,6 +43,8 @@
 ---
 
 ## File Structure
+
+Current-code note: this file map is the original target. Current `ts/src` also contains `corpus.ts`, `structural-index.ts`, `search.ts`, `similarity.ts`, `snapshot.ts`, `ranking.ts`, and `vocab/`.
 
 ```
 ~/d/nodes/
@@ -50,6 +68,8 @@
 ---
 
 ## Task 1: Repo restructure + TS scaffold
+
+Current-code note: the repo split is complete. The current TS package config has since gained `main`/`types`/`exports` pointing at `dist/` and a `build` script, so the scaffold snippets below are only the initial bootstrap.
 
 **Files:**
 - Move (git): `src/` → `python/src/`, `tests/` → `python/tests/`, `pyproject.toml` → `python/pyproject.toml`
@@ -1358,6 +1378,8 @@ rtk git commit -m "feat(ts): port KindSpec + Registry validation"
 
 ## Task 8: shapes.ts
 
+Current-code note: this task's one-facet `Membership` shape is historical. Current TS shapes mirror the redesigned Python structural-shapes model: scope membership lives in `facets.membership`, while shape-owned form data lives in `facets.edges`, `facets.order`, and `facets.keys`.
+
 **Files:**
 - Create: `ts/src/shapes.ts`
 - Create: `ts/tests/shapes.test.ts`
@@ -1578,6 +1600,8 @@ rtk git commit -m "feat(ts): port structural shapes (membership facet + invarian
 ---
 
 ## Task 9: store.ts (historical Plan-1 CRUD surface)
+
+Current-code note: this task's full-CRUD `Store` was intentionally superseded by later structural-index work. Current `Store` is file mechanics only; `Corpus` owns resolution, collision checks, rename, search/vector updates, and manifest maintenance.
 
 **Files:**
 - Create: `ts/src/store.ts`
@@ -1919,6 +1943,8 @@ rtk git commit -m "feat(ts): port historical Plan-1 Store CRUD surface"
 ---
 
 ## Task 10: Barrel exports + cross-language parity + docs
+
+Current-code note: the barrel and parity fixtures remain, but current `ts/src/index.ts` exports the later Corpus, structural-index, search, similarity, snapshot, ranking, and vocab surfaces too. The `docs/format.md` and README sections below are historical Plan-4 snapshots and have been extended in current docs.
 
 **Files:**
 - Modify: `ts/src/index.ts`
