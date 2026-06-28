@@ -8,6 +8,12 @@
 
 **Tech Stack:** TypeScript (Node ≥20, ESM, `.js` import extensions, biome, vitest). All git/npm/npx/node tooling runs through the `rtk` wrapper.
 
+## Current State Note
+
+This plan has since been implemented. The core SP4 surface remains current: `src/encode.ts` exports the pure `spriteToAnsi(sprite: Sprite): string`, imports only `ValidationError` plus the `Sprite` type, and `Mindful` has no encoder method. Later CLI work composes `spriteToAnsi(mindful.sprite(id, scheme))` outside the API layer.
+
+The stale parts below are the test fixture setup and old SP3 renderer references. Current `src/sprite.ts` no longer exports `renderSprite`; it exports `spriteForIdentity(...)` for the organic sprite pipeline. Current `tests/encode.test.ts` builds direct `Sprite` fixtures, and the current encoder checks `typeof px !== "string"` before regex validation so non-string runtime pixels fail as `ValidationError` without unsafe stringification.
+
 ## Global Constraints
 
 - **No kernel changes.** All work is in `~/d/mindful/v6`. Dependency stays one-way (`mindful → @nodes/kernel`).
@@ -34,6 +40,8 @@ From `@nodes/kernel`: `ValidationError` is exported (the project's fail-early er
 
 The 8×8 test fixture reuses SP3's frozen byte-mapping seed `MAP_SEED = "c0808800" + "0".repeat(56)`, which has filled (non-background) cells, so the encoded sprite exercises multiple distinct colors.
 
+Current-code note: `renderSprite` is a historical SP3 name. In the implemented package, use direct `Sprite` fixtures for encoder unit tests, or use `spriteForIdentity` only when intentionally testing the current organic rendering path.
+
 ---
 
 ### Task 1: `encode.ts` — strict `spriteToAnsi` + barrel export
@@ -49,6 +57,8 @@ The 8×8 test fixture reuses SP3's frozen byte-mapping seed `MAP_SEED = "c080880
 - Produces: `function spriteToAnsi(sprite: Sprite): string` — validates a positive-width, even-height, rectangular, `#rrggbb` sprite (throws `ValidationError` otherwise) and returns half-block truecolor ANSI (4 text rows for an 8×8 sprite; no trailing newline).
 
 - [ ] **Step 1: Write the failing tests**
+
+Historical SP4 snippet: these tests import `renderSprite` because the original SP3 plan exported it. Current encoder tests should build plain `Sprite` fixtures directly and include the non-string runtime-pixel cases now covered by `tests/encode.test.ts`.
 
 Create `~/d/mindful/v6/tests/encode.test.ts`:
 ```ts
@@ -224,6 +234,8 @@ Expected: FAIL — `../src/encode.js` does not exist / `spriteToAnsi` is not exp
 
 - [ ] **Step 3: Implement `src/encode.ts`**
 
+Historical SP4 snippet: the current implementation adds an explicit `typeof px !== "string"` guard before `HEX_RE.test(px)` and throws a generic `ValidationError("sprite has invalid pixel")`. Preserve that hardening if editing current code.
+
 Create `~/d/mindful/v6/src/encode.ts`:
 ```ts
 import { ValidationError } from "@nodes/kernel";
@@ -336,3 +348,5 @@ rtk git commit -m "feat(encode): spriteToAnsi — strict half-block truecolor AN
 **2. Placeholder scan:** none — every code/test step is complete; the 2×2 expected string and validation cases are fully specified.
 
 **3. Type consistency:** `spriteToAnsi(sprite: Sprite): string` matches the spec; `Sprite`/`renderSprite`/`VisualIdentity` names match `sprite.ts`/`identity.ts`; `ValidationError` matches the kernel export; the test-local `fg`/`bg`/`channels` mirror the private implementation helpers without importing them.
+
+Current-code note: replace the historical `renderSprite`/`VisualIdentity` fixture dependency with direct `Sprite` fixtures when comparing against current code.
