@@ -8,6 +8,12 @@
 
 **Tech Stack:** TypeScript (Node ≥20, ESM, `.js` import extensions, zod, biome, vitest). No new runtime dependencies — pure integer/string math over the existing `VisualIdentity`. All git/npm/npx/node tooling runs through the `rtk` wrapper.
 
+## Current State Note
+
+This plan has since been implemented and then superseded by later organic visuals work. The historical SP3 baseline below describes an 8×8 mirrored-cell renderer with `spriteCells()` and `renderSprite()`. The current `~/d/mindful/v6` implementation exports `spriteForIdentity(identity, scheme?, size?)`, `validateSpriteSize()`, `MAX_SPRITE_SIZE`, and `Sprite`; `Mindful.sprite(thoughtId, scheme?, size = 24)` renders the organic formula-field pipeline at configurable even sizes up to 128. The original `tests/sprite.test.ts` no longer exists; current coverage lives in `sprite-integration.test.ts`, `sprite-golden.test.ts`, and the organic field/family/colormap tests.
+
+Current code also includes later facets and APIs layered on top of SP3: `captured` is required on `thought`, `Mindful.capture` requires `at`, aliases are optional, and ANSI encoding/CLI/catalog/semantic/import features exist. When auditing or modifying current code, preserve those later surfaces instead of replacing them with the SP3-era snippets.
+
 ## Global Constraints
 
 - **No kernel changes.** All work is in `~/d/mindful/v6`. Dependency stays one-way (`mindful → @nodes/kernel`).
@@ -17,7 +23,7 @@
 - **Color-independence of the pattern.** `spriteCells` is a function of the seed alone; the palette never affects which cells are filled.
 - **Fail early at the public boundary.** `renderSprite` validates `colors` (exactly 4, each `#rrggbb`); `spriteCells` validates the `VisualIdentity` shape on direct calls. Both throw `ValidationError` before producing output. No silent fallbacks, no short grids.
 - **Canonical lowercase output.** `Sprite.pixels` entries are lowercase `#rrggbb`, matching SP2 `resolve()`.
-- **Grid is 8×8 by contract.** Fixed, not parameterized (configurable size is SP4+).
+- **Historical SP3 baseline:** grid is 8×8 by contract, fixed, not parameterized. Current code has since moved to configurable organic sprites with a default size of 24.
 - **Byte mapping is frozen.** One seed byte per generated cell (`byteIndex = row*4 + col`); `filled = (b & 0x80) !== 0`; `ink = (((b >> 1) % 3) + 1)`. Do not "improve" density/masking in SP3.
 - **`rtk` gate, all green before each commit:** `rtk npm test && rtk npm run typecheck && rtk npm run check`. biome uses tabs, line width 120, and sorts imports on `--fix` (expected reformatting).
 
@@ -38,6 +44,8 @@ From `src/color.ts` (do not modify): `resolve(identity, scheme?) → string[]` (
 From `@nodes/kernel`: `ValidationError`, `RefError` are exported. `corpus.get(id)` throws `RefError` for a missing node.
 
 `VisualIdentitySchema` is `.strict()` and requires `slots` (4 entries) even though `spriteCells` ignores them — all test fixtures that call `spriteCells`/`renderSprite` directly must include 4 valid slots.
+
+Current-code note: `spriteCells` and `renderSprite` are historical SP3 names, not current exports. Use `spriteForIdentity` for current renderer tests and include `CAPTURED` in any direct `thought` fixtures.
 
 ---
 
@@ -64,6 +72,8 @@ Seed `"c0808800" + "0".repeat(56)` (64 hex chars). Bytes 0–3 are `0xc0, 0x80, 
 So row 0 generated cells `[1,2,3,0]`, mirrored → `[1,2,3,0,0,3,2,1]`. Rows 1–7 are all `0` (`[0,0,0,0,0,0,0,0]`).
 
 - [ ] **Step 1: Write the failing tests**
+
+Historical SP3 snippet: this creates the original unit test file for the 8×8 mirrored-cell renderer. Current code no longer has `tests/sprite.test.ts`; the organic renderer is covered by integration/golden tests plus field/family/colormap tests.
 
 Create `~/d/mindful/v6/tests/sprite.test.ts`:
 ```ts
@@ -142,6 +152,8 @@ Expected: FAIL — `../src/sprite.js` does not exist / `spriteCells` is not expo
 
 - [ ] **Step 3: Implement `sprite.ts` (types + `spriteCells`)**
 
+Historical SP3 snippet: do not replace current `src/sprite.ts` with this baseline in the implemented package. Current `src/sprite.ts` delegates to formula families, colormaps, and field normalization through `spriteForIdentity`.
+
 Create `~/d/mindful/v6/src/sprite.ts`:
 ```ts
 import { ValidationError } from "@nodes/kernel";
@@ -218,6 +230,8 @@ rtk git commit -m "feat(sprite): SpriteCells/Sprite types + pure spriteCells gen
 - Produces: `function renderSprite(identity: VisualIdentity, colors: string[]): Sprite` — validates `colors` (exactly 4, each `#rrggbb`), paints `pixels[r][c] = colors[cells[r][c]]` lowercased, returns `{ width: 8, height: 8, pixels }`. Throws `ValidationError` on a bad `colors` argument and (via `spriteCells`) on a malformed identity.
 
 - [ ] **Step 1: Write the failing tests**
+
+Historical SP3 snippet: current renderer tests should target `spriteForIdentity` and `Mindful.sprite(..., size?)`, not `renderSprite`.
 
 First, **merge `renderSprite` into the existing `../src/sprite.js` import** at the top of the file (do not add a second import statement from the same module — biome's import organizer flags duplicates). The line becomes:
 ```ts
@@ -298,6 +312,8 @@ Expected: FAIL — `renderSprite` is not exported.
 
 - [ ] **Step 3: Implement `renderSprite`**
 
+Historical SP3 snippet: the current implementation validates colorschemes through the organic rendering path and no longer exports `renderSprite`.
+
 Append to `~/d/mindful/v6/src/sprite.ts`:
 ```ts
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
@@ -349,6 +365,8 @@ rtk git commit -m "feat(sprite): renderSprite — validated, lowercase-normalize
 - Produces: `Mindful.sprite(thoughtId: string, scheme?: Colorscheme): Sprite` — loads the thought (`RefError` if absent), loads its identity once (`FacetError` if missing/malformed), returns `renderSprite(identity, resolve(identity, scheme))`.
 
 - [ ] **Step 1: Write the failing integration tests**
+
+Historical SP3 snippet: the current `Mindful.capture` API requires `at`, and current `Mindful.sprite` accepts an optional `size`. Current direct `thought` fixtures must include `CAPTURED`.
 
 Create `~/d/mindful/v6/tests/sprite-integration.test.ts`:
 ```ts
@@ -436,6 +454,8 @@ Expected: FAIL — `m.sprite` is not a function.
 
 - [ ] **Step 3: Add the `sprite()` method to `api.ts`**
 
+Historical SP3 snippet: the implemented API now calls `spriteForIdentity(identity, scheme, size)` and defaults to size `24`, rather than composing `resolve()` with `renderSprite()`.
+
 In `~/d/mindful/v6/src/api.ts`, add to the existing import from `./sprite.js` (create the import line near the other local imports):
 ```ts
 import { type Sprite, renderSprite } from "./sprite.js";
@@ -492,3 +512,5 @@ rtk git commit -m "feat(api): Mindful.sprite() + barrel exports for the renderer
 **2. Placeholder scan:** none — every code/test step contains complete code; byte-mapping expected values are pre-computed.
 
 **3. Type consistency:** `CellValue`/`SpriteCells`/`Sprite`/`spriteCells`/`renderSprite` used identically across tasks; `Mindful.sprite(thoughtId, scheme?)` matches the spec signature; `resolve`/`visualIdentityOf`/`defaultColorscheme`/`Colorscheme` names match `color.ts`/`identity.ts`.
+
+Current-code note: these self-review checks describe the SP3 baseline. In the implemented package, the analogous current checks are `Sprite`/`spriteForIdentity`/`Mindful.sprite(thoughtId, scheme?, size?)`, deterministic organic goldens, size validation, and preservation of later `captured`/alias surfaces.
