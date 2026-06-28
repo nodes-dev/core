@@ -4,19 +4,25 @@
 
 **Goal:** Build the headless `mindful` TypeScript package in `~/d/mindful/v6` over the `@nodes/kernel` substrate — a `Mindful` API that captures thoughts, builds mindmaps (graph) and journals (list), and encapsulates all structural form-facet maintenance so callers never hand-build `membership`/`edges`/`order`.
 
-**Architecture:** `@nodes/kernel` gains a real build (`dist/`) so it is consumable as a package. `~/d/mindful/v6` is a new TS package depending on it via a one-way `file:` dependency. The package registers a *mindful profile* (`thought`/`mindmap`/`journal` kinds adopting the kernel's `graph`/`list` shapes) and exposes a `Mindful` class that wraps a `Corpus`, translating high-level intents into validated facet mutations.
+**Architecture:** `@nodes/kernel` gains a real build (`dist/`) so it is consumable as a package. At SP1, `~/d/mindful/v6` was created as a TS package depending on it via a one-way `file:` dependency. The package registers a *mindful profile* (`thought`/`mindmap`/`journal` kinds adopting the kernel's `graph`/`list` shapes) and exposes a `Mindful` class that wraps a `Corpus`, translating high-level intents into validated facet mutations.
 
 **Tech Stack:** TypeScript 5.5+, zod v3 (transitively via the kernel), vitest, biome (width 120). `@nodes/kernel` at `~/d/nodes/ts` (already implements the structural-shape contract — Plan A merged). The mindful package at `~/d/mindful/v6`. All commands via the `rtk` wrapper.
 
-This is **Plan B**, the third and final plan of mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part B / §3). It depends on Plan A (both kernels merged: Python `a7dd55b`, TS `f2f9749`). SP2 (the `visualIdentity` facet) and SP3 (renderer + CLI/TUI) are out of scope.
+This is **Plan B**, the third and final plan of mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part B / §3). It depends on Plan A (the Python and TypeScript kernel shape redesigns). This plan has since been implemented; `~/d/mindful/v6` now exists and later SPs have extended it. The task steps below are the historical SP1 implementation sequence, not current scaffolding instructions. Later SP additions such as `visualIdentity`, captured timestamps, CLI entry points, catalogs, semantic indexing, import tooling, and benchmark gates are intentionally outside this SP1 plan.
 
 ## Cross-Repo Structure
 
 This plan spans **two repos**:
-- **Task 1** modifies `~/d/nodes/ts` (adds the kernel build) — committed in the `nodes` git repo on a feature branch.
-- **Tasks 2–6** create and build `~/d/mindful/v6` — a NEW repo (`git init` in Task 2), committed there.
+- **Task 1** modifies `~/d/nodes/ts` (adds the kernel build) — committed in the `nodes` git repo.
+- **Tasks 2–6** created and built `~/d/mindful/v6` — a new repo at the time of SP1 (`git init` in Task 2), committed there.
 
 The SDD progress ledger lives in `~/d/nodes/.superpowers/sdd/progress.md` (the controller's durable record across both repos).
+
+## Current State Note
+
+The current `~/d/mindful/v6` package is no longer the minimal SP1 package described by the early tasks. It now has a real `dist/` build, package `exports`/`types`, CLI bins, `package-lock.json`, and additional modules/tests for later SPs. In particular, the current `thought` kind requires later facets (`visualIdentity`, `captured`) and allows an optional `alias`; Task 3 below intentionally shows the original SP1 surface where `thought` had no required facets.
+
+Use this plan to understand and audit the SP1 foundation. Do not execute Task 2 as a fresh scaffold against the current package; for new work, use the later SP plans under `~/d/mindful/v6/docs/plans/`.
 
 ## Global Constraints (from spec §3, copied verbatim where exact)
 
@@ -47,6 +53,8 @@ The SDD progress ledger lives in `~/d/nodes/.superpowers/sdd/progress.md` (the c
 | `~/d/mindful/v6/src/profile.ts` | `registerMindfulProfile(reg)` | 3 |
 | `~/d/mindful/v6/src/api.ts` | `Mindful` class (thoughts/tags/queries, then mindmaps, then journals) | 4,5,6 |
 | `~/d/mindful/v6/tests/*.test.ts` | per-area tests | 2–6 |
+
+This table is the SP1 file map. The current package contains additional source, docs, scripts, tests, and CLI bins from later SPs.
 
 `api.ts` grows across Tasks 4–6 (thoughts/tags/queries → mindmaps → journals); each task adds a cohesive method group. If `api.ts` grows unwieldy, a split into `api/thoughts.ts`/`api/mindmaps.ts`/`api/journals.ts` is acceptable, but SP1's surface is small enough for one file — do not split preemptively.
 
@@ -1082,6 +1090,6 @@ Key invariants to confirm by inspection after the gates are green:
 
 ## Deferred (per spec §7)
 
-- **SP2:** the `visualIdentity` facet and identity-derivation (`thought = note + VisualIdentity`).
-- **SP3:** renderer (2D art/animation) + CLI/TUI shell; natural-systems formula-viz.
+- **SP2 at the time of this plan:** the `visualIdentity` facet and identity-derivation (`thought = note + VisualIdentity`). This has since been implemented in later SP work.
+- **SP3 at the time of this plan:** renderer (2D art/animation) + CLI/TUI shell; natural-systems formula-viz. Later SP work has added renderer/encoder/CLI surfaces.
 - Tag auto-creation + a `topic` kind; thought-id slugs derived from titles (SP1 mints `thought:<uid>` — unique, collision-free); publishing `@nodes/kernel` to a registry; multi-shape kinds; additional shapes.
