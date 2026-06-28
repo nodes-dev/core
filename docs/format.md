@@ -48,10 +48,10 @@ relations-graph queries `outbound`, `inbound`, `neighbors`, `dangling`.
   as dangling — retained in the live index and on disk — and are surfaced by `dangling()`.
 
 ### Known kernel limitations
-- Python index persistence is a disposable cache: files remain the source of truth, and
-  `Corpus(root)` reconciles the snapshot against current file hashes before serving indexes.
-  TypeScript snapshot persistence is not implemented yet; future TypeScript persistence must
-  use the separate reserved `snapshot.ts.json` filename.
+- Index persistence is a disposable per-language cache in both kernels: files remain the
+  source of truth, and `Corpus(root)` / `new Corpus(root)` reconcile snapshots against current
+  file hashes before serving indexes. Python and TypeScript use separate snapshot filenames
+  (`snapshot.py.json`, `snapshot.ts.json`) and never read each other's snapshots.
 - No public membership-graph traversal (tree descendants, DAG reachability) yet — membership refs
   are tracked internally for rename but are not exposed as graph edges.
 
@@ -149,8 +149,9 @@ exposes `Corpus.search(query, limit=None) -> list[SearchHit]`.
   (`fixtures/search.oracle.json`) pin ranked ids and 6-dp scores; both languages
   build the index and assert equality. Scores are not claimed bit-identical.
 
-Python persistence for the derived indexes is described below; TypeScript still rebuilds the
-full-text index in memory until future `snapshot.ts.json` persistence is implemented.
+Persistence for the derived indexes is described below. Python and TypeScript snapshots are
+separate private caches, but both kernels keep the full-text index current through the same
+semantic contract.
 
 ### TypeScript full-text search
 
@@ -228,8 +229,7 @@ rather than trusted blindly.
 
 Writing is explicit: `Corpus.flush_index()` serializes the three indexes plus the
 manifest and writes atomically. Construction never writes the snapshot. Reconcile
-enforces the same collision contract as a from-scratch build. `snapshot.ts.json` is the
-reserved filename for future TypeScript snapshot persistence; the Python loader does not
+enforces the same collision contract as a from-scratch build. The Python loader does not
 read TypeScript snapshots, and the filenames remain separate.
 
 ### Index persistence (TypeScript)
@@ -247,3 +247,6 @@ an unchanged corpus skips the full parse + re-index pass.
   corrupt snapshot triggers a silent full rebuild (it is a cache, never the source of truth).
 - **Files remain authoritative.** The snapshot can be deleted at any time with no loss of
   correctness — only the startup-speed benefit.
+- **Validation is fail-closed.** Malformed cache sections, manifest/index uid-set divergence,
+  impossible search postings, vector namespace/dim mismatches, and structural identity
+  inconsistencies discard the snapshot and rebuild from files.

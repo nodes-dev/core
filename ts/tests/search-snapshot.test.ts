@@ -46,6 +46,27 @@ describe("SearchIndex snapshot", () => {
     expect(() => SearchIndex.fromDict(d)).toThrow();
   });
 
+  it("rejects an empty posting bucket", () => {
+    const d = seed().toDict();
+    d.postings.ghost = {};
+    expect(() => SearchIndex.fromDict(d)).toThrow();
+  });
+
+  it("rejects a zero posting tf pair", () => {
+    const d = seed().toDict();
+    const uid = Object.keys(d.lengths)[0];
+    d.postings.ghost = { [uid]: [0, 0] };
+    expect(() => SearchIndex.fromDict(d)).toThrow();
+  });
+
+  it("rejects a posting tf greater than the field length", () => {
+    const d = seed().toDict();
+    const uid = Object.keys(d.lengths)[0];
+    const [titleLen] = d.lengths[uid];
+    d.postings.ghost = { [uid]: [titleLen + 1, 0] };
+    expect(() => SearchIndex.fromDict(d)).toThrow();
+  });
+
   it("rejects a non-integer / negative length pair", () => {
     const d = seed().toDict();
     const uid = Object.keys(d.lengths)[0];

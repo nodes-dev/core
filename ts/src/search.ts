@@ -185,18 +185,29 @@ export class SearchIndex {
     for (const [term, docs] of Object.entries(raw.postings as Record<string, unknown>)) {
       if (typeof docs !== "object" || docs === null)
         throw new Error("search snapshot: postings bucket must be an object");
+      if (Object.keys(docs).length === 0)
+        throw new Error(`search snapshot: postings bucket for term ${JSON.stringify(term)} must not be empty`);
       const bucket = new Map<string, [number, number]>();
       for (const [uid, tf] of Object.entries(docs as Record<string, unknown>)) {
         if (!lengths.has(uid)) {
           throw new Error(`search snapshot: posting uid ${JSON.stringify(uid)} absent from lengths`);
         }
-        bucket.set(
-          uid,
-          nonNegativeIntPair(
-            tf,
-            `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)}`,
-          ),
+        const tfPair = nonNegativeIntPair(
+          tf,
+          `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)}`,
         );
+        if (tfPair[0] === 0 && tfPair[1] === 0) {
+          throw new Error(
+            `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)} must not be all zero`,
+          );
+        }
+        const [titleLen, bodyLen] = lengths.get(uid) as [number, number];
+        if (tfPair[0] > titleLen || tfPair[1] > bodyLen) {
+          throw new Error(
+            `search snapshot: posting tf for term ${JSON.stringify(term)} uid ${JSON.stringify(uid)} exceeds field length`,
+          );
+        }
+        bucket.set(uid, tfPair);
       }
       postings.set(term, bucket);
     }

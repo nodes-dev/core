@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -52,5 +52,12 @@ describe("Store file mechanics", () => {
     store.writeFile(n("topic:b", "topic"));
     store.writeFile(n("topic:a", "topic"));
     expect(store.allNodes().map((x) => x.id)).toEqual(["topic:a", "topic:b"]);
+  });
+
+  it("allNodes ignores the private .nodes-index tree", () => {
+    store.writeFile(n("topic:a", "topic"));
+    mkdirSync(join(root, ".nodes-index"));
+    writeFileSync(join(root, ".nodes-index", "cache.md"), "not a node");
+    expect(store.allNodes().map((x) => x.id)).toEqual(["topic:a"]);
   });
 });
