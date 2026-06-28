@@ -10,6 +10,23 @@
 
 **Reference (read before starting):** the design doc `~/d/nodes/docs/specs/2026-06-22-nodes-ts-structural-index-design.md`, and the Python sources this mirrors: `~/d/nodes/python/src/nodes/kernel/{index,corpus,store}.py` and their tests `~/d/nodes/python/tests/test_{index,corpus,store,index_rebuild_equivalence}.py`.
 
+## Current State Note
+
+This plan has since been implemented and remains useful as the historical TypeScript Plan-2 rollout for slim `Store`, structural `Index`, and `Corpus`. The core boundary is still current: `Store` is file mechanics, `Index` is pure in-memory structural data, and `Corpus` owns mutations, resolution, graph queries, and rename.
+
+The TypeScript kernel has grown since this checklist was written:
+
+- Current `Corpus` is `Corpus(root, registry?, embedder?)`. It still owns the structural index, and now also owns full-text `SearchIndex`, optional similarity `VectorIndex`, a live manifest, snapshot load/reconcile, and `flushIndex()`.
+- Current construction attempts to load `.nodes-index/snapshot.ts.json` and reconcile it against current file hashes before falling back to a full rebuild. The plan's "always rebuildable from markdown files" remains true, but construction no longer always parses every file.
+- `Store.allNodes()` now uses `iterCorpusFiles()` so scans share snapshot file-walk rules, including ignoring `.nodes-index/`.
+- `Index` now also exposes `toDict()` / validating `fromDict()` for snapshot persistence. The class still does no file I/O.
+- Later structural-shapes redesign split structural refs across `membership`, `edges`, `order`, and `keys` facets, so current ref roles include `edges_source`, `edges_target`, `order_member`, and `keys_value` instead of the historical one-facet membership edge roles shown below.
+- The knowledge vocab has since been ported to TypeScript; the "knowledge vocab is NOT ported" constraint below is historical Plan-2 scope, not current package state.
+- Current `Corpus` also exposes `idsByKind(kind)` and `allByKind(kind)`, which are later additions outside this plan.
+- The `docs/format.md` and `ts/README.md` updates in Task 8 have already been integrated and extended with vocab, full-text search, similarity, and snapshot persistence. Do not replace current docs with the historical snippets below.
+
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `ts/src`, tests, README, or `docs/format.md`.
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
@@ -27,6 +44,8 @@ Every task's requirements implicitly include this section.
 ---
 
 ### Task 1: Slim the `Store` to file mechanics
+
+Current-code note: the slim `Store` surface from this task is implemented, with one later persistence-driven change: `Store.allNodes()` delegates to `iterCorpusFiles()` instead of a private recursive scanner.
 
 **Files:**
 - Modify: `ts/src/store.ts` (full rewrite — strip cross-corpus logic)
@@ -204,6 +223,8 @@ rtk git commit -m "refactor(ts): slim Store to file mechanics (cross-corpus logi
 ---
 
 ### Task 2: `Index` — data structures, resolution, collision gate, upsert/remove
+
+Current-code note: `Index` now also has validating snapshot serialization (`toDict()` / `fromDict()`). Current structural refs reflect the redesigned shape facets (`membership`, `edges`, `order`, `keys`), so do not use this task's older one-facet membership role list as current code.
 
 **Files:**
 - Create: `ts/src/structural-index.ts`
@@ -707,6 +728,8 @@ rtk git commit -m "feat(ts): Index graph queries (outbound/inbound/dangling, rel
 
 ### Task 4: `Corpus` — CRUD, resolution, neighbors (`rename` stub)
 
+Current-code note: current `Corpus` construction is no longer just `Index.build(this.store.allNodes())`; it loads/reconciles snapshots, builds `SearchIndex`, optionally builds `VectorIndex`, and maintains a manifest. The CRUD and graph-query APIs from this task are still present.
+
 **Files:**
 - Create: `ts/src/corpus.ts`
 - Create: `ts/tests/corpus.test.ts`
@@ -952,6 +975,8 @@ rtk git commit -m "feat(ts): Corpus CRUD + resolution + graph queries (rename st
 ---
 
 ### Task 5: `Corpus.rename` — O(degree) referrer rewrite + registry validation
+
+Current-code note: the O(degree), validate-all-before-write rename contract is still current. Later plans extended the commit path to refresh `SearchIndex`, optional `VectorIndex`, and manifest entries for the renamed node and every rewritten referrer.
 
 **Files:**
 - Modify: `ts/src/corpus.ts` (replace the `rename` stub with the real implementation)
@@ -1710,6 +1735,8 @@ rtk git commit -m "test: cross-language Corpus.rename parity (shared fixture cor
 ---
 
 ### Task 8: Barrel exports + smoke test + docs
+
+Current-code note: current `ts/src/index.ts` exports additional surfaces added later (`SearchIndex`, `VectorIndex`, snapshot helpers, ranking, similarity, and vocab). The docs snippets below are historical and have been superseded by current `docs/format.md` and `ts/README.md`.
 
 **Files:**
 - Modify: `ts/src/index.ts` (barrel — add `Corpus`, `Index` + its types)
