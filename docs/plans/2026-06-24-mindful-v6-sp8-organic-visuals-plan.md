@@ -8,7 +8,19 @@
 
 **Tech Stack:** TypeScript (ESM, `.js` import specifiers), vitest, zod (existing), `@nodes/kernel` (existing, no changes). No new runtime dependencies.
 
-**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp8-organic-visuals-design.md` (committed `f394a5f`). Section references below (§7.1, §7.2, …) point into it.
+**Spec:** `~/d/nodes/docs/specs/2026-06-24-mindful-v6-sp8-organic-visuals-design.md`. Section references below (§7.1, §7.2, …) point into it.
+
+## Current State Note
+
+This plan has since been implemented and is still mostly accurate for the organic visual pipeline: `hsl.ts`, `field.ts`, `colormap.ts`, `families.ts`, `sprite.ts`, `Mindful.sprite`, the ANSI encoder tests, and the golden sprite tests all exist in current `~/d/mindful/v6`.
+
+There are three important current-code differences from the historical task text below:
+
+- `src/sprite.ts` is no longer reduced to the `Sprite` interface only. Current code deliberately centralizes the public render helper there: `spriteForIdentity(identity, scheme = defaultColorscheme, size = 24)`, plus `validateSpriteSize` and `MAX_SPRITE_SIZE = 128`.
+- `Mindful.sprite(thoughtId, scheme, size)` delegates to `spriteForIdentity` instead of inlining `clusterBucket → FAMILIES → normalizeField → colormap` in `api.ts`.
+- The size contract is stricter than the original text: size must be a positive even integer and must be `<= 128`. The same validation applies at both the `Mindful.sprite` and `spriteForIdentity` boundaries.
+
+Treat the snippets below as the original transition plan, not as replacement code for current `sprite.ts` or `api.ts`.
 
 ## Global Constraints
 
@@ -19,10 +31,10 @@
 - **Seed byte layout (§7.2, pinned):** `seed` is 64 lowercase hex chars (32 bytes). Cluster = bytes `0–1` (uint16 BE) `% K`; PRNG seed = bytes `2–5` (uint32 BE); parameter words = bytes `6–31`, word `j` at byte `6 + 2j` (2 bytes BE → `u ∈ [0,1)`). These three regions are disjoint.
 - **Generator constants (§7.1, pinned):** every numeric constant is fixed in `families.ts`; the golden tests depend on them.
 - **`K = CLUSTER_BUCKETS = FAMILIES.length`** (6 at the end of this plan). `clusterId` is derived from the seed at render time; it is **not** stored — no facet schema change, no migration.
-- **`size`** defaults to `24`, must be a positive **even** integer (the SP4 encoder requires even height); fail-early `ValidationError` otherwise.
+- **`size`** defaults to `24`, must be a positive **even** integer (the SP4 encoder requires even height); fail-early `ValidationError` otherwise. Current code also caps public sprite size at `MAX_SPRITE_SIZE = 128`.
 - **`hsl.ts` is internal** — shared by `color.ts` and `colormap.ts`, **not** added to the `index.ts` barrel.
 - **House rules:** Composition > inheritance. No "legacy"/"compatibility" layers. No "Unified" prefix. No `Co-Authored-By` trailers in commits.
-- **Tooling:** all git/npm/npx run through `rtk`. Formatting is biome (tabs, width 120); fix with `rtk npx @biomejs/biome check --write <files>`. `rtk npm run check` is read-only. **Do not use `grep`/`rg` inside the rtk env** (corrupted output) — use file tools.
+- **Tooling:** all git/npm/npx run through `rtk`. Formatting is biome (tabs, width 120); fix with `rtk npx @biomejs/biome check --write <files>`. `rtk npm run check` is read-only. Use `rtk rg` for searches and read target files directly when validating exact snippets.
 - **Gate (every task ends green):** `rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build`.
 
 ---
@@ -36,9 +48,9 @@
 | `src/field.ts` (new) | `Field` type, seed-layout readers, `mapSeed*`, `clusterBucket`, `prngSeed`, `mulberry32`, `normalizeField` | 2 |
 | `src/colormap.ts` (new) | `colormap(clusterId, scheme) → (v) => hex`; scheme validation at the boundary | 3 |
 | `src/families.ts` (new) | `Family` type, `FAMILIES` registry (K=6), `K`, pure cores `logisticMap`/`phyllotaxisSeeds` | 4,5,6 |
-| `src/api.ts` (modify) | `Mindful.sprite` reroute via the pipeline + `size` param | 7 |
-| `src/sprite.ts` (modify) | reduced to the `Sprite` interface only (byte-mirror deleted) | 8 |
-| `src/index.ts` (modify) | barrel: drop byte-mirror names, keep `Sprite` | 8 |
+| `src/api.ts` (modify) | `Mindful.sprite` reroute via the pipeline + `size` param; current code delegates to `spriteForIdentity` | 7 |
+| `src/sprite.ts` (modify) | current code owns `Sprite`, `spriteForIdentity`, `validateSpriteSize`, and `MAX_SPRITE_SIZE` | 8 |
+| `src/index.ts` (modify) | barrel: drop byte-mirror names, export `spriteForIdentity` and `Sprite` | 8 |
 
 Tests: `tests/hsl.test.ts` (new, T1), `tests/field.test.ts` (new, T2), `tests/colormap.test.ts` (new, T3), `tests/families.test.ts` (new, grown T4–6), `tests/sprite-integration.test.ts` (rewritten, T7), `tests/encode.test.ts` (rewritten, T8), `tests/sprite.test.ts` (deleted, T8).
 
@@ -186,8 +198,8 @@ Expected: PASS — new HSL contract holds and `resolve` behavior is unchanged.
 ```bash
 rtk npx @biomejs/biome check --write src/hsl.ts src/color.ts tests/hsl.test.ts
 rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
-git add src/hsl.ts src/color.ts tests/hsl.test.ts
-git commit -m "refactor(color): extract hexToHsl/hslToHex into internal hsl.ts with validation + clamping"
+rtk git add src/hsl.ts src/color.ts tests/hsl.test.ts
+rtk git commit -m "refactor(color): extract hexToHsl/hslToHex into internal hsl.ts with validation + clamping"
 ```
 
 ---
@@ -195,6 +207,8 @@ git commit -m "refactor(color): extract hexToHsl/hslToHex into internal hsl.ts w
 ## Task 2: `src/field.ts` — Field type, seed layout, PRNG, normalization
 
 Pure primitives shared by every generator. Implements the pinned §7.2 seed layout and the §7.1 normalization modes + constant-field rule.
+
+Current-code note: the implemented `field.ts` is stricter than the historical snippet. It validates `spec.min`/`spec.max`, rejects unsupported normalize modes, uses a `BigInt`-backed seed reader before converting to number, accepts `readonly` arrays in `mapSeedPick`, and uses a `nextDown` guard so `mapSeed` stays strictly below `max`.
 
 **Files:**
 - Create: `src/field.ts`
@@ -502,8 +516,8 @@ Expected: PASS.
 ```bash
 rtk npx @biomejs/biome check --write src/field.ts tests/field.test.ts
 rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
-git add src/field.ts tests/field.test.ts
-git commit -m "feat(field): Field type, pinned seed layout, mulberry32 PRNG, normalizeField"
+rtk git add src/field.ts tests/field.test.ts
+rtk git commit -m "feat(field): Field type, pinned seed layout, mulberry32 PRNG, normalizeField"
 ```
 
 ---
@@ -614,8 +628,8 @@ Expected: PASS.
 ```bash
 rtk npx @biomejs/biome check --write src/colormap.ts tests/colormap.test.ts
 rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
-git add src/colormap.ts tests/colormap.test.ts
-git commit -m "feat(colormap): cluster-keyed single-hue HSL ramp with scheme validation"
+rtk git add src/colormap.ts tests/colormap.test.ts
+rtk git commit -m "feat(colormap): cluster-keyed single-hue HSL ramp with scheme validation"
 ```
 
 ---
@@ -791,8 +805,8 @@ Expected: PASS.
 ```bash
 rtk npx @biomejs/biome check --write src/families.ts tests/families.test.ts
 rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
-git add src/families.ts tests/families.test.ts
-git commit -m "feat(families): registry scaffolding + modal-acoustics & n-body generators"
+rtk git add src/families.ts tests/families.test.ts
+rtk git commit -m "feat(families): registry scaffolding + modal-acoustics & n-body generators"
 ```
 
 ---
@@ -952,8 +966,8 @@ Expected: PASS (registry tests now cover 4 families).
 ```bash
 rtk npx @biomejs/biome check --write src/families.ts tests/families.test.ts
 rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
-git add src/families.ts tests/families.test.ts
-git commit -m "feat(families): logistic-map + vogel-phyllotaxis generators"
+rtk git add src/families.ts tests/families.test.ts
+rtk git commit -m "feat(families): logistic-map + vogel-phyllotaxis generators"
 ```
 
 ---
@@ -1162,8 +1176,8 @@ Expected: PASS. `K === 6`.
 ```bash
 rtk npx @biomejs/biome check --write src/families.ts tests/families.test.ts
 rtk npm test && rtk npm run typecheck && rtk npm run check && rtk npm run build
-git add src/families.ts tests/families.test.ts
-git commit -m "feat(families): gray-scott + lorenz generators (K=6 complete)"
+rtk git add src/families.ts tests/families.test.ts
+rtk git commit -m "feat(families): gray-scott + lorenz generators (K=6 complete)"
 ```
 
 ---
@@ -1172,6 +1186,8 @@ git commit -m "feat(families): gray-scott + lorenz generators (K=6 complete)"
 
 Reroute `Mindful.sprite` to the new pipeline, add the `size` parameter, and rewrite the sprite-integration tests for the organic output. The byte-mirror still exists after this task (deleted in Task 8) but is no longer used by `api.ts`.
 
+Current-code note: the final implementation moved the render pipeline into `spriteForIdentity` in `src/sprite.ts`, and `Mindful.sprite` is now thin glue: load node, call `visualIdentityOf`, then delegate to `spriteForIdentity(identity, scheme, size)`. Keep that helper boundary if editing current code; do not paste the older inline pipeline into `api.ts`.
+
 **Files:**
 - Modify: `src/api.ts:22-27` (imports) and `src/api.ts:160-166` (the `sprite` method)
 - Test: `tests/sprite-integration.test.ts` (rewrite in full)
@@ -1179,6 +1195,8 @@ Reroute `Mindful.sprite` to the new pipeline, add the `size` parameter, and rewr
 **Interfaces:**
 - Consumes: `clusterBucket`, `normalizeField` from `./field.js`; `colormap` from `./colormap.js`; `FAMILIES`, `K` from `./families.js`; `type Sprite` from `./sprite.js`; existing `visualIdentityOf`, `Colorscheme`, `defaultColorscheme`, `ValidationError`.
 - Produces: `Mindful.sprite(thoughtId: string, scheme?: Colorscheme, size?: number): Sprite` — `size` defaults to `24`; rendered field is `size × size`.
+
+Current-code additions: `tests/sprite-integration.test.ts` also verifies `spriteForIdentity(identity, undefined)` equals `m.sprite(id)`, enforces size validation through the helper boundary, renders the maximum supported size `128`, rejects non-integer sizes, and rejects sizes above `128`.
 
 - [ ] **Step 1: Rewrite the test** — replace `tests/sprite-integration.test.ts` entirely:
 
@@ -1280,6 +1298,8 @@ import type { Sprite } from "./sprite.js";
 
 - [ ] **Step 4: Replace the `sprite` method** (currently `src/api.ts:160-166`):
 
+Current-code note: current `api.ts` uses the shorter delegated form shown after this historical inline version.
+
 ```ts
 	/** Render a thought's stored visual identity to an organic generative sprite (size × size, default 24),
 	 * themed by a colorscheme. The seed selects a formula family (cluster = seed bytes 0-1 % K) and drives
@@ -1297,6 +1317,18 @@ import type { Sprite } from "./sprite.js";
 		const paint = colormap(cluster, scheme); // validates the scheme before the pixel loop
 		const pixels = field.values.map((row) => row.map((v) => paint(v)));
 		return { width: size, height: size, pixels };
+	}
+```
+
+Current delegated form:
+
+```ts
+	/** Render a thought's stored visual identity through the organic formula-field pipeline. Pure glue:
+	 * no derived identity fallback, persistence, or mutation. */
+	sprite(thoughtId: string, scheme: Colorscheme = defaultColorscheme, size = 24): Sprite {
+		const node = this.corpus.get(thoughtId); // RefError if no such thought
+		const identity = visualIdentityOf(node); // FacetError if missing/malformed; loaded once
+		return spriteForIdentity(identity, scheme, size);
 	}
 ```
 
@@ -1388,8 +1420,8 @@ Expected: PASS (whole suite green, including the still-present byte-mirror tests
 
 ```bash
 rtk npx @biomejs/biome check --write src/api.ts tests/sprite-integration.test.ts tests/sprite-golden.test.ts
-git add src/api.ts tests/sprite-integration.test.ts tests/sprite-golden.test.ts tests/__snapshots__/sprite-golden.test.ts.snap
-git commit -m "feat(api): Mindful.sprite renders the organic formula-field pipeline (+ size param, golden render tests)"
+rtk git add src/api.ts tests/sprite-integration.test.ts tests/sprite-golden.test.ts tests/__snapshots__/sprite-golden.test.ts.snap
+rtk git commit -m "feat(api): Mindful.sprite renders the organic formula-field pipeline (+ size param, golden render tests)"
 ```
 
 ---
@@ -1398,16 +1430,29 @@ git commit -m "feat(api): Mindful.sprite renders the organic formula-field pipel
 
 Remove the now-unused byte-mirror surface, shrink `sprite.ts`, fix the barrel, rewrite the encoder tests to hand-built `Sprite` fixtures, and delete the byte-mirror unit test.
 
+Current-code note: this task's title and snippets are historical. The byte-mirror surface was deleted, but `sprite.ts` was not reduced to a type-only file. It now contains the organic sprite rendering boundary:
+
+- `Sprite`
+- `MAX_SPRITE_SIZE = 128`
+- `validateSpriteSize(size)`
+- `spriteForIdentity(identity, scheme = defaultColorscheme, size = 24)`
+
+The barrel currently exports `spriteForIdentity` and `Sprite` from `./sprite.js`.
+
 **Files:**
 - Modify: `src/sprite.ts` (reduce to the `Sprite` interface)
 - Modify: `src/index.ts:17` (barrel)
 - Modify: `tests/encode.test.ts` (remove `renderSprite` usage; build the 8×8 sprite by hand)
 - Delete: `tests/sprite.test.ts`
 
-**Interfaces:**
-- `src/sprite.ts` now exports only `interface Sprite { width: number; height: number; pixels: string[][] }`. `CellValue`, `SpriteCells`, `spriteCells`, `renderSprite` no longer exist.
+**Historical target interfaces:**
+- The original plan expected `src/sprite.ts` to export only `interface Sprite { width: number; height: number; pixels: string[][] }`. `CellValue`, `SpriteCells`, `spriteCells`, `renderSprite` no longer exist.
+
+Historical interface note: `CellValue`, `SpriteCells`, `spriteCells`, and `renderSprite` remain deleted, but the current `src/sprite.ts` exports more than `Sprite` as described above.
 
 - [ ] **Step 1: Replace `src/sprite.ts` entirely**
+
+Historical snippet only. Current code should keep `spriteForIdentity`, `validateSpriteSize`, and `MAX_SPRITE_SIZE`.
 
 ```ts
 /** A rendered raster: a width×height grid of #rrggbb pixels. Produced by the generative pipeline
@@ -1428,13 +1473,13 @@ export { type CellValue, type Sprite, type SpriteCells, renderSprite, spriteCell
 with:
 
 ```ts
-export { type Sprite } from "./sprite.js";
+export { spriteForIdentity, type Sprite } from "./sprite.js";
 ```
 
 - [ ] **Step 3: Delete the byte-mirror unit test**
 
 ```bash
-git rm tests/sprite.test.ts
+rtk git rm tests/sprite.test.ts
 ```
 
 - [ ] **Step 4: Rewrite the two byte-mirror-dependent encoder tests** — in `tests/encode.test.ts`, remove the import `import { type Sprite, renderSprite } from "../src/sprite.js";` and the now-unused `import type { VisualIdentity }`, `idWithSeed`, `MAP_SEED`, `FOUR`. Replace them with a `type Sprite` import and a hand-built 8×8 fixture, and update the two tests that used `renderSprite`. Concretely:
@@ -1497,8 +1542,8 @@ Expected: PASS — full suite green; `dist/` builds. `tsc` would error if any so
 
 ```bash
 rtk npx @biomejs/biome check --write src/sprite.ts src/index.ts tests/encode.test.ts
-git add src/sprite.ts src/index.ts tests/encode.test.ts tests/sprite.test.ts
-git commit -m "refactor(sprite): delete byte-mirror renderer; reduce sprite.ts to the Sprite type"
+rtk git add src/sprite.ts src/index.ts tests/encode.test.ts tests/sprite.test.ts
+rtk git commit -m "refactor(sprite): delete byte-mirror renderer; reduce sprite.ts to the Sprite type"
 ```
 
 ---
@@ -1515,7 +1560,7 @@ git commit -m "refactor(sprite): delete byte-mirror renderer; reduce sprite.ts t
 - §7.1 pinned constants → Tasks 4–6 (encoded verbatim).
 - §7.2 seed layout (disjoint regions, word offsets) → Task 2 (readers + disjointness test), Tasks 4–6 (word offsets).
 - §8 colormap (cluster base, HSL ramp, `hsl.ts` extraction not barreled, scheme validation) → Task 1 (extraction), Task 3 (colormap + validation).
-- §9 `Mindful.sprite(id, scheme?, size=24)`, even/positive size → Task 7.
+- §9 `Mindful.sprite(id, scheme?, size=24)`, even/positive size → Task 7. Current implementation also caps size at `128` through the shared `validateSpriteSize` helper.
 - §10 determinism/purity/validation (size, scheme, NaN, dims) → Tasks 2/3/7 tests.
 - §11 tests (golden determinism, per-generator faithfulness, HSL contract, scheme validation) → Task 1 (HSL), Tasks 4–6 (faithfulness + raw-determinism), Task 7 (`sprite-golden.test.ts`: fixed seeds covering all six buckets, rendered through `sprite → spriteToAnsi`, re-render byte-identical + snapshot-locked; plus fresh-instance round-trip + scheme validation in `sprite-integration.test.ts`).
 - §12 renderer-agnostic `Field` → Task 2 (`Field` is the common currency; generators emit raw, no renderer coupling).
@@ -1531,7 +1576,7 @@ No spec requirement is left without a task.
 - `colormap(clusterId, scheme): (v)=>string` — Task 3; consumed Task 7 (`paint(v)`). ✔
 - `clusterBucket(seed, k)` — Task 2; consumed Task 7 (`clusterBucket(identity.seed, K)`). ✔
 - `K` exported Task 4 (= `FAMILIES.length`, grows to 6 by Task 6); imported Task 7. ✔
-- `Sprite` — produced by Task 7's `sprite`, narrowed to type-only in Task 8; `encode.ts`'s `import type { Sprite }` stays valid. ✔
+- `Sprite` — produced by Task 7's `sprite`; current Task 8 result deletes the byte-mirror exports while keeping `spriteForIdentity` beside the type. `encode.ts`'s `import type { Sprite }` stays valid. ✔
 - `hexToHsl`/`hslToHex` — Task 1; consumed by Task 3 (`colormap`) and re-imported by `color.ts`. ✔
 - `mapSeed`/`mapSeedRangeInt`/`mapSeedPick`/`mulberry32`/`prngSeed` — Task 2; consumed Tasks 4–6 with the exact signatures. ✔
 
