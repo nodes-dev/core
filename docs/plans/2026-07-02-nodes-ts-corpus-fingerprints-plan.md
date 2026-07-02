@@ -48,8 +48,7 @@
 Create `ts/tests/corpus-fingerprint.test.ts`:
 
 ```ts
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -113,15 +112,35 @@ describe("corpus stat fingerprints", () => {
     expect(listCorpusFileStats(root).map((row) => row.path)).toEqual(["real.md"]);
   });
 
-  it("ignores markdown symlinks", () => {
-    write("target.txt", "target");
+  it("ignores markdown symlinks and does not descend into symlinked directories", () => {
+    write("real/inside.md", "inside");
+    write("target.md", "target");
     try {
-      symlinkSync(join(root, "target.txt"), join(root, "linked.md"));
+      // A symlinked regular markdown file pointing at a real markdown target.
+      symlinkSync(join(root, "target.md"), join(root, "linked.md"));
+      // A symlinked directory that itself contains markdown.
+      symlinkSync(join(root, "real"), join(root, "linked-dir"));
     } catch {
       return; // symlink unsupported on this platform
     }
 
-    expect(listCorpusFileStats(root)).toEqual([]);
+    // Only the real files appear. The symlinked file is skipped, and the walker
+    // must not descend into the symlinked directory (no "linked-dir/inside.md").
+    expect(listCorpusFileStats(root).map((row) => row.path)).toEqual(["real/inside.md", "target.md"]);
+  });
+
+  it("changes the on-disk fingerprint when a corpus file's size changes", () => {
+    write("a.md", "one");
+    const before = readCorpusFingerprint(root);
+
+    write("a.md", "a much longer body"); // different length -> different size
+    const after = readCorpusFingerprint(root);
+
+    // Round-trips a real filesystem change through statSync into the comparator,
+    // rather than comparing hand-authored fingerprint literals. Uses a size
+    // change (not a same-size edit) so the assertion never depends on mtime
+    // granularity.
+    expect(sameCorpusFingerprint(before, after)).toBe(false);
   });
 
   it("matches iterCorpusFiles path set and order", () => {
@@ -558,7 +577,7 @@ Expected:
 
 - [ ] **Step 6: Check final git status**
 
-Run from `~/d/nodes`:
+Run from `~/d/nodes/ts`:
 
 ```bash
 rtk git status --short
@@ -568,10 +587,10 @@ Expected: clean, or only intentional untracked build artifacts that are not part
 
 - [ ] **Step 7: Commit verification-only fixes if needed**
 
-If Step 1-5 required formatting or small test corrections, commit them:
+If Step 1-5 required formatting or small test corrections, commit them (from `~/d/nodes/ts`):
 
 ```bash
-rtk git add ts/src/snapshot.ts ts/src/index.ts ts/tests/corpus-fingerprint.test.ts ts/tests/smoke.test.ts
+rtk git add src/snapshot.ts src/index.ts tests/corpus-fingerprint.test.ts tests/smoke.test.ts
 rtk git commit -m "test: verify corpus fingerprint contract"
 ```
 
