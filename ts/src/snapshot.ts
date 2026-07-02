@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -36,16 +37,28 @@ export interface CorpusFile {
   readonly sha256: string;
 }
 
+export interface CorpusFileStat {
+  readonly path: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+export interface CorpusFingerprint {
+  readonly files: readonly CorpusFileStat[];
+}
+
+interface WalkedCorpusPath {
+  readonly path: string;
+  readonly fullPath: string;
+}
+
 /** Root-relative POSIX path (forward slashes on every platform), the cross-language form. */
 function relPosix(root: string, full: string): string {
   return relative(root, full).split(/[\\/]/).join("/");
 }
 
-/** Byte-level walk: read each .md file's bytes once and hash them. Skips the private
- * `.nodes-index` tree, symlinks, and non-files. Sorted by root-relative POSIX path so the
- * order matches Python's `sorted(root.rglob("*.md"))`. */
-export function iterCorpusFiles(root: string): CorpusFile[] {
-  const files: CorpusFile[] = [];
+function listCorpusMarkdownPaths(root: string): WalkedCorpusPath[] {
+  const files: WalkedCorpusPath[] = [];
   const walk = (dir: string): void => {
     if (!existsSync(dir)) return;
     let entries: Dirent[];
@@ -61,14 +74,46 @@ export function iterCorpusFiles(root: string): CorpusFile[] {
         if (relPosix(root, full) === ".nodes-index") continue;
         walk(full);
       } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        const data = readFileSync(full);
-        files.push({ path: relPosix(root, full), data, sha256: hashBytes(data) });
+        files.push({ path: relPosix(root, full), fullPath: full });
       }
     }
   };
   walk(root);
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return files;
+}
+
+/** Byte-level walk: read each .md file's bytes once and hash them. Skips the private
+ * `.nodes-index` tree, symlinks, and non-files. Sorted by root-relative POSIX path so the
+ * order matches Python's `sorted(root.rglob("*.md"))`. */
+export function iterCorpusFiles(root: string): CorpusFile[] {
+  return listCorpusMarkdownPaths(root).map(({ path, fullPath }) => {
+    const data = readFileSync(fullPath);
+    return { path, data, sha256: hashBytes(data) };
+  });
+}
+
+/** Stat-level walk over the same corpus file set as `iterCorpusFiles`. Does not read file bodies. */
+export function listCorpusFileStats(root: string): CorpusFileStat[] {
+  return listCorpusMarkdownPaths(root).map(({ path, fullPath }) => {
+    const stat = statSync(fullPath);
+    return { path, mtimeMs: stat.mtimeMs, size: stat.size };
+  });
+}
+
+/** Cheap external-change fingerprint for resident consumers. Not a content-identity hash. */
+export function readCorpusFingerprint(root: string): CorpusFingerprint {
+  return { files: listCorpusFileStats(root) };
+}
+
+export function sameCorpusFingerprint(a: CorpusFingerprint, b: CorpusFingerprint): boolean {
+  if (a.files.length !== b.files.length) return false;
+  for (let i = 0; i < a.files.length; i++) {
+    const left = a.files[i];
+    const right = b.files[i];
+    if (left.path !== right.path || left.mtimeMs !== right.mtimeMs || left.size !== right.size) return false;
+  }
+  return true;
 }
 
 export interface ManifestEntry {
