@@ -138,7 +138,36 @@ A **reporting** API, not a raising one: it returns findings and never throws on 
 content. Construction already fails hard on unparseable files and uid/id collisions, so
 `check` operates on whatever constructs.
 
-**API.**
+**Structured validation in the kernel (`Registry.check`).** `Registry.validate` raises at
+the first violation and collapses missing, unexpected, and malformed facets into
+`FacetError`, so distinct finding codes cannot be recovered from it without message
+parsing or duplicated logic. The registry therefore gains a collecting counterpart:
+
+```python
+class Violation(BaseModel):
+    code: str      # unknown-kind | facet-missing | facet-unexpected |
+                   # facet-invalid | invariant-violated
+    detail: str    # the facet name / kind name the violation is about ("" for
+                   # invariant-violated when no facet applies)
+    message: str   # human-readable, non-normative
+
+def check(self, node: Node) -> list[Violation]: ...   # collects, never raises on content
+```
+
+- Unregistered kind → one `unknown-kind` violation (`detail` = the kind); nothing else is
+  checked for that node.
+- Facet presence/allowance is computed directly (same composition as `validate`):
+  each missing required facet → `facet-missing`, each unexpected facet →
+  `facet-unexpected` (`detail` = the facet name).
+- Invariants run only when the facet-presence checks pass (they presuppose their facets;
+  running them anyway would duplicate `facet-missing` findings). An invariant raising
+  `FacetError` → `facet-invalid`; raising `InvariantError` → `invariant-violated`.
+  **Only these kernel content errors are converted.** Any other exception from an
+  invariant (invariants are arbitrary callables) is a programmer bug and propagates.
+- `Registry.validate` behavior is unchanged (first violation raised, same error classes
+  and messages); it and `check` share the composition helpers.
+
+**Corpus API.**
 
 ```python
 # Python
@@ -146,8 +175,10 @@ class Finding(BaseModel):
     severity: Literal["error", "warning"]
     code: str
     ref: str          # id of the node the finding anchors to (for dangling-ref:
-                      # the relation's source node; the unresolved target goes in message)
-    message: str
+                      # the relation's source node)
+    detail: str       # machine-stable discriminator: facet name / kind name /
+                      # unresolved target ref
+    message: str      # human-readable, non-normative
 
 def check(self, registry: Registry | None = None) -> list[Finding]: ...
 ```
@@ -158,22 +189,30 @@ interface Finding {
   readonly severity: "error" | "warning";
   readonly code: string;
   readonly ref: string;
+  readonly detail: string;
   readonly message: string;
 }
 
 check(registry?: Registry): Finding[];
 ```
 
-- Uses the passed registry, else `self.registry`.
-- **With a registry:** every node is validated against it. Violations map to finding
-  codes: `unknown-kind`, `facet-missing`, `facet-unexpected`, `facet-invalid`,
-  `invariant-violated` — all `error` severity. Registry `validate` exceptions are caught
-  and converted to findings; `check` itself never raises on content.
-- **Always (registry or not):** dangling relation refs → `dangling-ref`, severity
-  `warning` (dangling is a documented-normal state).
-- **No registry anywhere:** structural findings only — explicit by parameter absence, not
-  a silent skip.
-- Deterministic order: sorted by node id, then code, then message.
+- Uses the passed registry, else `self.registry`. There is deliberately no way to ignore
+  a corpus's own registry: `dangling-ref` is the only registry-independent code, so a
+  caller wanting structural-only results filters the report by code (or constructs a
+  registry-free `Corpus`).
+- **With a registry:** every node runs through `Registry.check`; each violation becomes an
+  `error` finding with the same `code` and `detail`. `Corpus.check` never raises on
+  content; unexpected invariant exceptions propagate (see above).
+- **Always (registry or not), the exhaustive list of structural findings:** each
+  unresolved top-level relation target → `dangling-ref`, severity `warning` (`ref` = the
+  relation's source node, `detail` = the unresolved target) — exactly the edges
+  `Corpus.dangling()` reports. Nothing else: malformed structural facet payloads
+  (`membership`/`edges`/`order`/`keys`) are a registry concern (shape invariants), and
+  dangling *membership* refs are deferred with the membership-traversal limitation.
+- **No registry anywhere:** the structural findings above only — explicit by parameter
+  absence, not a silent skip.
+- Deterministic order: sorted by `ref`, then `code`, then `detail` — all normative,
+  oracle-pinned fields. `message` is human-only and never used for ordering or parity.
 
 **Standard.** `STANDARD.md` §8 defines corpus validity and the finding codes
 language-agnostically (tier 2). This gives downstream corpora (mindful, science) their
@@ -181,14 +220,19 @@ CI / pre-commit hook.
 
 ## 8. Testing strategy
 
-- **Per-language unit tests:** a clean corpus yields no findings; each finding code is
-  exercised (seed invalid files through a registry-free corpus, then check with a
-  vocab+shapes registry); dangling-ref reported with and without a registry; passed
-  registry overrides `self.registry`; deterministic ordering.
+- **Per-language unit tests:** `Registry.check` collects all violations for a node with
+  precise codes, converts only kernel content errors from invariants (a non-kernel
+  exception propagates), skips invariants when facet-presence checks fail, and leaves
+  `validate` behavior unchanged (existing suites stay green). `Corpus.check`: a clean
+  corpus yields no findings; each finding code is exercised (seed invalid files through a
+  registry-free corpus, then check with a vocab+shapes registry); dangling-ref reported
+  with and without a registry; passed registry overrides `self.registry`; multiple
+  findings on one node are all reported; deterministic ordering.
 - **Shared conformance fixture:** `fixtures/check-corpus/` — a committed corpus seeded
   with known violations (an unknown kind, a prose kind with a stray facet, a source kind
-  with an empty/invalid `source` facet, a dangling relation) — plus
-  `fixtures/check.oracle.json` pinning the expected findings (severity, code, ref). Both
+  with an empty/invalid `source` facet, a dangling relation, one node with several
+  violations at once) — plus `fixtures/check.oracle.json` pinning the expected findings
+  (severity, code, ref, detail — `message` stays unpinned and human-only). Both
   languages build a corpus over the fixture, run `check` with the knowledge vocab + builtin
   shapes registered, and assert equality with the oracle. Same pattern as the
   search/similarity oracles.
@@ -234,7 +278,14 @@ constructible corpus + a findings report is the recoverable posture.
 3. **`docs/specs/` → `docs/designs/`**; dated designs and plans are historical records,
    named as such by the new `README.md` / `AGENTS.md`.
 4. **`Corpus.check()` is a reporting API in both kernels** — registry violations as
-   errors, dangling refs as warnings, deterministic order, defined normatively in the
-   standard and pinned by `fixtures/check-corpus/` + `fixtures/check.oracle.json`.
-5. **Construction semantics are unchanged** — check reports on what constructs; the write
+   errors, dangling refs as warnings, deterministic order over normative fields
+   (`ref`, `code`, `detail`), defined normatively in the standard and pinned by
+   `fixtures/check-corpus/` + `fixtures/check.oracle.json`.
+5. **The registry gains a structured, collecting `Registry.check(node)`** so finding
+   codes come from computation, never from parsing error messages; `Registry.validate`
+   is unchanged. Only kernel content errors (`FacetError`, `InvariantError`,
+   `UnknownKindError`) convert to findings — unexpected invariant exceptions propagate.
+6. **No "ignore my registry" parameter** — filter findings by code, or construct a
+   registry-free `Corpus` (YAGNI).
+7. **Construction semantics are unchanged** — check reports on what constructs; the write
    path keeps failing early.
