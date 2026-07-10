@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - Python gates run from `python/`: `rtk uv run --frozen pytest -q`, `rtk uv run --frozen ruff check .`, `rtk uv run --frozen pyright src`. TypeScript gates run from `ts/`: `npm test`, `npm run typecheck`, `npm run check`.
+- Before the `npm run check` gate, run `npx biome check --write .` from `ts/` — Biome enforces `lineWidth: 120` formatting, and plan snippets are not guaranteed pre-formatted.
 - Git commands go through `rtk` (e.g. `rtk git add …`). No AI-attribution trailers in commit messages.
 - `Registry.validate` behavior (raise-at-first-violation, error classes, messages) MUST NOT change; the full existing suites stay green.
 - `Corpus` construction semantics MUST NOT change (still fails hard on unparseable files and uid/id collisions; registry still not consulted at construction).
@@ -71,6 +72,7 @@ rtk git commit -m "docs: rename specs/ to designs/ (dated design records)"
 - Delete: `docs/format.md`
 - Modify: every `docs/**/*.md` referencing `format.md` (except the two 2026-07-10 files)
 - Modify: `docs/designs/2026-06-21-nodes-substrate-design.md` (current-state note under §3.4)
+- Modify: `python/tests/_canonical.py:7`, `ts/tests/_canonical.ts:3` (stale "spec §5.1" comments)
 
 **Interfaces:**
 - Consumes: `docs/designs/` path from Task 1.
@@ -154,9 +156,11 @@ defined in §4.3. Untyped links use the reserved predicate `relatesTo`.
 A facet is a named, typed payload attached to a node under `facets`. Payloads MUST be
 mappings. Which facets a node may or must carry is decided by its kind's registry spec
 (§6); facet payload schemas are enforced by invariants (e.g. the shape form facets §5,
-the vocab `source` facet). Typed facet accessors MUST reject unknown payload keys
-(fail-early on typos) and MUST surface malformed payloads as `FacetError` — a raw
-Pydantic/Zod error never escapes a public API.
+the vocab `source` facet). Typed facet accessors MUST surface a missing or malformed
+payload as `FacetError` — a raw Pydantic/Zod error never escapes a public API. Whether
+unknown payload keys are rejected is a property of each facet's schema: the vocab
+`source` facet MUST reject them (fail-early on typos); the built-in shape form facets
+(§5) currently tolerate them. New facet schemas SHOULD reject unknown keys.
 
 ## 3. Identity, references & rename
 
@@ -208,14 +212,16 @@ preserved verbatim). Top-level fields:
 ### 4.3 Serialized relation forms
 
 - **Node-relation** (in `related` / `relations`): `{ predicate, target, … }` — `source`
-  is implied to be the containing node and MUST be omitted on disk.
+  defaults to the containing node. Serializers MUST omit `source` when it equals the
+  container; a relation sourced elsewhere carries an explicit `source`.
 - **Graph edge** (in a structure's `edges` facet): `{ source, predicate, target, … }` —
   both endpoints explicit (the structure node is the container, not an endpoint).
 - `related: [ref, …]` is sugar for `relatesTo` relations sourced at the node. On
   serialization, a plain `relatesTo` relation (directed, no weight, no attrs, sourced at
   the node) MUST emit into `related`; all other relations emit into `relations`.
-- Parsers MUST fill `source` from context into the normalized form; serializers MUST
-  drop `source` only when it equals the container. Round-trip MUST be lossless.
+- Parsers MUST fill an omitted `source` from the container into the normalized form.
+  Serializers MUST omit optional relation fields at their defaults (`directed: true`,
+  no `weight`, empty `attrs`). Round-trip MUST be lossless.
 
 Example:
 
@@ -414,6 +420,28 @@ The cross-language ranking contract is the 6-decimal, round-half-up score key
 The shared oracles under `fixtures/` are the conformance suite. Both languages MUST
 assert against them.
 
+### 11.1 Canonical JSON projection
+
+Cross-language node equality is defined over this projection (implemented by the
+`to_canonical` / `toCanonical` test helpers):
+
+```json
+{
+  "id": "...", "uid": "...", "kind": "...", "title": "...", "body": "...",
+  "metadata": { "created": "YYYY-MM-DD or null", "updated": "YYYY-MM-DD or null", "version": 1 },
+  "relations": [ { "source": "...", "predicate": "...", "target": "...",
+                   "directed": true, "weight": null, "attrs": {} } ],
+  "facets": { },
+  "deprecated_ids": [ ]
+}
+```
+
+Relations are normalized (`source` explicit, every field present) in document order;
+dates render as `YYYY-MM-DD` strings or `null`; field names use the on-disk forms
+(`deprecated_ids`).
+
+### 11.2 Fixture inventory
+
 | Fixture | Pins |
 |---------|------|
 | `gene_phf19.md`, `gene_phf19.canonical.json` | frontmatter parse → canonical JSON projection |
@@ -464,15 +492,29 @@ In `docs/designs/2026-06-21-nodes-substrate-design.md`, insert directly under th
 > `docs/STANDARD.md` §5. The table below is the original design record.
 ```
 
-- [ ] **Step 4: Verify suites still pass (no code references docs)**
+- [ ] **Step 4: Repoint the canonical-helper comments**
+
+Both test helpers cite a dead "spec §5.1". In `python/tests/_canonical.py`, change the docstring's first line:
+
+```python
+    """Language-neutral canonical JSON of a node (docs/STANDARD.md §11.1).
+```
+
+In `ts/tests/_canonical.ts`, change the comment:
+
+```ts
+// Language-neutral canonical JSON of a node (docs/STANDARD.md §11.1). Mirrors python/tests/_canonical.py.
+```
+
+- [ ] **Step 5: Verify suites still pass (docs are not imported by code)**
 
 From `python/`: `rtk uv run --frozen pytest -q` — expected: PASS.
 From `ts/`: `npm test` — expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-rtk git add -A docs
+rtk git add -A docs python/tests/_canonical.py ts/tests/_canonical.ts
 rtk git commit -m "docs: add versioned normative STANDARD.md, retire format.md"
 ```
 
@@ -1258,6 +1300,7 @@ Expected: PASS (8 tests).
 ```bash
 npm test
 npm run typecheck
+npx biome check --write .
 npm run check
 rtk git add src/registry.ts tests/registry-check.test.ts
 rtk git commit -m "feat(ts/registry): structured collecting Registry.check beside unchanged validate"
@@ -1423,7 +1466,9 @@ Add this method to `Corpus` (after `rename`):
         code: "dangling-ref",
         ref: rel.source,
         detail: rel.target,
-        message: `${rel.source}: relation ${JSON.stringify(rel.predicate)} targets unresolved ${JSON.stringify(rel.target)}`,
+        message:
+          `${rel.source}: relation ${JSON.stringify(rel.predicate)} ` +
+          `targets unresolved ${JSON.stringify(rel.target)}`,
       });
     }
     findings.sort((a, b) => cmpStr(a.ref, b.ref) || cmpStr(a.code, b.code) || cmpStr(a.detail, b.detail));
@@ -1451,6 +1496,7 @@ Expected: PASS (4 tests).
 ```bash
 npm test
 npm run typecheck
+npx biome check --write .
 npm run check
 rtk git add src/corpus.ts src/index.ts tests/corpus-check.test.ts
 rtk git commit -m "feat(ts/corpus): Corpus.check reporting API (registry violations + dangling refs)"
@@ -1467,7 +1513,7 @@ rtk git commit -m "feat(ts/corpus): Corpus.check reporting API (registry violati
 
 **Interfaces:**
 - Consumes: `Corpus.check` in both languages (Tasks 6, 8); `register_builtin_shapes` / `registerBuiltinShapes`; `register_knowledge_vocab` / `registerKnowledgeVocab`.
-- Produces: the tier-2 conformance oracle listed in `docs/STANDARD.md` §11.
+- Produces: the tier-2 conformance oracle listed in `docs/STANDARD.md` §11.2.
 
 - [ ] **Step 1: Create the fixture corpus**
 
@@ -1697,6 +1743,7 @@ From `ts/`:
 ```bash
 npm test
 npm run typecheck
+npx biome check --write .
 npm run check
 ```
 
