@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+, pydantic v2, pytest. Source under `~/d/nodes/python/src/nodes/`, tests under `~/d/nodes/python/tests/`. All commands run from `~/d/nodes/python` via the `rtk` wrapper.
 
-This is **Plan A-py**, the first of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`). It is followed by **Plan A-ts** (the TypeScript port, using this finished Python as its oracle) and then **Plan B** (the mindful package). Both kernels land before mindful is scaffolded.
+This is **Plan A-py**, the first of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/designs/2026-06-23-mindful-v6-sp1-abstraction-design.md`). It is followed by **Plan A-ts** (the TypeScript port, using this finished Python as its oracle) and then **Plan B** (the mindful package). Both kernels land before mindful is scaffolded.
 
 ## Current State Note
 

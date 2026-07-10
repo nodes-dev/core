@@ -22,7 +22,7 @@ The repo and kernel have grown since this checklist was written:
 
 Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `index.py`, `store.py`, or `docs/format.md`.
 
-**Spec:** `docs/specs/2026-06-21-nodes-structural-index-design.md` (approved). Read it for rationale; this plan is self-contained for implementation.
+**Spec:** `docs/designs/2026-06-21-nodes-structural-index-design.md` (approved). Read it for rationale; this plan is self-contained for implementation.
 
 ## Global Constraints
 

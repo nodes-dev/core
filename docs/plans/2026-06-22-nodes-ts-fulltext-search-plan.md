@@ -20,7 +20,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 ## Global Constraints
 
-These bind every task. Values are copied verbatim from the spec (`docs/specs/2026-06-22-nodes-fulltext-search-design.md`) and the committed Python implementation (`python/src/nodes/kernel/search.py`).
+These bind every task. Values are copied verbatim from the spec (`docs/designs/2026-06-22-nodes-fulltext-search-design.md`) and the committed Python implementation (`python/src/nodes/kernel/search.py`).
 
 - **Tokenizer (the parity contract):** `text.normalize("NFC").toLowerCase()`, then split into maximal Unicode-alphanumeric runs via `/[\p{L}\p{N}]+/gu` (`s.match(re) ?? []`), then drop stop-words. No stemming. Document tokenization keeps duplicates; query-side dedup happens in `search`. Empty / whitespace / all-separator / all-stop-word input → `[]`.
 - **Stop-word list — exactly these 33 words** (a module-level `Set`): `a an and are as at be but by for if in into is it no not of on or such that the their then there these they this to was will with`.
@@ -878,7 +878,7 @@ rtk git commit -m "test(ts/search): cross-language ranking oracle parity; docs"
 
 ## Self-Review
 
-**Spec coverage** (`docs/specs/2026-06-22-nodes-fulltext-search-design.md`):
+**Spec coverage** (`docs/designs/2026-06-22-nodes-fulltext-search-design.md`):
 - §3 tokenizer (NFC → lowercase → `\p{L}\p{N}` runs → 33 stop-words; dups kept) → Task 1. §3.2 oracle (incl. NFD↔NFC, mixed scripts, non-BMP) → Task 1 oracle test.
 - §4 BM25F (idf, tf' title-then-body with avglen guard, `(K1+1)` numerator, deduped sum) + §4.1 constants + §4.2 determinism (code-point comparator, `scoreKey`, sort key) → Tasks 1 (helpers) + 3 (scoring).
 - §5 `SearchIndex` state + build/upsert/remove (dup-uid → `CollisionError`, empty-text doc slot) → Task 2. Rebuild-equivalence (§9) → Task 2.

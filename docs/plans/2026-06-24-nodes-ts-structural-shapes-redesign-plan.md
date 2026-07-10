@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript 5.5+, zod v3, vitest, biome (width 120). Source under `~/d/nodes/ts/src/`, tests under `~/d/nodes/ts/tests/`. All commands run from `~/d/nodes/ts` via the `rtk` wrapper.
 
-This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is the **oracle** for this port. This TS port has since been implemented on `main`; the red/green expectations below are the historical implementation sequence, not the current suite state. Plan B (the mindful package) follows.
+This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/designs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is the **oracle** for this port. This TS port has since been implemented on `main`; the red/green expectations below are the historical implementation sequence, not the current suite state. Plan B (the mindful package) follows.
 
 ## Current State Note
 

@@ -33,7 +33,7 @@ Treat code snippets below as the original greenfield rollout, not as replacement
 - Canonical id form `kind:slug` is the stored **and** display ref form; `uid` is an immutable UUID anchor on every node (spec §3.1, §3.5).
 - One `Relation` primitive; on disk `source` is implied by location (spec §3.2): node-relations omit `source`, graph edges keep both endpoints.
 - Facets serialize as a nested `facets:` map (spec §4).
-- Reference spec: `~/d/nodes/docs/specs/2026-06-21-nodes-substrate-design.md`.
+- Reference spec: `~/d/nodes/docs/designs/2026-06-21-nodes-substrate-design.md`.
 
 ---
 

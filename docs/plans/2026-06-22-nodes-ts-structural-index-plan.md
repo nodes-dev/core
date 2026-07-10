@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (strict, ES2022, NodeNext ESM), Zod, eemeli `yaml`, Vitest, Biome.
 
-**Reference (read before starting):** the design doc `~/d/nodes/docs/specs/2026-06-22-nodes-ts-structural-index-design.md`, and the Python sources this mirrors: `~/d/nodes/python/src/nodes/kernel/{index,corpus,store}.py` and their tests `~/d/nodes/python/tests/test_{index,corpus,store,index_rebuild_equivalence}.py`.
+**Reference (read before starting):** the design doc `~/d/nodes/docs/designs/2026-06-22-nodes-ts-structural-index-design.md`, and the Python sources this mirrors: `~/d/nodes/python/src/nodes/kernel/{index,corpus,store}.py` and their tests `~/d/nodes/python/tests/test_{index,corpus,store,index_rebuild_equivalence}.py`.
 
 ## Current State Note
 

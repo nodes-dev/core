@@ -20,7 +20,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 ## Global Constraints
 
-These bind every task. Values are copied verbatim from the spec (`docs/specs/2026-06-22-nodes-similarity-index-design.md`) and the committed Python implementation (`python/src/nodes/kernel/similarity.py`, `ranking.py`, `corpus.py`).
+These bind every task. Values are copied verbatim from the spec (`docs/designs/2026-06-22-nodes-similarity-index-design.md`) and the committed Python implementation (`python/src/nodes/kernel/similarity.py`, `ranking.py`, `corpus.py`).
 
 - **The seam.** The kernel ships **no** concrete embedder. `Embedder` is an interface with a `readonly cacheNamespace: string` and `embed(texts: string[]): Vector[]`. `Vector = number[]`. Vectors are treated as immutable by convention.
 - **`embedText` (frozen contract):** one vector per node from ``embedText(node) = `${node.title}\n\n${node.body}` `` — title and body joined by exactly one blank line. This is the cache-key text and the parity contract; do not alter it.
@@ -1422,7 +1422,7 @@ rtk git commit -m "test(ts-similarity): cross-language parity against frozen ora
 
 ## Self-Review (completed by plan author)
 
-**Spec coverage** (against `docs/specs/2026-06-22-nodes-similarity-index-design.md`, realized in `similarity.py`):
+**Spec coverage** (against `docs/designs/2026-06-22-nodes-similarity-index-design.md`, realized in `similarity.py`):
 - Embedder seam + `embedText` → Task 2. `textHash` + cache layout + atomic writes + raw vectors → Task 3. Path-safety validators → Task 2 (defined) / Task 3 (enforced in `pathFor`). L2 normalize + cosine + shared `scoreKey` → Tasks 4–5 + Task 1. Namespace/dim binding + prepare/commit + `similar` self-exclusion + `k` contract → Tasks 4–5. Opt-in `Corpus` + `EmbedderRequiredError` + mutation ordering → Task 6. Frozen-fixture parity → Task 7. No gaps.
 
 **Placeholder scan:** no TBD/TODO; every code step shows complete code. The one deliberately-simplified test line in Task 6 Step 1 is called out with explicit fallback instructions.

@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (ESM, strict), Zod, `yaml` (eemeli), Vitest, Biome, npm. Type gate is `tsc --noEmit`. Python side stays uv + pytest + ruff + pyright.
 
-**Spec:** `docs/specs/2026-06-21-nodes-ts-kernel-design.md`
+**Spec:** `docs/designs/2026-06-21-nodes-ts-kernel-design.md`
 
 ## Current State Note
 

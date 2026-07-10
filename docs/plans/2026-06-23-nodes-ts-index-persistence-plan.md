@@ -20,7 +20,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 ## Global Constraints
 
-- **Parity source is the implemented Python, not the spec.** Where the Python code is stricter than `docs/specs/2026-06-23-nodes-index-persistence-design.md`, follow the code. The two kernels must stay behaviorally equivalent (the `cross_parity.test.ts` discipline).
+- **Parity source is the implemented Python, not the spec.** Where the Python code is stricter than `docs/designs/2026-06-23-nodes-index-persistence-design.md`, follow the code. The two kernels must stay behaviorally equivalent (the `cross_parity.test.ts` discipline).
 - **Snapshot is a disposable, private, per-language cache.** Filename `snapshot.ts.json`; `lang` is `"ts"`. Python writes `snapshot.py.json` / `lang "py"`; neither language reads the other's file. `SNAPSHOT_SCHEMA_VERSION = 1`.
 - **Files are the single source of truth.** Every `Corpus` construction reconciles the snapshot against current file hashes, so a stale/absent/corrupt snapshot costs only time, never correctness.
 - **Manifest is always a byte-level file-walk product** on both reconcile and full rebuild — hash the actual on-disk bytes, never `nodeToMarkdown(node)`, on the load path. The write path (`add`/`delete`/`rename`) may hash `nodeToMarkdown(node)` because those are exactly the bytes just written.
@@ -1969,7 +1969,7 @@ rtk git commit -m "feat(ts-persistence): manifest maintenance across add/delete/
 
 ## Self-Review
 
-**1. Spec coverage** (against `docs/specs/2026-06-23-nodes-index-persistence-design.md` and the implemented Python):
+**1. Spec coverage** (against `docs/designs/2026-06-23-nodes-index-persistence-design.md` and the implemented Python):
 
 - §2 architecture (pure indexes + `snapshot.ts` owns I/O + `Corpus` owns manifest): Tasks 1–6.
 - §2.1 file layout (`snapshot.ts.json`, `lang "ts"`): Tasks 1, 5.
