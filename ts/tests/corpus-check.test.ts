@@ -82,4 +82,23 @@ describe("Corpus.check", () => {
     c.add(makeNode({ id: "note:n", kind: "note", title: "N" }));
     expect(tuples(c.check(new Registry()))).toEqual([["error", "unknown-kind", "note:n", "note"]]);
   });
+
+  it("orders details by Unicode code point, not UTF-16 code units", () => {
+    const root = tmpRoot();
+    const seed = new Corpus(root); // registry-free: simulates hand-edited files
+    // U+FF61 (one code unit, 0xFF61) vs U+1F600 (surrogate pair, lead unit 0xD83D):
+    // code-unit order puts the emoji first; code-point order puts it last.
+    seed.add(makeNode({ id: "note:x", kind: "note", title: "X", facets: { "｡": {}, "\u{1f600}": {} } }));
+    const c = new Corpus(root, vocabRegistry());
+    expect(c.check().map((f) => f.detail)).toEqual(["｡", "\u{1f600}"]);
+  });
+
+  it("does not mutate the corpus", () => {
+    const root = tmpRoot();
+    const seed = new Corpus(root);
+    seed.add(makeNode({ id: "zzz:m", kind: "zzz", title: "M" }));
+    const c = new Corpus(root, vocabRegistry());
+    c.check();
+    expect(c.get("zzz:m").title).toBe("M"); // still readable, file untouched
+  });
 });

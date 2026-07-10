@@ -1,5 +1,6 @@
 import { FacetError, InvariantError, UnknownKindError, ValidationError } from "./errors.js";
 import type { Node } from "./node.js";
+import { compareCodepoints } from "./search.js";
 
 export type Invariant = (node: Node) => void;
 
@@ -116,7 +117,7 @@ export class Registry {
     const { required, optional, invariants } = this.compose(spec, node.kind);
     const present = new Set(Object.keys(node.facets));
     const violations: Violation[] = [];
-    for (const name of [...required].filter((f) => !present.has(f)).sort()) {
+    for (const name of [...required].filter((f) => !present.has(f)).sort(compareCodepoints)) {
       violations.push({
         code: "facet-missing",
         detail: name,
@@ -124,7 +125,7 @@ export class Registry {
       });
     }
     const allowed = new Set([...required, ...optional]);
-    for (const name of [...present].filter((f) => !allowed.has(f)).sort()) {
+    for (const name of [...present].filter((f) => !allowed.has(f)).sort(compareCodepoints)) {
       violations.push({
         code: "facet-unexpected",
         detail: name,

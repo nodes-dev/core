@@ -58,6 +58,14 @@ def test_passed_registry_overrides_corpus_registry(tmp_path):
     assert _tuples(c.check(registry=empty)) == [("error", "unknown-kind", "note:n", "note")]
 
 
+def test_details_order_by_code_point(tmp_path):
+    seed = Corpus(tmp_path)  # registry-free: simulates hand-edited files
+    # U+FF61 < U+1F600 by code point; UTF-16 code-unit order would reverse them.
+    seed.add(Node(id="note:x", kind="note", title="X", facets={"｡": {}, "\U0001f600": {}}))
+    c = Corpus(tmp_path, registry=_registry())
+    assert [f.detail for f in c.check()] == ["｡", "\U0001f600"]
+
+
 def test_check_does_not_mutate_corpus(tmp_path):
     seed = Corpus(tmp_path)
     seed.add(Node(id="zzz:m", kind="zzz", title="M"))

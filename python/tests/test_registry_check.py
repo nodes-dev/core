@@ -75,3 +75,13 @@ def test_validate_behavior_unchanged(reg):
 
     with pytest.raises(FacetError):
         reg.validate(Node(id="paper:p", kind="paper", title="P"))
+
+
+def test_facet_names_sort_by_code_point(reg):
+    # U+FF61 < U+1F600 by code point; UTF-16 code-unit order (as in a naive JS
+    # sort) would reverse them. Pins the cross-language collation contract (§8.1).
+    node = Node(id="note:n", kind="note", title="N", facets={"｡": {}, "\U0001f600": {}})
+    assert _codes(reg.check(node)) == [
+        ("facet-unexpected", "｡"),
+        ("facet-unexpected", "\U0001f600"),
+    ]

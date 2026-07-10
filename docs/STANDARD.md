@@ -244,7 +244,7 @@ Returns a list of violations; MUST NOT raise on content. Each violation carries
   else is checked for that node.
 - Otherwise, facet presence is computed directly (same composition as `validate`): each
   missing required facet → `facet-missing`; each unexpected facet → `facet-unexpected`
-  (`detail` = the facet name, sorted within each code).
+  (`detail` = the facet name, sorted within each code by Unicode code point).
 - Invariants run only when the facet-presence checks pass (they presuppose their
   facets). An invariant raising `FacetError` → `facet-invalid`; `InvariantError` →
   `invariant-violated` (`detail` = `""` — invariants are opaque callables and cannot be
@@ -275,9 +275,10 @@ node the finding anchors to.
   `dangling-ref` per unresolved top-level relation target — exactly the edges
   `dangling()` reports. Malformed structural facet payloads are a registry concern
   (shape invariants); dangling *membership* refs are deferred (§13).
-- Ordering MUST be `(ref, code, detail)` ascending — all normative, oracle-pinned
-  fields. `message` is human-readable, non-normative, and never used for ordering or
-  parity.
+- Ordering MUST be `(ref, code, detail)` ascending, comparing strings by Unicode
+  code-point order (not UTF-16 code-unit order, cf. §9.1) — all normative,
+  oracle-pinned fields. `message` is human-readable, non-normative, and never used for
+  ordering or parity.
 
 ## 9. Derived indexes: search & similarity
 

@@ -87,4 +87,12 @@ describe("Registry.check", () => {
     const reg = vocabRegistry();
     expect(() => reg.validate(makeNode({ id: "paper:p", kind: "paper", title: "P" }))).toThrow(FacetError);
   });
+
+  it("sorts facet names by Unicode code point, not UTF-16 code units", () => {
+    const reg = vocabRegistry();
+    // U+FF61 is a single code unit (0xFF61); U+1F600 is a surrogate pair whose lead
+    // unit (0xD83D) sorts BEFORE 0xFF61 — code-point order is the reverse.
+    const node = makeNode({ id: "note:n", kind: "note", title: "N", facets: { "｡": {}, "\u{1f600}": {} } });
+    expect(reg.check(node).map((v) => v.detail)).toEqual(["｡", "\u{1f600}"]);
+  });
 });

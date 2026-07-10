@@ -3,7 +3,7 @@ import { nodeFromMarkdown, nodeToMarkdown } from "./frontmatter.js";
 import { NodeId } from "./ids.js";
 import type { Node } from "./node.js";
 import type { Registry } from "./registry.js";
-import { type SearchHit, SearchIndex } from "./search.js";
+import { type SearchHit, SearchIndex, compareCodepoints } from "./search.js";
 import { EDGES, KEYS, MEMBERSHIP, ORDER } from "./shapes.js";
 import { type Embedder, type SimilarHit, type Vector, VectorCache, VectorIndex } from "./similarity.js";
 import {
@@ -71,10 +71,6 @@ export interface Finding {
   readonly ref: string;
   readonly detail: string;
   readonly message: string;
-}
-
-function cmpStr(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** Coordinator over a `Store` + an in-memory `Index`. The primary kernel API. */
@@ -363,7 +359,10 @@ export class Corpus {
           `targets unresolved ${JSON.stringify(rel.target)}`,
       });
     }
-    findings.sort((a, b) => cmpStr(a.ref, b.ref) || cmpStr(a.code, b.code) || cmpStr(a.detail, b.detail));
+    findings.sort(
+      (a, b) =>
+        compareCodepoints(a.ref, b.ref) || compareCodepoints(a.code, b.code) || compareCodepoints(a.detail, b.detail),
+    );
     return findings;
   }
 
