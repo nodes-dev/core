@@ -22,9 +22,9 @@ The TypeScript kernel has grown substantially since this checklist:
 - `ts/src/index.ts` now exports later modules too: `Corpus`, snapshot helpers, `Index`, `SearchIndex`, `VectorIndex`, ranking, and similarity helpers.
 - `ts/package.json` now exposes built `dist/` artifacts and includes a `build` script in addition to the original test/typecheck/check scripts.
 - The shapes implementation in this plan was superseded by the structural-shapes redesign: current TS shapes split `membership`, `edges`, `order`, and `keys` into separate form facets, mirroring current Python.
-- The `docs/format.md` and `ts/README.md` snippets in Task 10 have already been integrated and later extended with structural index, vocab, search, similarity, and snapshot persistence. Do not replace current docs with the historical snippets below.
+- The `docs/STANDARD.md` and `ts/README.md` snippets in Task 10 have already been integrated and later extended with structural index, vocab, search, similarity, and snapshot persistence. Do not replace current docs with the historical snippets below.
 
-Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `ts/src`, tests, package config, README, or `docs/format.md`.
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `ts/src`, tests, package config, README, or `docs/STANDARD.md`.
 
 ## Global Constraints
 
@@ -1944,14 +1944,14 @@ rtk git commit -m "feat(ts): port historical Plan-1 Store CRUD surface"
 
 ## Task 10: Barrel exports + cross-language parity + docs
 
-Current-code note: the barrel and parity fixtures remain, but current `ts/src/index.ts` exports the later Corpus, structural-index, search, similarity, snapshot, ranking, and vocab surfaces too. The `docs/format.md` and README sections below are historical Plan-4 snapshots and have been extended in current docs.
+Current-code note: the barrel and parity fixtures remain, but current `ts/src/index.ts` exports the later Corpus, structural-index, search, similarity, snapshot, ranking, and vocab surfaces too. The `docs/STANDARD.md` and README sections below are historical Plan-4 snapshots and have been extended in current docs.
 
 **Files:**
 - Modify: `ts/src/index.ts`
 - Modify: `python/tests/test_parity.py` (append check 3)
 - Create: `ts/tests/cross_parity.test.ts` (check 4)
 - Create: `ts/README.md`
-- Modify: `docs/format.md`
+- Modify: `docs/STANDARD.md`
 
 **Interfaces:**
 - Consumes: every module's public surface.
@@ -2095,7 +2095,7 @@ the knowledge vocab, are later TypeScript plans.
 - `npm run check` — Biome lint + format
 ```
 
-Append to `docs/format.md`:
+Append to `docs/STANDARD.md`:
 
 ```markdown
 ## TypeScript kernel (Plan 4)
@@ -2137,7 +2137,7 @@ Expected: TS — full Vitest suite green, typecheck + biome clean. Python — fu
 
 ```bash
 cd ~/d/nodes
-rtk git add ts/src/index.ts ts/tests/smoke.test.ts ts/tests/cross_parity.test.ts ts/README.md python/tests/test_parity.py docs/format.md
+rtk git add ts/src/index.ts ts/tests/smoke.test.ts ts/tests/cross_parity.test.ts ts/README.md python/tests/test_parity.py docs/STANDARD.md
 rtk git commit -m "feat(ts): barrel exports + cross-language parity checks + docs"
 ```
 
@@ -2153,7 +2153,7 @@ rtk git commit -m "feat(ts): barrel exports + cross-language parity checks + doc
 - §6.1–6.9 module ports → Tasks 3 (errors, ids), 4 (relations), 5 (node), 6 (frontmatter), 7 (registry), 8 (shapes), 9 (store), 10 (barrel) ✅
 - §6.5 explicit YAML parse-error handling → Task 6 `splitFrontmatter` `doc.errors` ✅
 - §7 errors wrapped, never raw → Tasks 5 (`makeNode`), 8 (`membershipOf`) ✅
-- §9 docs (`ts/README.md`, `docs/format.md` section) → Task 10 ✅
+- §9 docs (`ts/README.md`, `docs/STANDARD.md` section) → Task 10 ✅
 
 **2. Placeholder scan:** No TBD/"handle errors"/"similar to"/uncoded steps. The fixture-generation steps (Task 2 Step 4, Task 6 Step 5) contain runnable commands; their committed outputs are enforced by currency tests.
 

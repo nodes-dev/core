@@ -1373,7 +1373,7 @@ rtk git commit -m "feat(kernel): file store with CRUD, collision detection, rena
 ### Task 9: On-disk format reference + full-suite gate
 
 **Files:**
-- Create: `~/d/nodes/docs/format.md`
+- Create: `~/d/nodes/docs/STANDARD.md`
 - Create: `tests/test_format_golden.py`
 - Create: `tests/fixtures/gene_phf19.md`
 
@@ -1440,7 +1440,7 @@ Expected: FAIL — fixture missing or assertion error until the fixture + parser
 
 - [ ] **Step 4: Write the format reference doc**
 
-`~/d/nodes/docs/format.md`:
+`~/d/nodes/docs/STANDARD.md`:
 ```markdown
 # nodes — on-disk format (kernel)
 
@@ -1485,7 +1485,7 @@ Expected: no errors.
 - [ ] **Step 7: Commit**
 
 ```bash
-rtk git add docs/format.md tests/test_format_golden.py tests/fixtures/gene_phf19.md
+rtk git add docs/STANDARD.md tests/test_format_golden.py tests/fixtures/gene_phf19.md
 rtk git commit -m "docs(kernel): on-disk format reference + golden round-trip test"
 ```
 
@@ -1501,7 +1501,7 @@ rtk git commit -m "docs(kernel): on-disk format reference + golden round-trip te
 - §3.4 structural shapes + membership facet + invariants → Task 6.
 - §3.5 identity/rename contract (stored=id, uid anchor, `resolve()` via deprecated_ids, ref rewrite incl. membership, collisions) → Tasks 2, 4, 8.
 - §4 on-disk format (nested facets, top-level created/updated/version, source-implied) → Tasks 7, 9.
-- §5 derived index → **historically out of scope (Plan 2)**, flagged in `format.md`; now implemented by later structural-index/search/similarity/persistence plans.
+- §5 derived index → **historically out of scope (Plan 2)**, flagged in `STANDARD.md`; now implemented by later structural-index/search/similarity/persistence plans.
 - §6 Python lib (CRUD) → Tasks 4–8; TS port was historically out of scope and now lives under `~/d/nodes/ts`.
 - §10 `uid` backfill → **out of scope (science-migration plan)**; kernel mints uuid4 for new nodes (Task 4).
 
@@ -1509,4 +1509,4 @@ rtk git commit -m "docs(kernel): on-disk format reference + golden round-trip te
 
 **Type consistency:** `Node`, `Relation`, `Membership`, `Registry`, `KindSpec`, `Store` signatures match across Interfaces blocks and usage. `node.relations` holds the merged related+typed relations everywhere (Tasks 4, 7, 8). `MEMBERSHIP` facet key consistent (Tasks 6, 9).
 
-**Historical deferrals (intentional, flagged in `docs/format.md`):** derived index (incl. O(1) ref resolution); TS port; `uid` backfill migration. The derived indexes and TS port have since been implemented by later plans. Membership-edge rewrite on rename was **in scope** for this baseline and now lives at the `Corpus` layer.
+**Historical deferrals (intentional, flagged in `docs/STANDARD.md`):** derived index (incl. O(1) ref resolution); TS port; `uid` backfill migration. The derived indexes and TS port have since been implemented by later plans. Membership-edge rewrite on rename was **in scope** for this baseline and now lives at the `Corpus` layer.

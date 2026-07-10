@@ -1730,7 +1730,7 @@ Wire the in-memory manifest into every write path so `flushIndex()` needs no re-
 **Files:**
 - Modify: `ts/src/corpus.ts`
 - Modify: `ts/src/store.ts`
-- Modify: `docs/format.md`
+- Modify: `docs/STANDARD.md`
 - Test: `ts/tests/corpus-persistence-rename.test.ts`
 - Test: `ts/tests/store.test.ts`
 
@@ -1933,7 +1933,7 @@ Append this test to `ts/tests/store.test.ts`:
   });
 ```
 
-5. Append the index-persistence subsection to `docs/format.md`. Add this section at the end of the file (match the file's existing heading style — read the file first to confirm the heading level and tone, then append):
+5. Append the index-persistence subsection to `docs/STANDARD.md`. Add this section at the end of the file (match the file's existing heading style — read the file first to confirm the heading level and tone, then append):
 
 ```markdown
 ### Index persistence (TypeScript)
@@ -1961,7 +1961,7 @@ Expected: PASS. Then `rtk npm test` (full — every existing test, especially `c
 - [ ] **Step 5: Commit**
 
 ```bash
-rtk git add ts/src/corpus.ts ts/src/store.ts docs/format.md ts/tests/corpus-persistence-rename.test.ts ts/tests/store.test.ts
+rtk git add ts/src/corpus.ts ts/src/store.ts docs/STANDARD.md ts/tests/corpus-persistence-rename.test.ts ts/tests/store.test.ts
 rtk git commit -m "feat(ts-persistence): manifest maintenance across add/delete/rename + docs"
 ```
 
@@ -1983,9 +1983,9 @@ rtk git commit -m "feat(ts-persistence): manifest maintenance across add/delete/
 - §8 `flushIndex` (atomic write, vectors null without embedder); construction never writes: Tasks 5, 6.
 - §9 error-handling summary: Tasks 5, 6 (and the propagation tests in Task 6).
 - §10 testing matrix: every listed scenario maps to a test in Tasks 1–7 (round-trip, on-disk mutation, rename manifest, invalidation → silent rebuild, no-embedder tolerance, error propagation, full collision contract, empty-embedder corpus via Task 3's empty round-trip + Task 5's no-vectors-with-embedder, relation identity, integrity guards).
-- §11 module/file map: `snapshot.ts` created (Tasks 1, 5); `search.ts`/`similarity.ts`/`structural-index.ts` modified (Tasks 2–4); `corpus.ts` modified (Tasks 6, 7); `store.ts` modified (Task 7); `docs/format.md` extended (Task 7).
+- §11 module/file map: `snapshot.ts` created (Tasks 1, 5); `search.ts`/`similarity.ts`/`structural-index.ts` modified (Tasks 2–4); `corpus.ts` modified (Tasks 6, 7); `store.ts` modified (Task 7); `docs/STANDARD.md` extended (Task 7).
 
-**2. Placeholder scan:** No unresolved placeholders or hand-wavy "similar to Task N" steps — every step carries its full code. The `docs/format.md` step instructs reading the file first to match heading level, with the exact content to append provided.
+**2. Placeholder scan:** No unresolved placeholders or hand-wavy "similar to Task N" steps — every step carries its full code. The `docs/STANDARD.md` step instructs reading the file first to match heading level, with the exact content to append provided.
 
 **3. Type consistency:** Method names are stable across tasks — `toDict`/`fromDict` (camelCase, matching TS convention; Python uses `to_dict`/`from_dict`), `flushIndex`, `loadSnapshot`, `writeSnapshot`, `iterCorpusFiles`, `hashBytes`, `pathForNodeId`, `recordManifest`, `relPath`, `fullRebuild`, `reconcile`. `ManifestEntry`/`CorpusFile`/`Snapshot` shapes are defined in Task 1/5 and consumed unchanged in Task 6. The `Corpus.manifest` field (Task 6) is the type read by Task 7's tests. Structural snapshot entries use `structuralRefs`, never a copied `membership` object.
 

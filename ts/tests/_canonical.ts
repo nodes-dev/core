@@ -1,6 +1,6 @@
 import type { Node } from "../src/node.js";
 
-// Language-neutral canonical JSON of a node (spec §5.1). Mirrors python/tests/_canonical.py.
+// Language-neutral canonical JSON of a node (docs/STANDARD.md §11.1). Mirrors python/tests/_canonical.py.
 export function toCanonical(node: Node): unknown {
   return {
     id: node.id,

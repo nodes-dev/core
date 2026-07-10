@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (strict, ES2022, NodeNext ESM), Zod, Vitest, Biome.
 
-**Reference (read before starting):** the spec is `docs/format.md` §"Knowledge vocab (Plan 3)" (the roster, the `Source` facet, the predicates, the enforcement contract). The oracle this mirrors is the Python source `~/d/nodes/python/src/nodes/vocab/{source,kinds,predicates,__init__}.py` and its tests `~/d/nodes/python/tests/test_vocab_{source,kinds,predicates,exports}.py`. The kernel surface the port consumes lives in `~/d/nodes/ts/src/{errors,node,registry,relations,corpus}.ts`.
+**Reference (read before starting):** the spec is `docs/STANDARD.md` §"Knowledge vocab (Plan 3)" (the roster, the `Source` facet, the predicates, the enforcement contract). The oracle this mirrors is the Python source `~/d/nodes/python/src/nodes/vocab/{source,kinds,predicates,__init__}.py` and its tests `~/d/nodes/python/tests/test_vocab_{source,kinds,predicates,exports}.py`. The kernel surface the port consumes lives in `~/d/nodes/ts/src/{errors,node,registry,relations,corpus}.ts`.
 
 ## Current State Note
 
@@ -18,7 +18,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 - Later plans added structural shapes, full-text search, similarity, and snapshot persistence to the TypeScript kernel. Current `Corpus(root, registry?, embedder?)` has a larger construction and mutation path than this vocab-only plan needed.
 - The "no kernel code" constraint was correct for this plan's scope. Do not infer from it that the current kernel has not changed since; it now includes search, similarity, ranking, and snapshot modules.
-- The `docs/format.md` and `ts/README.md` edits in Task 5 have already been applied and later extended by subsequent plans.
+- The `docs/STANDARD.md` and `ts/README.md` edits in Task 5 have already been applied and later extended by subsequent plans.
 
 ## Global Constraints
 
@@ -663,7 +663,7 @@ rtk git commit -m "feat(ts): vocab barrel + exports + Corpus-vocab integration t
 
 **Files:**
 - Modify: `ts/README.md` (scope: knowledge vocab now ported)
-- Modify: `docs/format.md` (note the TS vocab layer; fix the stale "not yet ported" sentence)
+- Modify: `docs/STANDARD.md` (note the TS vocab layer; fix the stale "not yet ported" sentence)
 
 **Interfaces:**
 - Consumes: nothing (docs only).
@@ -683,9 +683,9 @@ kernel; register it onto a `Registry` with `registerKnowledgeVocab(reg)`.
 
 (If the existing wording differs, preserve the surrounding scope text and only swap the "knowledge vocab … later plans" clause for the text above.)
 
-- [ ] **Step 2: Update `docs/format.md`**
+- [ ] **Step 2: Update `docs/STANDARD.md`**
 
-In `docs/format.md`, in the "## TypeScript kernel (Plan 4)" section, change the final sentence that reads "The knowledge vocab is not yet ported." to:
+In `docs/STANDARD.md`, in the "## TypeScript kernel (Plan 4)" section, change the final sentence that reads "The knowledge vocab is not yet ported." to:
 
 ```markdown
 The knowledge vocab is ported too — see "TypeScript knowledge vocab" below.
@@ -722,7 +722,7 @@ Re-read both edited sections to confirm there is no remaining "not yet ported" /
 
 ```bash
 cd ~/d/nodes
-rtk git add ts/README.md docs/format.md
+rtk git add ts/README.md docs/STANDARD.md
 rtk git commit -m "docs: TypeScript knowledge vocab ported"
 ```
 
@@ -730,7 +730,7 @@ rtk git commit -m "docs: TypeScript knowledge vocab ported"
 
 ## Self-Review
 
-**1. Spec coverage** (`docs/format.md` §"Knowledge vocab (Plan 3)" + Python oracle):
+**1. Spec coverage** (`docs/STANDARD.md` §"Knowledge vocab (Plan 3)" + Python oracle):
 - Roster of 7 kinds; prose bare; source kinds require `source` facet + identifiability invariant → Task 2 ✅
 - `Source` facet fields + `extra="forbid"` (→ `.strict()`) + at-least-one invariant → Task 1 ✅
 - `Source.year` Pydantic-compatible normalization for quoted numeric years / integral floats, without broad JS coercion → Task 1 ✅

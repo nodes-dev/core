@@ -4,7 +4,7 @@ from nodes.kernel.node import Node
 
 
 def to_canonical(node: Node) -> dict:
-    """Language-neutral canonical JSON of a node (spec §5.1).
+    """Language-neutral canonical JSON of a node (docs/STANDARD.md §11.1).
 
     Relations are normalized (source explicit) in document order. Dates render
     as YYYY-MM-DD strings or None. Uses on-disk field name `deprecated_ids`.

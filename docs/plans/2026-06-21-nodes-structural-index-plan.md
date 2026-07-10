@@ -17,10 +17,10 @@ The repo and kernel have grown since this checklist was written:
 - Python now lives under `~/d/nodes/python/`. Historical paths like `src/nodes/kernel/...` and `tests/...` mean `python/src/nodes/kernel/...` and `python/tests/...` in the current checkout.
 - The current `Corpus` also builds and maintains `SearchIndex`, an optional `VectorIndex`, a live manifest, and disposable snapshot persistence. `Index` now exposes `to_dict()` / validating `from_dict()` for snapshots, but still does no file I/O.
 - `Store.all_nodes()` now scans through `iter_corpus_files()` so corpus scans share the snapshot file-walk rules, including ignoring `.nodes-index/`.
-- The `docs/format.md` update in Task 6 has been superseded by later sections for shapes, knowledge vocab, TypeScript parity, full-text search, similarity, and per-language snapshot persistence. Do not replace current `docs/format.md` with the historical snippet below.
+- The `docs/STANDARD.md` update in Task 6 has been superseded by later sections for shapes, knowledge vocab, TypeScript parity, full-text search, similarity, and per-language snapshot persistence. Do not replace current `docs/STANDARD.md` with the historical snippet below.
 - Current shell commands should use the repository's `rtk` wrapper. From `~/d/nodes/python`, run Python gates with `rtk uv run --frozen pytest`, `rtk uv run --frozen ruff check .`, and `rtk uv run --frozen pyright src`.
 
-Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `index.py`, `store.py`, or `docs/format.md`.
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `index.py`, `store.py`, or `docs/STANDARD.md`.
 
 **Spec:** `docs/designs/2026-06-21-nodes-structural-index-design.md` (approved). Read it for rationale; this plan is self-contained for implementation.
 
@@ -51,7 +51,7 @@ Historical path note: this checklist predates the repo split. In the current che
 - `tests/test_index.py` — **created**.
 - `tests/test_corpus.py` — **created**.
 - `tests/test_index_rebuild_equivalence.py` — **created** (the §6 property test).
-- `docs/format.md` — **modified** (update the "known limitations" section).
+- `docs/STANDARD.md` — **modified** (update the "known limitations" section).
 
 Existing modules consumed as-is: `node.py` (`Node`), `relations.py` (`Relation`, `relates_to`, `RELATES_TO`), `ids.py` (`NodeId`), `shapes.py` (`MEMBERSHIP`), `frontmatter.py` (`node_from_markdown`, `node_to_markdown`).
 
@@ -1100,11 +1100,11 @@ git commit -m "feat(corpus): O(degree) rename — targeted referrer rewrite via 
 
 ## Task 6: Rebuild-equivalence property test + docs update
 
-Current-code note: the structural rebuild-equivalence property is implemented, and later persistence tests extend the same idea across snapshot load/reconcile. The `docs/format.md` replacement below is historical; current `docs/format.md` already includes later Plan-3+ sections and snapshot persistence language.
+Current-code note: the structural rebuild-equivalence property is implemented, and later persistence tests extend the same idea across snapshot load/reconcile. The `docs/STANDARD.md` replacement below is historical; current `docs/STANDARD.md` already includes later Plan-3+ sections and snapshot persistence language.
 
 **Files:**
 - Create: `tests/test_index_rebuild_equivalence.py`
-- Modify: `docs/format.md`
+- Modify: `docs/STANDARD.md`
 
 **Interfaces:**
 - Consumes: `Corpus` (Tasks 4–5), `Index` (Task 2).
@@ -1205,9 +1205,9 @@ def test_rebuild_equivalence_after_overwrite(tmp_path):
 Run: `uv run pytest tests/test_index_rebuild_equivalence.py -v`
 Expected: PASS (2 tests). If either fails, an incremental-maintenance path diverges from a clean rebuild — fix the `upsert`/`remove`/`rename` path it points at before proceeding; do not weaken the normalization to make it pass.
 
-- [ ] **Step 3: Update `docs/format.md` known-limitations section**
+- [ ] **Step 3: Update `docs/STANDARD.md` known-limitations section**
 
-Replace the "Known kernel limitations" block (the derived-index bullet and the `delete()` note) with text reflecting Plan 2. Open `docs/format.md`, find:
+Replace the "Known kernel limitations" block (the derived-index bullet and the `delete()` note) with text reflecting Plan 2. Open `docs/STANDARD.md`, find:
 
 ```markdown
 ## Known kernel limitations (resolved in later plans)
@@ -1257,7 +1257,7 @@ Expected: clean (0 errors).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_index_rebuild_equivalence.py docs/format.md
+git add tests/test_index_rebuild_equivalence.py docs/STANDARD.md
 git commit -m "test(index): rebuild-equivalence property test; docs(format): Plan 2 index & API"
 ```
 

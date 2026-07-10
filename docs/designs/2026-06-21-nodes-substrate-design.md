@@ -134,6 +134,11 @@ genuinely narrows the one above by adding invariants.
 
 ### 3.4 Structural shapes — the refinement lattice
 
+> **Current-state note (2026-07-10):** this section predates the structural-shapes
+> redesign. The current contract is a scope-only `membership` facet (`{members}`) plus
+> shape-owned form facets (`edges` / `order` / `keys`), specified normatively in
+> `docs/STANDARD.md` §5. The table below is the original design record.
+
 ```
 Set ─┬─ List   (+ order, duplicates allowed)
      └─ Dict   (+ unique keys)

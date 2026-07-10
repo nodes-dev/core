@@ -16,7 +16,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 - Later snapshot persistence added `VectorIndex.toDict()` / `fromDict()` and snapshot namespace/dimension validation. Current `Corpus` construction may load/reconcile persisted normalized vectors.
 - The `scoreKey` extraction described in Task 1 is already complete, so older search-plan snippets that import it from `search.ts` are historical.
-- The `docs/format.md` update in Task 7 has already been applied and later extended with snapshot persistence sections.
+- The `docs/STANDARD.md` update in Task 7 has already been applied and later extended with snapshot persistence sections.
 
 ## Global Constraints
 
@@ -1258,11 +1258,11 @@ rtk git commit -m "feat(ts-similarity): opt-in Corpus integration with fail-befo
 
 ### Task 7: Cross-language parity test + docs
 
-Mirror of Python commit `cf5cb43`, but **consume** the frozen fixtures rather than generate them. Assert TS `Corpus` similarity reproduces the committed oracle, and document the TS port in `docs/format.md`.
+Mirror of Python commit `cf5cb43`, but **consume** the frozen fixtures rather than generate them. Assert TS `Corpus` similarity reproduces the committed oracle, and document the TS port in `docs/STANDARD.md`.
 
 **Files:**
 - Test: `ts/tests/similarity-parity.test.ts`
-- Modify: `docs/format.md` (append a "TypeScript similarity index" subsection under the existing similarity section)
+- Modify: `docs/STANDARD.md` (append a "TypeScript similarity index" subsection under the existing similarity section)
 
 **Interfaces:**
 - Consumes: the committed `fixtures/similarity-corpus/`, `fixtures/similarity.vectors.json`, `fixtures/similarity.oracle.json` (read-only); `Corpus`, `scoreKey`, `embedText`, `Embedder`, `Vector`.
@@ -1388,7 +1388,7 @@ Expected: PASS — all three oracle sections (`similar`, `query_vector`, `simila
 
 - [ ] **Step 3: Document the TS port**
 
-In `docs/format.md`, append a subsection at the end of the "Similarity / embedding index (derived index)" section (after the Parity bullet at the bottom of the file):
+In `docs/STANDARD.md`, append a subsection at the end of the "Similarity / embedding index (derived index)" section (after the Parity bullet at the bottom of the file):
 
 ```markdown
 ### TypeScript similarity index
@@ -1414,7 +1414,7 @@ Also update the final sentence of the preceding Parity bullet — change "On-dis
 - [ ] **Step 4: Commit**
 
 ```bash
-rtk git add ts/tests/similarity-parity.test.ts docs/format.md
+rtk git add ts/tests/similarity-parity.test.ts docs/STANDARD.md
 rtk git commit -m "test(ts-similarity): cross-language parity against frozen oracle; docs"
 ```
 

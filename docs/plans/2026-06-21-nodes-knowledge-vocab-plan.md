@@ -16,10 +16,10 @@ The repo and kernel have grown since this checklist was written:
 
 - Python now lives under `~/d/nodes/python/`. Historical paths like `src/nodes/vocab/...`, `src/nodes/kernel/...`, and `tests/...` mean `python/src/nodes/vocab/...`, `python/src/nodes/kernel/...`, and `python/tests/...` in the current checkout.
 - Current `Corpus` is `Corpus(root, registry=None, embedder=None)`. Registry validation still runs before disk writes on `add` and before any rename writes, but the current rename path also prepares and commits full-text search, optional similarity vectors, and the live snapshot manifest.
-- The `docs/format.md` appendix from Task 6 is already integrated and has since been extended with TypeScript parity, full-text search, similarity, and index-persistence sections. Do not append the historical snippet below again.
+- The `docs/STANDARD.md` appendix from Task 6 is already integrated and has since been extended with TypeScript parity, full-text search, similarity, and index-persistence sections. Do not append the historical snippet below again.
 - Current shell commands should use the repository's `rtk` wrapper. From `~/d/nodes/python`, run Python gates with `rtk uv run --frozen pytest`, `rtk uv run --frozen ruff check .`, and `rtk uv run --frozen pyright src`.
 
-Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `vocab/`, tests, or `docs/format.md`.
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `corpus.py`, `vocab/`, tests, or `docs/STANDARD.md`.
 
 ## Global Constraints
 
@@ -722,11 +722,11 @@ rtk git commit -m "feat(corpus): validate-all-before-write rename (no partial re
 
 ### Task 6: Package exports + docs
 
-Current-code note: package exports are implemented, and the `docs/format.md` section below is already present in current docs with later additions around TypeScript, search, similarity, and snapshot persistence.
+Current-code note: package exports are implemented, and the `docs/STANDARD.md` section below is already present in current docs with later additions around TypeScript, search, similarity, and snapshot persistence.
 
 **Files:**
 - Modify: `src/nodes/vocab/__init__.py` (populate re-exports)
-- Modify: `docs/format.md` (append the vocab section)
+- Modify: `docs/STANDARD.md` (append the vocab section)
 - Test: `tests/test_vocab_exports.py`
 
 **Interfaces:**
@@ -808,7 +808,7 @@ Expected: PASS (2 tests).
 
 - [ ] **Step 5: Append the docs section**
 
-Append to the end of `docs/format.md`:
+Append to the end of `docs/STANDARD.md`:
 
 ```markdown
 
@@ -840,7 +840,7 @@ Register it onto a `Registry` with `register_knowledge_vocab(reg)` (mirrors
 rtk uv run pytest -q
 rtk uv run ruff check src tests
 rtk uv run pyright src
-rtk git add src/nodes/vocab/__init__.py tests/test_vocab_exports.py docs/format.md
+rtk git add src/nodes/vocab/__init__.py tests/test_vocab_exports.py docs/STANDARD.md
 rtk git commit -m "feat(vocab): package exports + docs(format): Knowledge vocab (Plan 3)"
 ```
 
