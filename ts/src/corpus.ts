@@ -64,6 +64,19 @@ function rewriteRefs(node: Node, oldId: string, newId: string): void {
   }
 }
 
+/** One corpus-check finding (reported, never thrown). */
+export interface Finding {
+  readonly severity: "error" | "warning";
+  readonly code: string;
+  readonly ref: string;
+  readonly detail: string;
+  readonly message: string;
+}
+
+function cmpStr(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Coordinator over a `Store` + an in-memory `Index`. The primary kernel API. */
 export class Corpus {
   readonly store: Store;
@@ -323,6 +336,35 @@ export class Corpus {
     this.recordManifest(node);
     for (const referrer of referrers) this.recordManifest(referrer);
     return node;
+  }
+
+  /** Report corpus-validity findings; never throws on content. Registry violations
+   * (configured or passed) are errors; unresolved top-level relation targets are
+   * warnings. Sorted by (ref, code, detail) — `message` is human-only. */
+  check(registry?: Registry): Finding[] {
+    const reg = registry ?? this.registry;
+    const findings: Finding[] = [];
+    if (reg !== undefined) {
+      for (const node of this.store.allNodes()) {
+        for (const v of reg.check(node)) {
+          findings.push({ severity: "error", code: v.code, ref: node.id, detail: v.detail, message: v.message });
+        }
+      }
+    }
+    for (const edge of this.index.danglingEdges()) {
+      const rel = edge.relation;
+      findings.push({
+        severity: "warning",
+        code: "dangling-ref",
+        ref: rel.source,
+        detail: rel.target,
+        message:
+          `${rel.source}: relation ${JSON.stringify(rel.predicate)} ` +
+          `targets unresolved ${JSON.stringify(rel.target)}`,
+      });
+    }
+    findings.sort((a, b) => cmpStr(a.ref, b.ref) || cmpStr(a.code, b.code) || cmpStr(a.detail, b.detail));
+    return findings;
   }
 
   search(query: string, limit?: number): SearchHit[] {

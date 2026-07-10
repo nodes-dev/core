@@ -42,7 +42,7 @@ There are three current-code details to keep in mind when reading the task snipp
 - **Modify** `python/src/nodes/kernel/search.py` — add `SearchIndex.to_dict`/`from_dict`.
 - **Modify** `python/src/nodes/kernel/similarity.py` — add `VectorIndex.to_dict`/`from_dict`.
 - **Modify** `python/src/nodes/kernel/corpus.py` — load/reconcile/full-rebuild in `__init__`; `flush_index()`; manifest maintenance in `add`/`delete`/`rename`.
-- **Modify** `docs/format.md` — index-persistence subsection.
+- **Modify** `docs/STANDARD.md` — index-persistence subsection.
 - **Tests:** `test_snapshot_io.py`, `test_search_snapshot.py`, `test_vector_snapshot.py`, `test_index_snapshot.py`, `test_snapshot_load.py`, `test_corpus_persistence.py`, `test_corpus_persistence_rename.py`.
 
 ---
@@ -1305,7 +1305,7 @@ rtk git commit -m "feat(persistence): Corpus load/reconcile/full-rebuild + flush
 
 **Files:**
 - Modify: `python/src/nodes/kernel/corpus.py`
-- Modify: `docs/format.md`
+- Modify: `docs/STANDARD.md`
 - Test: `python/tests/test_corpus_persistence_rename.py`
 
 **Interfaces:**
@@ -1472,7 +1472,7 @@ Run the full suite:
 Run: `rtk uv run pytest -q`
 Expected: PASS (entire suite green).
 
-- [ ] **Step 5: Update `docs/format.md`**
+- [ ] **Step 5: Update `docs/STANDARD.md`**
 
 Append a subsection after the similarity-index section (the file's current tail describes the similarity index). Add:
 
@@ -1499,7 +1499,7 @@ enforces the same collision contract as a from-scratch build. The TypeScript por
 Run: `rtk uv run ruff check src tests`, `rtk uv run pyright src`.
 
 ```bash
-cd python && rtk git add src/nodes/kernel/corpus.py tests/test_corpus_persistence_rename.py ../docs/format.md
+cd python && rtk git add src/nodes/kernel/corpus.py tests/test_corpus_persistence_rename.py ../docs/STANDARD.md
 rtk git commit -m "feat(persistence): manifest maintenance across add/delete/rename; docs"
 ```
 

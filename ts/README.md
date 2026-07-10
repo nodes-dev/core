@@ -4,15 +4,21 @@ TypeScript port of the `nodes` kernel — behavioral + on-disk-format parity wit
 
 ## Scope
 
-Mirrors the current Python kernel: `Node`/`Relation`, ids, errors, frontmatter parse/serialize,
-registry, structural shapes, a slimmed `Store` (pure file mechanics), an in-memory `Index`
-(O(1) resolution + resolved relations graph), and a `Corpus` coordinator — the primary API for
-all mutations (`add`/`get`/`rename`/`delete`) and graph queries (`outbound`/`inbound`/`neighbors`/
-`dangling`). There is **no full-text search, no embeddings, no on-disk index persistence, and no
-membership-graph traversal** — those are later TypeScript plans. The knowledge vocab
-(`ts/src/vocab/` — `note`/`idea`/`question`/`topic`/`paper`/`book`/`dataset`, the `Source`
-facet, and the predicate vocabulary) is ported as a separate layer that imports only from the
-kernel; register it onto a `Registry` with `registerKnowledgeVocab(reg)`.
+Mirrors the current Python kernel: `Node`/`Relation`, ids, errors, frontmatter
+parse/serialize, registry, structural shapes, a slimmed `Store` (pure file mechanics),
+the in-memory structural `Index`, and the `Corpus` coordinator — the primary API for
+mutations (`add`/`get`/`rename`/`delete`), graph queries
+(`outbound`/`inbound`/`neighbors`/`dangling`), BM25F full-text `search`, opt-in
+embedding `similar`/`queryVector`/`similarText`, snapshot persistence (`flushIndex`),
+and corpus checking (`check`). TS-only conveniences (tier 3): `idsByKind`/`allByKind`
+and corpus stat fingerprints. There is **no membership-graph traversal** yet.
+
+The knowledge vocab (`ts/src/vocab/` — `note`/`idea`/`question`/`topic`/`paper`/`book`/
+`dataset`, the `Source` facet, and the predicate vocabulary) is a separate layer that
+imports only from the kernel; register it with `registerKnowledgeVocab(reg)`.
+
+The portable contract this kernel implements is specified in `../docs/STANDARD.md`
+(spec version 1.0); parity with Python is pinned by the shared `../fixtures/` oracles.
 
 ## Conventions
 

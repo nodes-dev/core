@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript 5.5+, zod v3, vitest, biome (width 120). Source under `~/d/nodes/ts/src/`, tests under `~/d/nodes/ts/tests/`. All commands run from `~/d/nodes/ts` via the `rtk` wrapper.
 
-This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is the **oracle** for this port. This TS port has since been implemented on `main`; the red/green expectations below are the historical implementation sequence, not the current suite state. Plan B (the mindful package) follows.
+This is **Plan A-ts**, the second of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/designs/2026-06-23-mindful-v6-sp1-abstraction-design.md`, Part A). Plan A-py (Python) is the **oracle** for this port. This TS port has since been implemented on `main`; the red/green expectations below are the historical implementation sequence, not the current suite state. Plan B (the mindful package) follows.
 
 ## Current State Note
 
@@ -18,7 +18,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 - Later plans added and/or persisted full-text search, similarity, and snapshots. Current `Corpus(root, registry?, embedder?)` has more initialization and mutation bookkeeping than the snippets in this shape-focused plan show.
 - Current TS snapshots use the `structuralRefs` container described here, with role strings shared with Python and camelCase keys on disk.
-- `docs/format.md` was already updated by Plan A-py and later extended by TS parity, search, similarity, and persistence plans; Task 5 remains historical verification guidance.
+- `docs/STANDARD.md` was already updated by Plan A-py and later extended by TS parity, search, similarity, and persistence plans; Task 5 remains historical verification guidance.
 
 ## The Oracle
 
@@ -1162,7 +1162,7 @@ rtk git commit -m "feat(shapes-ts): rename rewrites refs across membership/edges
 **Files:**
 - Modify: `ts/src/vocab/kinds.ts` (JSDoc comment)
 - Verify: `ts/src/index.ts` (barrel), `ts/tests/smoke.test.ts`, `ts/tests/vocab-exports.test.ts`
-- Note: `docs/format.md` is the SHARED, language-agnostic doc and was already updated by Plan A-py — do NOT edit it here; only confirm it still matches.
+- Note: `docs/STANDARD.md` is the SHARED, language-agnostic doc and was already updated by Plan A-py — do NOT edit it here; only confirm it still matches.
 
 **Interfaces:** none new — this task closes the surface and proves the whole suite green.
 

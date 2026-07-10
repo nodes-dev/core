@@ -16,7 +16,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 - Later similarity work extracted the parity rounding helper to `python/src/nodes/kernel/ranking.py`; import `score_key` from `nodes.kernel.ranking`, not from `nodes.kernel.search`.
 - Later snapshot persistence added `SearchIndex.to_dict()` / `from_dict()` and validating snapshot-load paths. Current construction may load/reconcile a snapshot rather than always building search from a fresh `Store.all_nodes()` scan.
-- The `docs/format.md` update in Task 5 has already been applied and later extended with TypeScript search, similarity, and snapshot persistence sections.
+- The `docs/STANDARD.md` update in Task 5 has already been applied and later extended with TypeScript search, similarity, and snapshot persistence sections.
 
 ## Global Constraints
 
@@ -787,7 +787,7 @@ rtk git commit -m "feat(search): Corpus.search + keep search index current on ad
 - Create: `python/scripts/gen_search_oracle.py`
 - Create: `fixtures/search.oracle.json` (generated)
 - Create: `python/tests/test_search_parity.py`
-- Modify: `docs/format.md`
+- Modify: `docs/STANDARD.md`
 
 **Interfaces:**
 - Consumes: `Corpus.search` (Task 4); `score_key` (Task 3).
@@ -930,7 +930,7 @@ def test_search_corpus_has_four_topics(tmp_path):
 Run: `rtk uv run pytest tests/test_search_parity.py -q`
 Expected: PASS.
 
-- [ ] **Step 6: Update `docs/format.md`**
+- [ ] **Step 6: Update `docs/STANDARD.md`**
 
 In the "### Known kernel limitations (resolved in later plans)" list, replace this line:
 
@@ -946,7 +946,7 @@ with:
   is a later plan.)
 ```
 
-Then append this section to the end of `docs/format.md`:
+Then append this section to the end of `docs/STANDARD.md`:
 
 ```markdown
 ## Full-text search (derived index)
@@ -984,7 +984,7 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-rtk git add fixtures/search-corpus python/scripts/gen_search_oracle.py fixtures/search.oracle.json python/tests/test_search_parity.py docs/format.md
+rtk git add fixtures/search-corpus python/scripts/gen_search_oracle.py fixtures/search.oracle.json python/tests/test_search_parity.py docs/STANDARD.md
 rtk git commit -m "test(search): cross-language ranking oracle + fixture corpus; docs"
 ```
 

@@ -1,0 +1,8 @@
+[
+  { "severity": "error", "code": "facet-unexpected", "ref": "note:stray", "detail": "source" },
+  { "severity": "warning", "code": "dangling-ref", "ref": "paper:broken", "detail": "paper:ghost" },
+  { "severity": "error", "code": "facet-missing", "ref": "paper:broken", "detail": "source" },
+  { "severity": "error", "code": "invariant-violated", "ref": "paper:empty", "detail": "" },
+  { "severity": "error", "code": "facet-invalid", "ref": "paper:typo", "detail": "" },
+  { "severity": "error", "code": "unknown-kind", "ref": "zzz:mystery", "detail": "zzz" }
+]

@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (strict, ES2022, NodeNext ESM), Zod, eemeli `yaml`, Vitest, Biome.
 
-**Reference (read before starting):** the design doc `~/d/nodes/docs/specs/2026-06-22-nodes-ts-structural-index-design.md`, and the Python sources this mirrors: `~/d/nodes/python/src/nodes/kernel/{index,corpus,store}.py` and their tests `~/d/nodes/python/tests/test_{index,corpus,store,index_rebuild_equivalence}.py`.
+**Reference (read before starting):** the design doc `~/d/nodes/docs/designs/2026-06-22-nodes-ts-structural-index-design.md`, and the Python sources this mirrors: `~/d/nodes/python/src/nodes/kernel/{index,corpus,store}.py` and their tests `~/d/nodes/python/tests/test_{index,corpus,store,index_rebuild_equivalence}.py`.
 
 ## Current State Note
 
@@ -23,9 +23,9 @@ The TypeScript kernel has grown since this checklist was written:
 - Later structural-shapes redesign split structural refs across `membership`, `edges`, `order`, and `keys` facets, so current ref roles include `edges_source`, `edges_target`, `order_member`, and `keys_value` instead of the historical one-facet membership edge roles shown below.
 - The knowledge vocab has since been ported to TypeScript; the "knowledge vocab is NOT ported" constraint below is historical Plan-2 scope, not current package state.
 - Current `Corpus` also exposes `idsByKind(kind)` and `allByKind(kind)`, which are later additions outside this plan.
-- The `docs/format.md` and `ts/README.md` updates in Task 8 have already been integrated and extended with vocab, full-text search, similarity, and snapshot persistence. Do not replace current docs with the historical snippets below.
+- The `docs/STANDARD.md` and `ts/README.md` updates in Task 8 have already been integrated and extended with vocab, full-text search, similarity, and snapshot persistence. Do not replace current docs with the historical snippets below.
 
-Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `ts/src`, tests, README, or `docs/format.md`.
+Treat code snippets below as the original greenfield implementation sequence, not as replacement code for current `ts/src`, tests, README, or `docs/STANDARD.md`.
 
 ## Global Constraints
 
@@ -1736,13 +1736,13 @@ rtk git commit -m "test: cross-language Corpus.rename parity (shared fixture cor
 
 ### Task 8: Barrel exports + smoke test + docs
 
-Current-code note: current `ts/src/index.ts` exports additional surfaces added later (`SearchIndex`, `VectorIndex`, snapshot helpers, ranking, similarity, and vocab). The docs snippets below are historical and have been superseded by current `docs/format.md` and `ts/README.md`.
+Current-code note: current `ts/src/index.ts` exports additional surfaces added later (`SearchIndex`, `VectorIndex`, snapshot helpers, ranking, similarity, and vocab). The docs snippets below are historical and have been superseded by current `docs/STANDARD.md` and `ts/README.md`.
 
 **Files:**
 - Modify: `ts/src/index.ts` (barrel — add `Corpus`, `Index` + its types)
 - Modify: `ts/tests/smoke.test.ts` (assert the new surface)
 - Modify: `ts/README.md` (scope: now includes Corpus + structural index; Store slimmed)
-- Modify: `docs/format.md` (note the corpus rename-parity fixtures)
+- Modify: `docs/STANDARD.md` (note the corpus rename-parity fixtures)
 
 **Interfaces:**
 - Consumes: every module's public surface.
@@ -1810,9 +1810,9 @@ all mutations (`add`/`get`/`rename`/`delete`) and graph queries (`outbound`/`inb
 membership-graph traversal** — those, and the knowledge vocab, are later TypeScript plans.
 ```
 
-- [ ] **Step 5: Update `docs/format.md`**
+- [ ] **Step 5: Update `docs/STANDARD.md`**
 
-Append to `docs/format.md`:
+Append to `docs/STANDARD.md`:
 
 ```markdown
 ## Corpus rename parity (TypeScript structural index)
@@ -1846,7 +1846,7 @@ Expected: all green.
 
 ```bash
 cd ~/d/nodes
-rtk git add ts/src/index.ts ts/tests/smoke.test.ts ts/README.md docs/format.md
+rtk git add ts/src/index.ts ts/tests/smoke.test.ts ts/README.md docs/STANDARD.md
 rtk git commit -m "feat(ts): barrel exports for Corpus + Index; docs"
 ```
 

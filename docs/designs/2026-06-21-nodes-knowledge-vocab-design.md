@@ -287,7 +287,7 @@ hierarchy (a raw Pydantic `ValidationError` never escapes `source_of`).
 
 ## 9. Docs
 
-Add a **"Knowledge vocab (Plan 3)"** section to `docs/format.md`: the seven-kind roster, the
+Add a **"Knowledge vocab (Plan 3)"** section to `docs/STANDARD.md`: the seven-kind roster, the
 `Source` facet shape, the predicate vocabulary, and the `Corpus` optional-registry wiring, plus a
 one-line statement of the `vocab → kernel` layering direction.
 

@@ -29,7 +29,7 @@ export {
   newUid,
 } from "./node.js";
 export { nodeFromMarkdown, nodeToMarkdown, splitFrontmatter } from "./frontmatter.js";
-export { type Invariant, type KindSpec, type ShapeSpec, Registry } from "./registry.js";
+export { type Invariant, type KindSpec, type ShapeSpec, type Violation, Registry } from "./registry.js";
 export {
   EDGES,
   EdgesSchema,
@@ -53,7 +53,7 @@ export {
 } from "./shapes.js";
 export type { Edges, Keys, Membership, Order } from "./shapes.js";
 export { Store } from "./store.js";
-export { Corpus } from "./corpus.js";
+export { Corpus, type Finding } from "./corpus.js";
 export {
   type CorpusFile,
   type CorpusFileStat,

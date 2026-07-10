@@ -311,4 +311,4 @@ whose deletion merely forces re-embedding).
   `from_dict`.
 - **Modify:** `python/src/nodes/kernel/corpus.py` — load/reconcile in `__init__`,
   `flush_index()`, in-memory manifest maintenance across `add` / `delete` / `rename`.
-- **Docs:** extend `docs/format.md` with an index-persistence subsection.
+- **Docs:** extend `docs/STANDARD.md` with an index-persistence subsection.

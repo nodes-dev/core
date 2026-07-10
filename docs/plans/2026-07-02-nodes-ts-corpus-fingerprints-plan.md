@@ -514,7 +514,7 @@ rtk git commit -m "feat: export corpus fingerprint helpers"
 ### Task 4: Verification And Documentation Check
 
 **Files:**
-- Read: `docs/specs/2026-07-02-nodes-ts-corpus-fingerprints-design.md`
+- Read: `docs/designs/2026-07-02-nodes-ts-corpus-fingerprints-design.md`
 - Read: `ts/src/snapshot.ts`
 - Read: `ts/src/index.ts`
 - Read: `ts/tests/corpus-fingerprint.test.ts`

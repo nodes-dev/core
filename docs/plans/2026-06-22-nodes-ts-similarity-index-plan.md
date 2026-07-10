@@ -16,11 +16,11 @@ There are three current-code details to keep in mind when reading the task snipp
 
 - Later snapshot persistence added `VectorIndex.toDict()` / `fromDict()` and snapshot namespace/dimension validation. Current `Corpus` construction may load/reconcile persisted normalized vectors.
 - The `scoreKey` extraction described in Task 1 is already complete, so older search-plan snippets that import it from `search.ts` are historical.
-- The `docs/format.md` update in Task 7 has already been applied and later extended with snapshot persistence sections.
+- The `docs/STANDARD.md` update in Task 7 has already been applied and later extended with snapshot persistence sections.
 
 ## Global Constraints
 
-These bind every task. Values are copied verbatim from the spec (`docs/specs/2026-06-22-nodes-similarity-index-design.md`) and the committed Python implementation (`python/src/nodes/kernel/similarity.py`, `ranking.py`, `corpus.py`).
+These bind every task. Values are copied verbatim from the spec (`docs/designs/2026-06-22-nodes-similarity-index-design.md`) and the committed Python implementation (`python/src/nodes/kernel/similarity.py`, `ranking.py`, `corpus.py`).
 
 - **The seam.** The kernel ships **no** concrete embedder. `Embedder` is an interface with a `readonly cacheNamespace: string` and `embed(texts: string[]): Vector[]`. `Vector = number[]`. Vectors are treated as immutable by convention.
 - **`embedText` (frozen contract):** one vector per node from ``embedText(node) = `${node.title}\n\n${node.body}` `` — title and body joined by exactly one blank line. This is the cache-key text and the parity contract; do not alter it.
@@ -1258,11 +1258,11 @@ rtk git commit -m "feat(ts-similarity): opt-in Corpus integration with fail-befo
 
 ### Task 7: Cross-language parity test + docs
 
-Mirror of Python commit `cf5cb43`, but **consume** the frozen fixtures rather than generate them. Assert TS `Corpus` similarity reproduces the committed oracle, and document the TS port in `docs/format.md`.
+Mirror of Python commit `cf5cb43`, but **consume** the frozen fixtures rather than generate them. Assert TS `Corpus` similarity reproduces the committed oracle, and document the TS port in `docs/STANDARD.md`.
 
 **Files:**
 - Test: `ts/tests/similarity-parity.test.ts`
-- Modify: `docs/format.md` (append a "TypeScript similarity index" subsection under the existing similarity section)
+- Modify: `docs/STANDARD.md` (append a "TypeScript similarity index" subsection under the existing similarity section)
 
 **Interfaces:**
 - Consumes: the committed `fixtures/similarity-corpus/`, `fixtures/similarity.vectors.json`, `fixtures/similarity.oracle.json` (read-only); `Corpus`, `scoreKey`, `embedText`, `Embedder`, `Vector`.
@@ -1388,7 +1388,7 @@ Expected: PASS — all three oracle sections (`similar`, `query_vector`, `simila
 
 - [ ] **Step 3: Document the TS port**
 
-In `docs/format.md`, append a subsection at the end of the "Similarity / embedding index (derived index)" section (after the Parity bullet at the bottom of the file):
+In `docs/STANDARD.md`, append a subsection at the end of the "Similarity / embedding index (derived index)" section (after the Parity bullet at the bottom of the file):
 
 ```markdown
 ### TypeScript similarity index
@@ -1414,7 +1414,7 @@ Also update the final sentence of the preceding Parity bullet — change "On-dis
 - [ ] **Step 4: Commit**
 
 ```bash
-rtk git add ts/tests/similarity-parity.test.ts docs/format.md
+rtk git add ts/tests/similarity-parity.test.ts docs/STANDARD.md
 rtk git commit -m "test(ts-similarity): cross-language parity against frozen oracle; docs"
 ```
 
@@ -1422,7 +1422,7 @@ rtk git commit -m "test(ts-similarity): cross-language parity against frozen ora
 
 ## Self-Review (completed by plan author)
 
-**Spec coverage** (against `docs/specs/2026-06-22-nodes-similarity-index-design.md`, realized in `similarity.py`):
+**Spec coverage** (against `docs/designs/2026-06-22-nodes-similarity-index-design.md`, realized in `similarity.py`):
 - Embedder seam + `embedText` → Task 2. `textHash` + cache layout + atomic writes + raw vectors → Task 3. Path-safety validators → Task 2 (defined) / Task 3 (enforced in `pathFor`). L2 normalize + cosine + shared `scoreKey` → Tasks 4–5 + Task 1. Namespace/dim binding + prepare/commit + `similar` self-exclusion + `k` contract → Tasks 4–5. Opt-in `Corpus` + `EmbedderRequiredError` + mutation ordering → Task 6. Frozen-fixture parity → Task 7. No gaps.
 
 **Placeholder scan:** no TBD/TODO; every code step shows complete code. The one deliberately-simplified test line in Task 6 Step 1 is called out with explicit fallback instructions.

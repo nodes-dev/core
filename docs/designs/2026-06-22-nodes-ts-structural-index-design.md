@@ -1,8 +1,8 @@
 # nodes — TypeScript Structural Index (Corpus + Index) Design
 
 **Status:** approved 2026-06-22
-**Builds on:** `docs/specs/2026-06-21-nodes-structural-index-design.md` (Plan 2, the Python
-structural index) and `docs/specs/2026-06-21-nodes-ts-kernel-design.md` (Plan 4, the TypeScript
+**Builds on:** `docs/designs/2026-06-21-nodes-structural-index-design.md` (Plan 2, the Python
+structural index) and `docs/designs/2026-06-21-nodes-ts-kernel-design.md` (Plan 4, the TypeScript
 kernel port).
 **Ports:** Plan 2 onto the TypeScript codebase, following the conventions established in Plan 4.
 

@@ -47,7 +47,7 @@ Python `main`. This distinction is load-bearing:
   (earlier, mid-Plan-1 task code deleted the old file first). The pin is to `f3e6ee4`, so the TS
   rename ordering in §6.8 is *exact* mirroring of the pinned commit — not a divergence from it.
 - On current `main`, Plan 2 introduced `Corpus` + `Index` and **moved** collision/resolution/
-  rename out of `Store`; today's `Store` is slim file mechanics and `docs/format.md` calls
+  rename out of `Store`; today's `Store` is slim file mechanics and `docs/STANDARD.md` calls
   `Corpus` the primary API.
 
 **This port targets the historical Plan-1 `Store`.** The TS `Store` carries the full CRUD
@@ -312,7 +312,7 @@ suite still 112 / ruff + pyright clean from `python/`.
 
 - `ts/README.md`: install, scripts, the camelCase-API / snake_case-on-disk note, the
   Plan-1-`Store`-is-the-CRUD-surface note.
-- Append a short "TypeScript kernel (Plan 4)" section to `docs/format.md`: the semantic parity
+- Append a short "TypeScript kernel (Plan 4)" section to `docs/STANDARD.md`: the semantic parity
   contract, the shared `fixtures/` oracle, and the explicit non-goal of byte-identical YAML.
 
 ## 10. Why this shape

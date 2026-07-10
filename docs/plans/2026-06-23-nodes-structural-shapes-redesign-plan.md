@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+, pydantic v2, pytest. Source under `~/d/nodes/python/src/nodes/`, tests under `~/d/nodes/python/tests/`. All commands run from `~/d/nodes/python` via the `rtk` wrapper.
 
-This is **Plan A-py**, the first of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/specs/2026-06-23-mindful-v6-sp1-abstraction-design.md`). It is followed by **Plan A-ts** (the TypeScript port, using this finished Python as its oracle) and then **Plan B** (the mindful package). Both kernels land before mindful is scaffolded.
+This is **Plan A-py**, the first of three plans for mindful v6 SP1 (spec: `~/d/nodes/docs/designs/2026-06-23-mindful-v6-sp1-abstraction-design.md`). It is followed by **Plan A-ts** (the TypeScript port, using this finished Python as its oracle) and then **Plan B** (the mindful package). Both kernels land before mindful is scaffolded.
 
 ## Current State Note
 
@@ -18,7 +18,7 @@ There are three current-code details to keep in mind when reading the task snipp
 
 - Later plans added full-text search, similarity, and snapshot persistence. Current `Corpus(root, registry=None, embedder=None)` therefore does more during construction and mutation than the snippets in this plan show.
 - Current structural `Index.to_dict()` / `from_dict()` serializes generic `structural_refs` rather than the old bundled membership snapshot shape, and `from_dict()` is a validating deserializer used by snapshot persistence.
-- The `docs/format.md` update in Task 5 has already been applied and later extended with TypeScript parity, full-text search, similarity, and snapshot persistence sections.
+- The `docs/STANDARD.md` update in Task 5 has already been applied and later extended with TypeScript parity, full-text search, similarity, and snapshot persistence sections.
 
 ## Global Constraints
 
@@ -1129,18 +1129,18 @@ rtk git commit -m "feat(shapes-py): rename rewrites refs across membership/edges
 
 ---
 
-### Task 5: Docs — update the structural-shapes section of `format.md`
+### Task 5: Docs — update the structural-shapes section of `STANDARD.md`
 
 **Files:**
-- Modify: `python/src/nodes/vocab/kinds.py:20` (comment only), `docs/format.md`
+- Modify: `python/src/nodes/vocab/kinds.py:20` (comment only), `docs/STANDARD.md`
 
 **Interfaces:**
 - Consumes: nothing new. Documents the Task 1–4 model.
 - Produces: corrected prose; no code behavior change.
 
-- [ ] **Step 1: Update `format.md`**
+- [ ] **Step 1: Update `STANDARD.md`**
 
-In `docs/format.md`, find the structural-shapes paragraph that currently reads `{shape, members, edges?}` and the shape list, and replace that paragraph (around line 23–24) with:
+In `docs/STANDARD.md`, find the structural-shapes paragraph that currently reads `{shape, members, edges?}` and the shape list, and replace that paragraph (around line 23–24) with:
 
 ```markdown
 A **structure** is a node of a registered *shape* carrying a scope-only `membership` facet
@@ -1172,7 +1172,7 @@ comment is not stale; the function still mirrors the builtin-shape registration 
 - [ ] **Step 3: Verify the golden-format test still passes**
 
 Run: `rtk uv run pytest tests/test_format_golden.py -q`
-Expected: PASS (this test guards `format.md` round-trip examples, not the prose; confirm no example block was broken).
+Expected: PASS (this test guards `STANDARD.md` round-trip examples, not the prose; confirm no example block was broken).
 
 - [ ] **Step 4: Run the full gate**
 
@@ -1187,8 +1187,8 @@ Expected: all PASS / no errors.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/d/nodes && rtk git add docs/format.md python/src/nodes/vocab/kinds.py
-rtk git commit -m "docs(shapes-py): document membership/form-facet shape model in format.md"
+cd ~/d/nodes && rtk git add docs/STANDARD.md python/src/nodes/vocab/kinds.py
+rtk git commit -m "docs(shapes-py): document membership/form-facet shape model in docs/STANDARD.md"
 ```
 
 ---

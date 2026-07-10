@@ -1,7 +1,7 @@
 # nodes — Structural Index (Plan 2) Design
 
 **Status:** approved 2026-06-21
-**Builds on:** `docs/specs/2026-06-21-nodes-substrate-design.md` §5 (Derived index & fast I/O)
+**Builds on:** `docs/designs/2026-06-21-nodes-substrate-design.md` §5 (Derived index & fast I/O)
 **Supersedes for §5:** scopes the spec's four-capability "derived index" down to its structural core.
 
 ## 1. Purpose & scope
