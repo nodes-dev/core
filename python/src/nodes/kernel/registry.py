@@ -4,7 +4,7 @@ from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nodes.kernel.errors import FacetError, UnknownKindError, ValidationError
+from nodes.kernel.errors import FacetError, InvariantError, UnknownKindError, ValidationError
 from nodes.kernel.node import Node
 
 Invariant = Callable[[Node], None]
@@ -27,6 +27,14 @@ class KindSpec(BaseModel):
     required_facets: set[str] = Field(default_factory=set)
     optional_facets: set[str] = Field(default_factory=set)
     invariants: list[Invariant] = Field(default_factory=list)
+
+
+class Violation(BaseModel):
+    """One structured validation finding from `Registry.check` (never raised)."""
+
+    code: str
+    detail: str
+    message: str
 
 
 class Registry:
@@ -58,8 +66,7 @@ class Registry:
         except KeyError as exc:
             raise UnknownKindError(f"kind {kind!r} is not registered") from exc
 
-    def validate(self, node: Node) -> None:
-        spec = self.get(node.kind)
+    def _compose(self, spec: KindSpec) -> tuple[set[str], set[str], list[Invariant]]:
         required = set(spec.required_facets)
         optional = set(spec.optional_facets)
         invariants: list[Invariant] = []
@@ -69,7 +76,10 @@ class Registry:
             optional |= shape.optional_facets
             invariants.extend(shape.invariants)
         invariants.extend(spec.invariants)
+        return required, optional, invariants
 
+    def validate(self, node: Node) -> None:
+        required, optional, invariants = self._compose(self.get(node.kind))
         present = set(node.facets)
         missing = required - present
         if missing:
@@ -80,3 +90,37 @@ class Registry:
             raise FacetError(f"{node.id}: unexpected facets {sorted(unexpected)}")
         for invariant in invariants:
             invariant(node)
+
+    def check(self, node: Node) -> list[Violation]:
+        """Collect ALL violations of `node` with machine-stable codes; never raises on
+        content. Non-kernel exceptions from invariants are programmer bugs and propagate."""
+        spec = self._specs.get(node.kind)
+        if spec is None:
+            return [
+                Violation(
+                    code="unknown-kind",
+                    detail=node.kind,
+                    message=f"{node.id}: kind {node.kind!r} is not registered",
+                )
+            ]
+        required, optional, invariants = self._compose(spec)
+        present = set(node.facets)
+        violations: list[Violation] = []
+        for name in sorted(required - present):
+            violations.append(
+                Violation(code="facet-missing", detail=name, message=f"{node.id}: missing required facet {name!r}")
+            )
+        for name in sorted(present - (required | optional)):
+            violations.append(
+                Violation(code="facet-unexpected", detail=name, message=f"{node.id}: unexpected facet {name!r}")
+            )
+        if violations:
+            return violations  # invariants presuppose their facets; running them would duplicate reports
+        for invariant in invariants:
+            try:
+                invariant(node)
+            except FacetError as exc:
+                violations.append(Violation(code="facet-invalid", detail="", message=str(exc)))
+            except InvariantError as exc:
+                violations.append(Violation(code="invariant-violated", detail="", message=str(exc)))
+        return violations
