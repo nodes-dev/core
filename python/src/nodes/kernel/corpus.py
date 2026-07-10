@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel
 
 from nodes.kernel.errors import CollisionError, EmbedderRequiredError, RefError
 from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
@@ -49,6 +52,16 @@ def _rewrite_refs(node: Node, old: str, new: str) -> None:
         for key, val in list(ky["keys"].items()):
             if val == old:
                 ky["keys"][key] = new
+
+
+class Finding(BaseModel):
+    """One corpus-check finding (reported, never raised)."""
+
+    severity: Literal["error", "warning"]
+    code: str
+    ref: str
+    detail: str
+    message: str
 
 
 class Corpus:
@@ -285,3 +298,32 @@ class Corpus:
         for referrer in referrers:
             self._record_manifest(referrer)
         return node
+
+    def check(self, registry: Registry | None = None) -> list[Finding]:
+        """Report corpus-validity findings; never raises on content.
+
+        Registry violations (when a registry is configured or passed) are errors;
+        unresolved top-level relation targets are warnings. Sorted by (ref, code,
+        detail) — `message` is human-only.
+        """
+        reg = registry if registry is not None else self.registry
+        findings: list[Finding] = []
+        if reg is not None:
+            for node in self.store.all_nodes():
+                for v in reg.check(node):
+                    findings.append(
+                        Finding(severity="error", code=v.code, ref=node.id, detail=v.detail, message=v.message)
+                    )
+        for edge in self.index.dangling_edges():
+            rel = edge.relation
+            findings.append(
+                Finding(
+                    severity="warning",
+                    code="dangling-ref",
+                    ref=rel.source,
+                    detail=rel.target,
+                    message=f"{rel.source}: relation {rel.predicate!r} targets unresolved {rel.target!r}",
+                )
+            )
+        findings.sort(key=lambda f: (f.ref, f.code, f.detail))
+        return findings
