@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { Corpus } from "../src/corpus.js";
 import { makeNode } from "../src/node.js";
 import { Registry } from "../src/registry.js";
-import { registerBuiltinShapes } from "../src/shapes.js";
+import { MEMBERSHIP, registerBuiltinShapes } from "../src/shapes.js";
 import { SOURCE, registerKnowledgeVocab } from "../src/vocab/index.js";
 
 function vocabRegistry(): Registry {
@@ -100,5 +100,39 @@ describe("Corpus.check", () => {
     const c = new Corpus(root, vocabRegistry());
     c.check();
     expect(c.get("zzz:m").title).toBe("M"); // still readable, file untouched
+  });
+
+  it("reports a dangling member after a delete, deduped per (container, ref)", () => {
+    const root = tmpRoot();
+    const seed = new Corpus(root); // registry-free: dangling-member is registry-independent
+    seed.add(makeNode({ id: "note:gone", kind: "note", title: "G" }));
+    seed.add(
+      makeNode({
+        id: "set:box",
+        kind: "set",
+        title: "Box",
+        facets: { [MEMBERSHIP]: { members: ["note:gone", "note:gone"] } },
+      }),
+    );
+    seed.delete("note:gone");
+    expect(tuples(seed.check())).toEqual([["warning", "dangling-member", "set:box", "note:gone"]]);
+  });
+
+  it("orders dangling-member with other findings by (ref, code, detail)", () => {
+    const root = tmpRoot();
+    const seed = new Corpus(root);
+    seed.add(
+      makeNode({
+        id: "set:box",
+        kind: "set",
+        title: "Box",
+        relations: [{ source: "set:box", predicate: "about", target: "topic:gone", directed: true }],
+        facets: { [MEMBERSHIP]: { members: ["note:ghost"] } },
+      }),
+    );
+    expect(tuples(seed.check())).toEqual([
+      ["warning", "dangling-member", "set:box", "note:ghost"],
+      ["warning", "dangling-ref", "set:box", "topic:gone"],
+    ]);
   });
 });

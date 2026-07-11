@@ -262,6 +262,26 @@ export class Corpus {
     return [...neighborUids].sort().map((u) => this.store.readFile(this.idFor(u)));
   }
 
+  private sortedLiveIds(uids: Iterable<string>): string[] {
+    return [...uids].map((u) => this.idFor(u)).sort(compareCodepoints);
+  }
+
+  members(ref: string): string[] {
+    return this.sortedLiveIds(this.index.membersOf(this.requireUid(ref)));
+  }
+
+  containers(ref: string): string[] {
+    return this.sortedLiveIds(this.index.containersOf(this.requireUid(ref)));
+  }
+
+  descendants(ref: string): string[] {
+    return this.sortedLiveIds(this.index.membershipClosure(this.requireUid(ref), "members"));
+  }
+
+  ancestors(ref: string): string[] {
+    return this.sortedLiveIds(this.index.membershipClosure(this.requireUid(ref), "containers"));
+  }
+
   rename(oldId: string, newId: string): Node {
     // 1. oldId must be a LIVE id (not unknown, not merely deprecated); then collision-check newId.
     const uid = this.index.idToUid.get(oldId);
@@ -335,8 +355,9 @@ export class Corpus {
   }
 
   /** Report corpus-validity findings; never throws on content. Registry violations
-   * (configured or passed) are errors; unresolved top-level relation targets are
-   * warnings. Sorted by (ref, code, detail) — `message` is human-only. */
+   * (configured or passed) are errors; unresolved top-level relation targets and
+   * unresolved membership member refs are warnings. Sorted by (ref, code, detail)
+   * — `message` is human-only. */
   check(registry?: Registry): Finding[] {
     const reg = registry ?? this.registry;
     const findings: Finding[] = [];
@@ -357,6 +378,16 @@ export class Corpus {
         message:
           `${rel.source}: relation ${JSON.stringify(rel.predicate)} ` +
           `targets unresolved ${JSON.stringify(rel.target)}`,
+      });
+    }
+    for (const { sourceUid, ref } of this.index.danglingMembers()) {
+      const containerId = this.idFor(sourceUid);
+      findings.push({
+        severity: "warning",
+        code: "dangling-member",
+        ref: containerId,
+        detail: ref,
+        message: `${containerId}: member ${JSON.stringify(ref)} resolves to no live node`,
       });
     }
     findings.sort(
