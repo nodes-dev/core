@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import deque
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -71,8 +72,8 @@ def _structural_out_refs(node: Node) -> list[OutRef]:
     are never relation-graph edges (their `relation` is None)."""
     refs: list[OutRef] = []
     mem = node.facets.get(MEMBERSHIP)
-    if isinstance(mem, dict):
-        for m in mem.get("members", []) or []:
+    if isinstance(mem, dict) and isinstance(mem.get("members"), list):
+        for m in mem["members"]:
             if isinstance(m, str):
                 refs.append(OutRef(ref=m, role="membership_member"))
     eg = node.facets.get(EDGES)
@@ -377,3 +378,60 @@ class Index:
                     seen.add(id(oref.relation))
                     edges.append(self._resolve_edge(oref.relation))
         return edges
+
+    def members_of(self, uid: str) -> set[str]:
+        """Uids of this node's resolvable direct members. Dangling member refs are skipped
+        (check reports them); duplicate entries and live+deprecated refs dedupe by uid."""
+        entry = self.by_uid[uid]
+        members: set[str] = set()
+        for oref in entry.out_refs:
+            if oref.role != "membership_member":
+                continue
+            member_uid = self.resolve_uid(oref.ref)
+            if member_uid is not None:
+                members.add(member_uid)
+        return members
+
+    def containers_of(self, uid: str) -> set[str]:
+        """Uids of the nodes whose membership facet lists any of this node's identity claims
+        (live id or deprecated ids — the same attribution rule as _relations_by_role)."""
+        containers: set[str] = set()
+        for ref in self._refs_for_uid(uid):
+            for inref in self.in_refs.get(ref, []):
+                if inref.out_ref.role != "membership_member":
+                    continue
+                containers.add(inref.source_uid)
+        return containers
+
+    def membership_closure(self, uid: str, direction: Literal["members", "containers"]) -> set[str]:
+        """Transitive membership closure (BFS). The visited set is seeded with the start uid,
+        which is excluded from the result even when a membership cycle reaches it."""
+        step = self.members_of if direction == "members" else self.containers_of
+        visited: set[str] = {uid}
+        queue: deque[str] = deque([uid])
+        while queue:
+            current = queue.popleft()
+            for nxt in step(current):
+                if nxt in visited:
+                    continue
+                visited.add(nxt)
+                queue.append(nxt)
+        visited.discard(uid)
+        return visited
+
+    def dangling_members(self) -> list[tuple[str, str]]:
+        """Every unresolved membership ref, deduped by (container uid, ref)."""
+        out: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for entry in self.by_uid.values():
+            for oref in entry.out_refs:
+                if oref.role != "membership_member":
+                    continue
+                if self.resolve_uid(oref.ref) is not None:
+                    continue
+                key = (entry.uid, oref.ref)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(key)
+        return out
