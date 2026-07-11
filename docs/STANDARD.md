@@ -1,6 +1,6 @@
 # The nodes Standard
 
-- **Spec version:** 1.0
+- **Spec version:** 1.1
 - **Status:** Living standard — the authoritative definition of the portable `nodes` contract.
 - **Implementations:** Python (`python/src/nodes/`), TypeScript (`ts/src/`).
 
@@ -225,6 +225,20 @@ and dangling tracking but are not relation-graph edges.
   uid-based. A **dangling** target (a relation whose target no longer resolves) is a
   normal state — surfaced, never raised. `inbound`/`outbound` raise `RefError` only when
   the *input* ref does not resolve.
+- Membership traversal (`members`, `containers`, `descendants`, `ancestors`) exposes
+  the containment graph over `membership.members` refs. Each method MUST resolve its
+  input ref (live then deprecated; `RefError` when it resolves to no live node — the
+  only raising path) and return a sorted (Unicode code point), uid-deduplicated list
+  of **live ids**. `members` / `containers` read one hop — the literal facet content,
+  resolved, so a container listing itself appears in its own `members`;
+  `descendants` / `ancestors` are the transitive closures over one-or-more hops and
+  MUST exclude the start node, even when a membership cycle makes it reachable from
+  itself. Member refs listed under deprecated ids resolve normally; dangling member
+  refs are silently skipped (`check` reports them, §8.2). Traversal MUST be
+  cycle-safe for every shape: `dag` / `tree` acyclicity constrains only a container's
+  internal `edges` facet, so cross-node membership containment cycles are legal. A
+  node without a membership facet has no members; a node no container lists has no
+  containers — both are empty results, never errors.
 - **Single-writer assumption.** Nothing coordinates concurrent mutation of one corpus
   (by two processes or two languages). Deployments MUST ensure a single writer at a
   time; readers may run concurrently at the cost of possibly-stale derived indexes.
@@ -268,13 +282,16 @@ node the finding anchors to.
 | `facet-invalid` | error | `""` | invariant raised `FacetError` (malformed payload) |
 | `invariant-violated` | error | `""` | invariant raised `InvariantError` |
 | `dangling-ref` | warning | target ref | top-level relation target resolves to no live node (`ref` = the relation's source node) |
+| `dangling-member` | warning | member ref | a `membership.members` entry resolves to no live node (`ref` = the container node) |
 
 - With a registry: every node runs through `Registry.check`; each violation becomes an
   `error` finding.
 - Always (registry or not), the exhaustive list of structural findings: one
   `dangling-ref` per unresolved top-level relation target — exactly the edges
-  `dangling()` reports. Malformed structural facet payloads are a registry concern
-  (shape invariants); dangling *membership* refs are deferred (§13).
+  `dangling()` reports — and one `dangling-member` per unresolved
+  `(container, member ref)` pair, deduplicated (a duplicated dangling entry reports
+  once). A member listed under a deprecated-but-resolvable id is not dangling.
+  Malformed structural facet payloads remain a registry concern (shape invariants).
 - Ordering MUST be `(ref, code, detail)` ascending, comparing strings by Unicode
   code-point order (not UTF-16 code-unit order, cf. §9.1) — all normative,
   oracle-pinned fields. `message` is human-readable, non-normative, and never used for
@@ -366,7 +383,8 @@ dates render as `YYYY-MM-DD` strings or `null`; field names use the on-disk form
 | `search.tokenizer.json` | tokenizer freeze |
 | `search-corpus/`, `search.oracle.json` | BM25F ranked ids + 6-dp scores |
 | `similarity-corpus/`, `similarity.vectors.json`, `similarity.oracle.json` | similarity ranking over frozen vectors (model embeddings are not portable) |
-| `check-corpus/`, `check.oracle.json` | corpus-validity findings (severity, code, ref, detail) |
+| `check-corpus/`, `check.oracle.json` | corpus-validity findings (severity, code, ref, detail); includes a membership cluster (nesting, a cycle, self-membership, one dangling member) |
+| `traversal.oracle.json` | membership traversal (`members` / `containers` / `descendants` / `ancestors`) over `check-corpus/` |
 
 ## 12. Versioning & change policy
 
@@ -376,12 +394,10 @@ dates render as `YYYY-MM-DD` strings or `null`; field names use the on-disk form
 - Any tier-1/tier-2 change MUST update this document and the affected fixtures in the
   same change. Tier-3 additions do not touch this document.
 - History: **1.0** (2026-07-10) — initial consolidation; adds §8 corpus validity.
+  **1.1** (2026-07-11) — membership traversal (§7); `dangling-member` finding (§8.2).
 
 ## 13. Known limitations
 
-- No public membership-graph traversal (tree descendants, DAG reachability); membership
-  refs are tracked for rename/dangling integrity but not exposed as graph edges, and
-  dangling membership refs are not yet reported by `check`.
 - Single-writer only (§7); no locking.
 - In-memory indexes and brute-force cosine target personal-corpus scale (order of
   10⁴–10⁵ nodes), not bulk graph workloads.
