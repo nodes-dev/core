@@ -24,8 +24,8 @@ Decide the tier first — see `docs/STANDARD.md` §1:
 
 ## Gates (run before every commit)
 
-- Python, from `python/`: `rtk uv run --frozen pytest -q`,
-  `rtk uv run --frozen ruff check .`, `rtk uv run --frozen pyright src`.
+- Python, from `python/`: `uv run --frozen pytest -q`,
+  `uv run --frozen ruff check .`, `uv run --frozen pyright src`.
 - TypeScript, from `ts/`: `npm test`, `npm run typecheck`, `npm run check`.
 
 ## Conventions

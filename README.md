@@ -40,9 +40,9 @@ standard, the standard wins.
 Python (from `python/`):
 
 ```sh
-rtk uv run --frozen pytest -q
-rtk uv run --frozen ruff check .
-rtk uv run --frozen pyright src
+uv run --frozen pytest -q
+uv run --frozen ruff check .
+uv run --frozen pyright src
 ```
 
 TypeScript (from `ts/`):
