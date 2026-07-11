@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nodes.kernel.ids import NodeId
-from nodes.kernel.index import Index
+from nodes.kernel.structural_index import Index
 from nodes.kernel.search import SearchIndex
 from nodes.kernel.similarity import VectorIndex
 

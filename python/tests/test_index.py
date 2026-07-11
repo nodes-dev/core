@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from nodes.kernel.errors import CollisionError
-from nodes.kernel.index import Index
+from nodes.kernel.structural_index import Index
 from nodes.kernel.node import Node
 from nodes.kernel.node import Node as _Node
 from nodes.kernel.relations import Relation, relates_to

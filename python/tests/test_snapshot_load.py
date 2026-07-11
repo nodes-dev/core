@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from nodes.kernel.index import Index
+from nodes.kernel.structural_index import Index
 from nodes.kernel.node import Node
 from nodes.kernel.relations import relates_to
 from nodes.kernel.search import SearchIndex

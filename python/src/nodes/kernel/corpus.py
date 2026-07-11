@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from nodes.kernel.errors import CollisionError, EmbedderRequiredError, RefError
 from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
 from nodes.kernel.ids import NodeId
-from nodes.kernel.index import Index, ResolvedEdge
+from nodes.kernel.structural_index import Index, ResolvedEdge
 from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
 from nodes.kernel.search import SearchHit, SearchIndex
