@@ -207,7 +207,7 @@ In `ts/src/structural-index.ts`, append inside `class Index`, directly after the
       for (const oref of entry.outRefs) {
         if (oref.role !== "membership_member") continue;
         if (this.resolveUid(oref.ref) !== null) continue;
-        const key = `${entry.uid} ${oref.ref}`;
+        const key = `${entry.uid}\u0000${oref.ref}`;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push({ sourceUid: entry.uid, ref: oref.ref });
@@ -443,7 +443,7 @@ rtk git commit -m "feat(ts/corpus): membership traversal API and dangling-member
 ### Task 3: Python Index membership primitives
 
 **Files:**
-- Modify: `python/src/nodes/kernel/index.py` (imports + methods on `class Index`, after `dangling_edges()`)
+- Modify: `python/src/nodes/kernel/structural_index.py` (imports + methods on `class Index`, after `dangling_edges()`)
 - Test: `python/tests/test_index.py` (append tests)
 
 **Interfaces:**
@@ -551,7 +551,7 @@ Expected: FAIL — `AttributeError: 'Index' object has no attribute 'members_of'
 
 - [ ] **Step 3: Implement the four Index methods (and the malformed-members guard)**
 
-In `python/src/nodes/kernel/index.py`, add to the imports near the top (after `import math`):
+In `python/src/nodes/kernel/structural_index.py`, add to the imports near the top (after `import math`):
 
 ```python
 from collections import deque
@@ -650,7 +650,7 @@ Expected: all PASS.
 
 ```bash
 cd ~/d/nodes
-rtk git add python/src/nodes/kernel/index.py python/tests/test_index.py
+rtk git add python/src/nodes/kernel/structural_index.py python/tests/test_index.py
 rtk git commit -m "feat(py/index): membership traversal primitives and dangling-member scan"
 ```
 
