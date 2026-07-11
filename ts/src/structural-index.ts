@@ -432,8 +432,9 @@ export class Index {
     const step = direction === "members" ? this.membersOf.bind(this) : this.containersOf.bind(this);
     const visited = new Set<string>([uid]);
     const queue: string[] = [uid];
-    while (queue.length > 0) {
-      const current = queue.shift() as string;
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
       for (const next of step(current)) {
         if (visited.has(next)) continue;
         visited.add(next);

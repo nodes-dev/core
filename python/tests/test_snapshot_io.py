@@ -20,7 +20,7 @@ from nodes.kernel.snapshot import (
 
 
 def test_constants():
-    assert SNAPSHOT_SCHEMA_VERSION == 1
+    assert SNAPSHOT_SCHEMA_VERSION == 2
     assert SNAPSHOT_LANG == "py"
 
 

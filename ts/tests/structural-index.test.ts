@@ -244,6 +244,19 @@ describe("Index — membership traversal", () => {
     expect(idx.membershipClosure(selfie.uid, "containers")).toEqual(new Set());
   });
 
+  it("membershipClosure covers broad fan-out with a cycle", () => {
+    const count = 2_000;
+    const leaves = Array.from({ length: count }, (_, i) => node(`note:n${i}`, "note"));
+    const root = setNode("set:root", [...leaves.map((leaf) => leaf.id), "set:root"]);
+    const idx = Index.build([root, ...leaves]);
+
+    const closure = idx.membershipClosure(root.uid, "members");
+
+    expect(closure.size).toBe(count);
+    expect(closure.has(root.uid)).toBe(false);
+    expect(closure).toEqual(new Set(leaves.map((leaf) => leaf.uid)));
+  });
+
   it("danglingMembers reports unresolved membership refs deduped per container", () => {
     const box = setNode("set:box", ["note:ghost", "note:ghost"]);
     const other = setNode("set:other", ["note:ghost"]);

@@ -12,7 +12,7 @@ from nodes.kernel.structural_index import Index
 from nodes.kernel.search import SearchIndex
 from nodes.kernel.similarity import VectorIndex
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 SNAPSHOT_LANG = "py"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _SNAPSHOT_KEYS = frozenset({"version", "lang", "manifest", "structural", "search", "vectors"})

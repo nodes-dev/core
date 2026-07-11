@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from nodes.kernel.corpus import Corpus
@@ -183,6 +185,33 @@ def test_corrupt_snapshot_silently_rebuilds(tmp_path):
     snapshot_path(tmp_path).write_text("{garbage", encoding="utf-8")
     rebuilt = Corpus(tmp_path)  # must not raise
     assert _results(rebuilt) == _results(c)
+
+
+def test_version_1_snapshot_rebuilds_malformed_membership_without_phantom_refs(tmp_path):
+    c = Corpus(tmp_path)
+    weird = c.add(
+        Node(
+            id="note:weird",
+            kind="note",
+            title="Weird",
+            facets={"membership": {"members": "note:ghost"}},
+        )
+    )
+    c.flush_index()
+    path = snapshot_path(tmp_path)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["version"] = 1
+    entry = next(row for row in doc["structural"]["entries"] if row["uid"] == weird.uid)
+    entry["structural_refs"] = [
+        {"ref": char, "role": "membership_member"} for char in "note:ghost"
+    ]
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+    rebuilt = Corpus(tmp_path)
+
+    assert rebuilt.members("note:weird") == []
+    assert rebuilt.descendants("note:weird") == []
+    assert [finding for finding in rebuilt.check() if finding.code == "dangling-member"] == []
 
 
 def test_manifest_path_identity_mismatch_silently_rebuilds(tmp_path):
