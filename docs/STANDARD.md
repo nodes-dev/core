@@ -269,7 +269,7 @@ Returns a list of violations; MUST NOT raise on content. Each violation carries
 
 Returns a list of findings; MUST NOT raise on content. Uses the passed registry, else
 the corpus's own; there is deliberately no way to ignore a corpus's registry
-(`dangling-ref` is the only registry-independent code — filter by code instead).
+(`dangling-ref` and `dangling-member` are registry-independent codes — filter by code instead).
 
 Finding fields: `{severity, code, ref, detail, message}` where `ref` is the id of the
 node the finding anchors to.
