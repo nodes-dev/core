@@ -335,23 +335,33 @@ node -e 'const fs = require("node:fs"); const mindful = JSON.parse(fs.readFileSy
 
 Expected: `requested` is `file:../../nodes/ts`, `bundled` is `true`, and the worktree package declares `@nodes-dev/core`. This directly records the dependency-name mismatch that a future mindful `npm install` would reconcile.
 
-As a no-commit downstream baseline, run from `~/d/mindful/v6`:
+Also confirm where mindful's existing installed link points:
 
 ```bash
-realpath node_modules/@nodes/kernel
-npm run build
+realpath ~/d/mindful/v6/node_modules/@nodes/kernel
 ```
 
-Expected: `realpath` identifies the main Nodes checkout, and the mindful build can still pass because its existing `node_modules/@nodes/kernel` symlink resolves there. Record that this is only a current-consumer API baseline: the symlink does not target the isolated package-identity worktree, so this passing build is not evidence of package-name compatibility. The build may refresh ignored `dist/` output but must not change tracked mindful files.
+Expected: `realpath` identifies `~/d/nodes/ts`, the main Nodes checkout, rather than the isolated package-identity worktree. Do not run a mindful build here: this slice changes no TypeScript source or API, and the existing symlink does not consume the renamed worktree manifest, so such a build cannot validate the identity migration.
 
 - [ ] **Step 3: Record mindful migration as the top follow-up**
 
 Record this follow-up in the implementation handoff:
 
 ```text
-Before running npm install in ~/d/mindful/v6, migrate its file dependency,
-bundledDependencies entry, source imports, freshness script, lockfile, and installed
-link from @nodes/kernel to @nodes-dev/core; then run mindful's full build/test/typecheck/check gates.
+Before running npm install in ~/d/mindful/v6, migrate @nodes/kernel to
+@nodes-dev/core across:
+
+- package.json: description, file dependency, and bundledDependencies;
+- package-lock.json and the installed node_modules link;
+- every executable import in src/ (currently 30 files) and tests/ (currently 30 files);
+- scripts/check-kernel-freshness.mjs, including comments, lookup path, and messages;
+- living orientation and agent guidance in README.md and AGENTS.md.
+
+Audit the 53 docs/ files that mention @nodes/kernel under mindful's own documentation
+authority rules. Preserve dated historical records unless mindful explicitly requires a
+correction; update any living or normative document that describes the current package.
+
+Then run mindful's full build/test/typecheck/check gates in its own reviewed commit.
 ```
 
 This downstream migration needs its own reviewed commit in the mindful repository. Do not edit mindful in this package-identity slice and do not add a compatibility package or alias in Nodes.
