@@ -1,6 +1,8 @@
-# @nodes/kernel (TypeScript)
+# @nodes-dev/core (TypeScript)
 
-TypeScript port of the `nodes` kernel — behavioral + on-disk-format parity with the Python kernel.
+TypeScript implementation of Nodes core — behavioral and on-disk-format parity with
+the Python distribution. Core contains the domain-free kernel and the general-purpose
+knowledge vocabulary.
 
 ## Scope
 

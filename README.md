@@ -24,8 +24,8 @@ kernel; domain profiles live in downstream repos.
 |------|----------|
 | `docs/STANDARD.md` | **The authority** — the versioned, normative portable contract. |
 | `docs/designs/`, `docs/plans/` | Dated historical records (rationale, not authority). |
-| `python/` | Python kernel + vocab (`nodes.kernel`, `nodes.vocab`). |
-| `ts/` | TypeScript kernel + vocab (`@nodes/kernel`). |
+| `python/` | Python core distribution (`nodes-core`); imports are `nodes.kernel` and `nodes.vocab`. |
+| `ts/` | TypeScript core package (`@nodes-dev/core`), containing kernel and vocab layers. |
 | `fixtures/` | Shared cross-language conformance oracles. |
 
 ## The standard

@@ -1,7 +1,7 @@
 [project]
-name = "nodes"
+name = "nodes-core"
 version = "0.1.0"
-description = "Problem-agnostic knowledge substrate kernel"
+description = "Nodes core: a problem-agnostic knowledge substrate"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.0",
