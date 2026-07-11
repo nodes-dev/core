@@ -1,0 +1,14 @@
+[
+  { "op": "members", "ref": "set:crate", "expect": ["set:box"] },
+  { "op": "members", "ref": "set:box", "expect": ["note:renamed", "note:tidy"] },
+  { "op": "members", "ref": "note:tidy", "expect": [] },
+  { "op": "containers", "ref": "note:tidy", "expect": ["set:box"] },
+  { "op": "containers", "ref": "note:old-name", "expect": ["set:box"] },
+  { "op": "containers", "ref": "set:box", "expect": ["set:crate"] },
+  { "op": "descendants", "ref": "set:crate", "expect": ["note:renamed", "note:tidy", "set:box"] },
+  { "op": "ancestors", "ref": "note:renamed", "expect": ["set:box", "set:crate"] },
+  { "op": "descendants", "ref": "set:loop-a", "expect": ["set:loop-b"] },
+  { "op": "ancestors", "ref": "set:loop-b", "expect": ["set:loop-a"] },
+  { "op": "members", "ref": "set:selfie", "expect": ["set:selfie"] },
+  { "op": "descendants", "ref": "set:selfie", "expect": [] }
+]

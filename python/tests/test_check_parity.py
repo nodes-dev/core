@@ -30,7 +30,7 @@ def test_check_findings_match_committed_oracle(tmp_path):
     assert actual == oracle
 
 
-def test_check_corpus_has_seven_nodes(tmp_path):
+def test_check_corpus_has_thirteen_nodes(tmp_path):
     corpus_dir = tmp_path / "check-corpus"
     shutil.copytree(CORPUS, corpus_dir)
-    assert len(Corpus(corpus_dir).all()) == 7
+    assert len(Corpus(corpus_dir).all()) == 13

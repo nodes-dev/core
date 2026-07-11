@@ -32,7 +32,7 @@ describe("check parity", () => {
     expect(actual).toEqual(oracle);
   });
 
-  it("fixture corpus has seven nodes", () => {
-    expect(new Corpus(copiedCorpus()).all()).toHaveLength(7);
+  it("fixture corpus has thirteen nodes", () => {
+    expect(new Corpus(copiedCorpus()).all()).toHaveLength(13);
   });
 });
