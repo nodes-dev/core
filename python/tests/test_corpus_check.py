@@ -4,7 +4,7 @@ from nodes.kernel.corpus import Corpus
 from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
 from nodes.kernel.relations import Relation
-from nodes.kernel.shapes import register_builtin_shapes
+from nodes.kernel.shapes import MEMBERSHIP, register_builtin_shapes
 from nodes.vocab.kinds import register_knowledge_vocab
 from nodes.vocab.source import SOURCE
 
@@ -72,3 +72,23 @@ def test_check_does_not_mutate_corpus(tmp_path):
     c = Corpus(tmp_path, registry=_registry())
     c.check()
     assert c.get("zzz:m").title == "M"  # still readable, file untouched
+
+
+def test_dangling_member_reported_after_delete_and_deduped(tmp_path):
+    seed = Corpus(tmp_path)  # registry-free: dangling-member is registry-independent
+    seed.add(Node(id="note:gone", kind="note", title="G"))
+    seed.add(Node(id="set:box", kind="set", title="Box",
+                  facets={MEMBERSHIP: {"members": ["note:gone", "note:gone"]}}))
+    seed.delete("note:gone")
+    assert _tuples(seed.check()) == [("warning", "dangling-member", "set:box", "note:gone")]
+
+
+def test_dangling_member_orders_with_other_findings(tmp_path):
+    seed = Corpus(tmp_path)
+    seed.add(Node(id="set:box", kind="set", title="Box",
+                  relations=[Relation(source="set:box", predicate="about", target="topic:gone")],
+                  facets={MEMBERSHIP: {"members": ["note:ghost"]}}))
+    assert _tuples(seed.check()) == [
+        ("warning", "dangling-member", "set:box", "note:ghost"),
+        ("warning", "dangling-ref", "set:box", "topic:gone"),
+    ]

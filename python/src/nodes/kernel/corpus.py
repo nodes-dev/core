@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -216,6 +217,21 @@ class Corpus:
         neighbor_uids.discard(uid)
         return [self.store.read_file(self.index.by_uid[u].id) for u in sorted(neighbor_uids)]
 
+    def _sorted_live_ids(self, uids: Iterable[str]) -> list[str]:
+        return sorted(self.index.by_uid[u].id for u in uids)
+
+    def members(self, ref: str) -> list[str]:
+        return self._sorted_live_ids(self.index.members_of(self._require_uid(ref)))
+
+    def containers(self, ref: str) -> list[str]:
+        return self._sorted_live_ids(self.index.containers_of(self._require_uid(ref)))
+
+    def descendants(self, ref: str) -> list[str]:
+        return self._sorted_live_ids(self.index.membership_closure(self._require_uid(ref), "members"))
+
+    def ancestors(self, ref: str) -> list[str]:
+        return self._sorted_live_ids(self.index.membership_closure(self._require_uid(ref), "containers"))
+
     def search(self, query: str, limit: int | None = None) -> list[SearchHit]:
         return self.search_index.search(query, limit)
 
@@ -303,8 +319,8 @@ class Corpus:
         """Report corpus-validity findings; never raises on content.
 
         Registry violations (when a registry is configured or passed) are errors;
-        unresolved top-level relation targets are warnings. Sorted by (ref, code,
-        detail) — `message` is human-only.
+        unresolved top-level relation targets and unresolved membership member refs
+        are warnings. Sorted by (ref, code, detail) — `message` is human-only.
         """
         reg = registry if registry is not None else self.registry
         findings: list[Finding] = []
@@ -323,6 +339,17 @@ class Corpus:
                     ref=rel.source,
                     detail=rel.target,
                     message=f"{rel.source}: relation {rel.predicate!r} targets unresolved {rel.target!r}",
+                )
+            )
+        for source_uid, ref in self.index.dangling_members():
+            container_id = self.index.by_uid[source_uid].id
+            findings.append(
+                Finding(
+                    severity="warning",
+                    code="dangling-member",
+                    ref=container_id,
+                    detail=ref,
+                    message=f"{container_id}: member {ref!r} resolves to no live node",
                 )
             )
         findings.sort(key=lambda f: (f.ref, f.code, f.detail))
