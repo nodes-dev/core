@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CollisionError } from "../src/errors.js";
+import { CollisionError, RefError } from "../src/errors.js";
 import { makeNode } from "../src/node.js";
 import { relatesTo } from "../src/relations.js";
+import { MEMBERSHIP } from "../src/shapes.js";
 import { Index } from "../src/structural-index.js";
 
 function node(id: string, kind: string, extra: Record<string, unknown> = {}) {
@@ -170,5 +171,100 @@ describe("Index — graph queries", () => {
     expect(dangling).toHaveLength(1);
     expect(dangling[0].relation.target).toBe("topic:gone");
     expect(dangling[0].targetUid).toBeNull();
+  });
+});
+
+function setNode(id: string, members: string[], extra: Record<string, unknown> = {}) {
+  return node(id, "set", { facets: { [MEMBERSHIP]: { members } }, ...extra });
+}
+
+describe("Index — membership traversal", () => {
+  it("membersOf returns resolvable member uids and skips dangling refs", () => {
+    const leaf = node("note:leaf", "note");
+    const box = setNode("set:box", ["note:leaf", "note:ghost"]);
+    const idx = Index.build([leaf, box]);
+    expect(idx.membersOf(box.uid)).toEqual(new Set([leaf.uid]));
+  });
+
+  it("membersOf resolves members listed under a deprecated id", () => {
+    const renamed = node("note:renamed", "note", { deprecatedIds: ["note:old"] });
+    const box = setNode("set:box", ["note:old"]);
+    const idx = Index.build([renamed, box]);
+    expect(idx.membersOf(box.uid)).toEqual(new Set([renamed.uid]));
+  });
+
+  it("membersOf dedupes duplicate entries and live+deprecated refs to one uid", () => {
+    const renamed = node("note:renamed", "note", { deprecatedIds: ["note:old"] });
+    const box = setNode("set:box", ["note:renamed", "note:old", "note:renamed"]);
+    const idx = Index.build([renamed, box]);
+    expect(idx.membersOf(box.uid)).toEqual(new Set([renamed.uid]));
+  });
+
+  it("membersOf on a node without a membership facet is empty", () => {
+    const plain = node("note:plain", "note");
+    const idx = Index.build([plain]);
+    expect(idx.membersOf(plain.uid)).toEqual(new Set());
+  });
+
+  it("membersOf and containersOf reject an unknown uid", () => {
+    expect(() => new Index().membersOf("nope")).toThrow(RefError);
+    expect(() => new Index().containersOf("nope")).toThrow(RefError);
+  });
+
+  it("containersOf finds containers listing the node's live or deprecated id", () => {
+    const renamed = node("note:renamed", "note", { deprecatedIds: ["note:old"] });
+    const byLive = setNode("set:live", ["note:renamed"]);
+    const byDep = setNode("set:dep", ["note:old"]);
+    const idx = Index.build([renamed, byLive, byDep]);
+    expect(idx.containersOf(renamed.uid)).toEqual(new Set([byLive.uid, byDep.uid]));
+  });
+
+  it("containersOf on an uncontained node is empty", () => {
+    const plain = node("note:plain", "note");
+    const idx = Index.build([plain]);
+    expect(idx.containersOf(plain.uid)).toEqual(new Set());
+  });
+
+  it("membershipClosure walks nesting transitively in both directions", () => {
+    const leaf = node("note:leaf", "note");
+    const box = setNode("set:box", ["note:leaf"]);
+    const crate = setNode("set:crate", ["set:box"]);
+    const idx = Index.build([leaf, box, crate]);
+    expect(idx.membershipClosure(crate.uid, "members")).toEqual(new Set([box.uid, leaf.uid]));
+    expect(idx.membershipClosure(leaf.uid, "containers")).toEqual(new Set([box.uid, crate.uid]));
+  });
+
+  it("membershipClosure terminates on cycles and always excludes the start node", () => {
+    const a = setNode("set:a", ["set:b"]);
+    const b = setNode("set:b", ["set:a"]);
+    const selfie = setNode("set:selfie", ["set:selfie"]);
+    const idx = Index.build([a, b, selfie]);
+    expect(idx.membershipClosure(a.uid, "members")).toEqual(new Set([b.uid]));
+    expect(idx.membershipClosure(selfie.uid, "members")).toEqual(new Set());
+    expect(idx.membershipClosure(selfie.uid, "containers")).toEqual(new Set());
+  });
+
+  it("danglingMembers reports unresolved membership refs deduped per container", () => {
+    const box = setNode("set:box", ["note:ghost", "note:ghost"]);
+    const other = setNode("set:other", ["note:ghost"]);
+    const idx = Index.build([box, other]);
+    const rows = idx.danglingMembers();
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => `${r.sourceUid} ${r.ref}`))).toEqual(
+      new Set([`${box.uid} note:ghost`, `${other.uid} note:ghost`]),
+    );
+  });
+
+  it("danglingMembers is empty when every member resolves (incl. via deprecated ids)", () => {
+    const renamed = node("note:renamed", "note", { deprecatedIds: ["note:old"] });
+    const box = setNode("set:box", ["note:old"]);
+    expect(Index.build([renamed, box]).danglingMembers()).toEqual([]);
+  });
+
+  it("a malformed membership facet contributes no member refs and no danglers", () => {
+    const weird = node("note:weird", "note", { facets: { [MEMBERSHIP]: { members: "not-a-list" } } });
+    const idx = Index.build([weird]);
+    expect(idx.membersOf(weird.uid)).toEqual(new Set());
+    expect(idx.danglingMembers()).toEqual([]);
   });
 });

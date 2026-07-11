@@ -398,4 +398,66 @@ export class Index {
     }
     return edges;
   }
+
+  /** Uids of this node's resolvable direct members. Dangling member refs are skipped
+   * (check reports them); duplicate entries and live+deprecated refs dedupe by uid. */
+  membersOf(uid: string): Set<string> {
+    const entry = this.byUid.get(uid);
+    if (entry === undefined) throw new RefError(`uid ${JSON.stringify(uid)} not in index`);
+    const members = new Set<string>();
+    for (const oref of entry.outRefs) {
+      if (oref.role !== "membership_member") continue;
+      const memberUid = this.resolveUid(oref.ref);
+      if (memberUid !== null) members.add(memberUid);
+    }
+    return members;
+  }
+
+  /** Uids of the nodes whose membership facet lists any of this node's identity claims
+   * (live id or deprecated ids — the same attribution rule as relationsByRole). */
+  containersOf(uid: string): Set<string> {
+    const containers = new Set<string>();
+    for (const ref of this.refsForUid(uid)) {
+      for (const inref of this.inRefs.get(ref) ?? []) {
+        if (inref.outRef.role !== "membership_member") continue;
+        containers.add(inref.sourceUid);
+      }
+    }
+    return containers;
+  }
+
+  /** Transitive membership closure (BFS). The visited set is seeded with the start uid,
+   * which is excluded from the result even when a membership cycle reaches it. */
+  membershipClosure(uid: string, direction: "members" | "containers"): Set<string> {
+    const step = direction === "members" ? this.membersOf.bind(this) : this.containersOf.bind(this);
+    const visited = new Set<string>([uid]);
+    const queue: string[] = [uid];
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      for (const next of step(current)) {
+        if (visited.has(next)) continue;
+        visited.add(next);
+        queue.push(next);
+      }
+    }
+    visited.delete(uid);
+    return visited;
+  }
+
+  /** Every unresolved membership ref, deduped by (container uid, ref). */
+  danglingMembers(): Array<{ sourceUid: string; ref: string }> {
+    const out: Array<{ sourceUid: string; ref: string }> = [];
+    const seen = new Set<string>();
+    for (const entry of this.byUid.values()) {
+      for (const oref of entry.outRefs) {
+        if (oref.role !== "membership_member") continue;
+        if (this.resolveUid(oref.ref) !== null) continue;
+        const key = `${entry.uid}\u0000${oref.ref}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ sourceUid: entry.uid, ref: oref.ref });
+      }
+    }
+    return out;
+  }
 }
