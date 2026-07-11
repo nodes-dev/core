@@ -87,9 +87,11 @@ Shared semantics (normative, STANDARD §7):
   `descendants` / `ancestors` are the transitive closures over one-or-more hops and
   **always exclude the start node**, even when a membership cycle makes it reachable
   from itself.
-- **Cycle safety.** Plain `set` / `graph` membership may be cyclic (only `dag` / `tree`
-  shapes forbid it); traversal terminates via a visited-uid set seeded with the start
-  uid.
+- **Cycle safety.** Membership traversal must be cycle-safe for **every** shape:
+  `dag` / `tree` acyclicity constrains only the container's internal `edges` facet
+  (`requireAcyclic` / `requireSingleParent` walk `edgesOf(node)`), so cross-node
+  membership containment cycles are legal for all shapes. Traversal terminates via a
+  visited-uid set seeded with the start uid.
 - **Malformed facets.** Non-object `membership` payloads, non-array `members`, and
   non-string entries contribute no refs (exactly what `structuralOutRefs` /
   `_structural_out_refs` already extract); their diagnosis belongs to
@@ -170,7 +172,7 @@ fixtures; no change to reading/writing corpora or to pinned behavior):
 
 ### 8.1 `fixtures/check-corpus/` — membership cluster
 
-Five new nodes join the existing seven. Containers use the built-in `set` convenience
+Six new nodes join the existing seven. Containers use the built-in `set` convenience
 kind (the conformance registry already loads `registerBuiltinShapes` /
 `register_builtin_shapes`; `set` requires only the `membership` facet):
 
@@ -180,9 +182,10 @@ kind (the conformance registry already loads `registerBuiltinShapes` /
 | `set:box` | `["note:tidy", "note:old-name"]` | mid container; one member via a deprecated id |
 | `set:loop-a` | `["set:loop-b"]` | two-node membership cycle |
 | `set:loop-b` | `["set:loop-a"]` | two-node membership cycle |
+| `set:selfie` | `["set:selfie"]` | direct self-membership (one-node cycle) |
 | `note:renamed` | — (plain note, `deprecated_ids: ["note:old-name"]`) | deprecated-id resolution target |
 
-`note:ghost` deliberately does not exist. All five new nodes are registry-valid, so the
+`note:ghost` deliberately does not exist. All six new nodes are registry-valid, so the
 only new check finding is the dangling member.
 
 ### 8.2 `fixtures/check.oracle.json`
@@ -210,13 +213,16 @@ run every row and compare exactly:
   { "op": "descendants", "ref": "set:crate",     "expect": ["note:renamed", "note:tidy", "set:box"] },
   { "op": "ancestors",   "ref": "note:renamed",  "expect": ["set:box", "set:crate"] },
   { "op": "descendants", "ref": "set:loop-a",    "expect": ["set:loop-b"] },
-  { "op": "ancestors",   "ref": "set:loop-b",    "expect": ["set:loop-a"] }
+  { "op": "ancestors",   "ref": "set:loop-b",    "expect": ["set:loop-a"] },
+  { "op": "members",     "ref": "set:selfie",    "expect": ["set:selfie"] },
+  { "op": "descendants", "ref": "set:selfie",    "expect": [] }
 ]
 ```
 
 Coverage by row: dangling-skip (1), deprecated-member resolution + sorted live-id
 output (2), facet-less node (3), direct containers (4), deprecated *input* ref (5),
-nesting (6–8), cycle termination + transitive self-exclusion (9–10). Error behavior
+nesting (6–8), cycle termination + transitive self-exclusion (9–10), direct
+self-membership vs transitive start-exclusion (11–12). Error behavior
 (`RefError` on an unresolvable input ref) is deliberately not oracle material — the
 oracle pins successful results; errors are pinned by each language's unit tests.
 
@@ -236,7 +242,7 @@ Per language, three layers:
   registry-independent, so the harness constructs `Corpus(root)` with no registry —
   itself a useful pin. The existing
   check-parity test picks up the new oracle row automatically. The "fixture corpus has
-  seven nodes" assertions in both languages become twelve.
+  seven nodes" assertions in both languages become thirteen.
 
 Gates: `npm run check && npm run typecheck && npm test` under `ts/`, `uv run pytest`
 under `python/`. Because mindful v6 consumes the TS kernel via its `@nodes/kernel`
