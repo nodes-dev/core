@@ -1,7 +1,7 @@
 {
-  "name": "@nodes/kernel",
+  "name": "@nodes-dev/core",
   "version": "0.1.0",
-  "description": "Problem-agnostic knowledge substrate kernel (TypeScript)",
+  "description": "Nodes core: a problem-agnostic knowledge substrate (TypeScript)",
   "type": "module",
   "engines": { "node": ">=20" },
   "packageManager": "npm@11.11.0",
