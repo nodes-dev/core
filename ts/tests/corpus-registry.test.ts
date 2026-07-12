@@ -6,23 +6,23 @@ import { Corpus } from "../src/corpus.js";
 import { FacetError, InvariantError, RefError } from "../src/errors.js";
 import { makeNode } from "../src/node.js";
 import { Registry } from "../src/registry.js";
-import { SOURCE, registerKnowledgeVocab } from "../src/vocab/index.js";
+import { SOURCE, registerFixturesProfile } from "./fixtures-profile.js";
 
-function knowledgeRegistry(): Registry {
+function fixturesRegistry(): Registry {
   const reg = new Registry();
-  registerKnowledgeVocab(reg);
+  registerFixturesProfile(reg);
   return reg;
 }
 
 let root: string;
 let corpus: Corpus;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "nodes-vocab-corpus-"));
-  corpus = new Corpus(root, knowledgeRegistry());
+  root = mkdtempSync(join(tmpdir(), "nodes-corpus-registry-"));
+  corpus = new Corpus(root, fixturesRegistry());
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-describe("Corpus with the knowledge vocab registry", () => {
+describe("Corpus write-boundary enforcement with a registry", () => {
   it("adds a bare note", () => {
     corpus.add(makeNode({ id: "note:a", kind: "note", title: "A" })); // no throw
     expect(corpus.get("note:a").title).toBe("A");
@@ -68,7 +68,7 @@ describe("Corpus with the knowledge vocab registry", () => {
       }),
     );
 
-    const c = new Corpus(root, knowledgeRegistry());
+    const c = new Corpus(root, fixturesRegistry());
     expect(() => c.rename("topic:t", "topic:t2")).toThrow(InvariantError);
 
     const fresh = new Corpus(root);

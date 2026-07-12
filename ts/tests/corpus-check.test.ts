@@ -6,12 +6,12 @@ import { Corpus } from "../src/corpus.js";
 import { makeNode } from "../src/node.js";
 import { Registry } from "../src/registry.js";
 import { MEMBERSHIP, registerBuiltinShapes } from "../src/shapes.js";
-import { SOURCE, registerKnowledgeVocab } from "../src/vocab/index.js";
+import { SOURCE, registerFixturesProfile } from "./fixtures-profile.js";
 
-function vocabRegistry(): Registry {
+function fixturesRegistry(): Registry {
   const reg = new Registry();
   registerBuiltinShapes(reg);
-  registerKnowledgeVocab(reg);
+  registerFixturesProfile(reg);
   return reg;
 }
 
@@ -26,7 +26,7 @@ function tmpRoot(): string {
 describe("Corpus.check", () => {
   it("returns no findings for a clean corpus", () => {
     const root = tmpRoot();
-    const c = new Corpus(root, vocabRegistry());
+    const c = new Corpus(root, fixturesRegistry());
     c.add(makeNode({ id: "topic:t", kind: "topic", title: "T" }));
     c.add(
       makeNode({
@@ -52,7 +52,7 @@ describe("Corpus.check", () => {
         relations: [{ source: "paper:b", predicate: "cites", target: "paper:ghost", directed: true }],
       }),
     );
-    const c = new Corpus(root, vocabRegistry());
+    const c = new Corpus(root, fixturesRegistry());
     expect(tuples(c.check())).toEqual([
       ["error", "facet-unexpected", "note:s", "source"],
       ["warning", "dangling-ref", "paper:b", "paper:ghost"],
@@ -78,7 +78,7 @@ describe("Corpus.check", () => {
 
   it("passed registry overrides the corpus registry", () => {
     const root = tmpRoot();
-    const c = new Corpus(root, vocabRegistry());
+    const c = new Corpus(root, fixturesRegistry());
     c.add(makeNode({ id: "note:n", kind: "note", title: "N" }));
     expect(tuples(c.check(new Registry()))).toEqual([["error", "unknown-kind", "note:n", "note"]]);
   });
@@ -89,7 +89,7 @@ describe("Corpus.check", () => {
     // U+FF61 (one code unit, 0xFF61) vs U+1F600 (surrogate pair, lead unit 0xD83D):
     // code-unit order puts the emoji first; code-point order puts it last.
     seed.add(makeNode({ id: "note:x", kind: "note", title: "X", facets: { "｡": {}, "\u{1f600}": {} } }));
-    const c = new Corpus(root, vocabRegistry());
+    const c = new Corpus(root, fixturesRegistry());
     expect(c.check().map((f) => f.detail)).toEqual(["｡", "\u{1f600}"]);
   });
 
@@ -97,7 +97,7 @@ describe("Corpus.check", () => {
     const root = tmpRoot();
     const seed = new Corpus(root);
     seed.add(makeNode({ id: "zzz:m", kind: "zzz", title: "M" }));
-    const c = new Corpus(root, vocabRegistry());
+    const c = new Corpus(root, fixturesRegistry());
     c.check();
     expect(c.get("zzz:m").title).toBe("M"); // still readable, file untouched
   });

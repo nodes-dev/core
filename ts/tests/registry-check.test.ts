@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { FacetError } from "../src/errors.js";
 import { makeNode } from "../src/node.js";
 import { Registry } from "../src/registry.js";
-import { SOURCE, registerKnowledgeVocab } from "../src/vocab/index.js";
+import { SOURCE, registerFixturesProfile } from "./fixtures-profile.js";
 
-function vocabRegistry(): Registry {
+function fixturesRegistry(): Registry {
   const reg = new Registry();
-  registerKnowledgeVocab(reg);
+  registerFixturesProfile(reg);
   return reg;
 }
 
@@ -16,12 +16,12 @@ function codes(violations: { code: string; detail: string }[]): [string, string]
 
 describe("Registry.check", () => {
   it("returns no violations for a valid node", () => {
-    const reg = vocabRegistry();
+    const reg = fixturesRegistry();
     expect(reg.check(makeNode({ id: "note:a", kind: "note", title: "A" }))).toEqual([]);
   });
 
   it("reports unknown kind as a single violation", () => {
-    const reg = vocabRegistry();
+    const reg = fixturesRegistry();
     const vs = reg.check(makeNode({ id: "zzz:a", kind: "zzz", title: "A" }));
     expect(codes(vs)).toEqual([["unknown-kind", "zzz"]]);
     expect(vs[0].message).toContain("zzz:a");
@@ -54,7 +54,7 @@ describe("Registry.check", () => {
   });
 
   it("maps invariant FacetError to facet-invalid", () => {
-    const reg = vocabRegistry();
+    const reg = fixturesRegistry();
     const node = makeNode({
       id: "paper:p",
       kind: "paper",
@@ -65,7 +65,7 @@ describe("Registry.check", () => {
   });
 
   it("maps InvariantError to invariant-violated", () => {
-    const reg = vocabRegistry();
+    const reg = fixturesRegistry();
     const node = makeNode({ id: "paper:p", kind: "paper", title: "P", facets: { [SOURCE]: {} } });
     expect(codes(reg.check(node))).toEqual([["invariant-violated", ""]]);
   });
@@ -84,12 +84,12 @@ describe("Registry.check", () => {
   });
 
   it("leaves validate behavior unchanged", () => {
-    const reg = vocabRegistry();
+    const reg = fixturesRegistry();
     expect(() => reg.validate(makeNode({ id: "paper:p", kind: "paper", title: "P" }))).toThrow(FacetError);
   });
 
   it("sorts facet names by Unicode code point, not UTF-16 code units", () => {
-    const reg = vocabRegistry();
+    const reg = fixturesRegistry();
     // U+FF61 is a single code unit (0xFF61); U+1F600 is a surrogate pair whose lead
     // unit (0xD83D) sorts BEFORE 0xFF61 — code-point order is the reverse.
     const node = makeNode({ id: "note:n", kind: "note", title: "N", facets: { "｡": {}, "\u{1f600}": {} } });
