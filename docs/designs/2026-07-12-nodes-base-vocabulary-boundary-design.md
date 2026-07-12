@@ -106,10 +106,16 @@ The implementation slice, in both kernels plus docs:
 
 - `ts/src/vocab/` (`index.ts`, `kinds.ts`, `predicates.ts`, `source.ts`)
 - `python/src/nodes/vocab/` (`__init__.py`, `kinds.py`, `predicates.py`, `source.py`)
-- Dedicated vocab tests: `ts/tests/vocab-corpus.test.ts`, `vocab-exports.test.ts`,
-  `vocab-kinds.test.ts`, `vocab-predicates.test.ts`, `vocab-source.test.ts`;
+- Dedicated vocab tests: `ts/tests/vocab-exports.test.ts`, `vocab-kinds.test.ts`,
+  `vocab-predicates.test.ts`, `vocab-source.test.ts`;
   `python/tests/test_vocab_exports.py`, `test_vocab_kinds.py`,
   `test_vocab_predicates.py`, `test_vocab_source.py`
+
+`ts/tests/vocab-corpus.test.ts` is **not** deleted: despite its name it is the TS
+kernel's write-boundary registry enforcement coverage (STANDARD §6 — `add` and
+`rename` MUST validate before any disk write), the counterpart of
+`python/tests/test_corpus_registry.py`. It rewires to the fixtures profile (§3.2)
+and renames to `ts/tests/corpus-registry.test.ts` to match its Python twin.
 
 ### 3.2 Fixtures profile (test support)
 
@@ -121,7 +127,8 @@ pins (`facet-unexpected`/`facet-missing`/`facet-invalid` on `source`,
 `invariant-violated` on an empty source, `unknown-kind` on `zzz`).
 
 Tests that today register the knowledge vocab rewire to this profile:
-`ts/tests/check_parity.test.ts`, `corpus-check.test.ts`, `registry-check.test.ts`;
+`ts/tests/check_parity.test.ts`, `corpus-check.test.ts`, `registry-check.test.ts`,
+`corpus-registry.test.ts` (renamed from `vocab-corpus.test.ts`, §3.1);
 `python/tests/test_check_parity.py`, `test_corpus_check.py`,
 `test_registry_check.py`, `test_corpus_registry.py`.
 
