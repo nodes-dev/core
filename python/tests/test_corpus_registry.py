@@ -6,13 +6,12 @@ from nodes.kernel.corpus import Corpus
 from nodes.kernel.errors import InvariantError, UnknownKindError
 from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
-from nodes.vocab.kinds import register_knowledge_vocab
-from nodes.vocab.source import SOURCE
+from tests._fixtures_profile import SOURCE, register_fixtures_profile
 
 
 def _registry() -> Registry:
     r = Registry()
-    register_knowledge_vocab(r)
+    register_fixtures_profile(r)
     return r
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from nodes.kernel.corpus import Corpus
 from nodes.kernel.registry import Registry
 from nodes.kernel.shapes import register_builtin_shapes
-from nodes.vocab.kinds import register_knowledge_vocab
+from tests._fixtures_profile import register_fixtures_profile
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"
 CORPUS = FIXTURES / "check-corpus"
@@ -22,7 +22,7 @@ def test_check_findings_match_committed_oracle(tmp_path):
     shutil.copytree(CORPUS, corpus_dir)
     reg = Registry()
     register_builtin_shapes(reg)
-    register_knowledge_vocab(reg)
+    register_fixtures_profile(reg)
     corpus = Corpus(corpus_dir, registry=reg)
     oracle = json.loads(ORACLE.read_text(encoding="utf-8"))
     assert oracle, "oracle must not be empty"

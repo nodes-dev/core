@@ -4,14 +4,13 @@ import pytest
 
 from nodes.kernel.node import Node
 from nodes.kernel.registry import KindSpec, Registry
-from nodes.vocab.kinds import register_knowledge_vocab
-from nodes.vocab.source import SOURCE
+from tests._fixtures_profile import SOURCE, register_fixtures_profile
 
 
 @pytest.fixture
 def reg() -> Registry:
     r = Registry()
-    register_knowledge_vocab(r)
+    register_fixtures_profile(r)
     return r
 
 

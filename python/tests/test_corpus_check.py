@@ -5,14 +5,13 @@ from nodes.kernel.node import Node
 from nodes.kernel.registry import Registry
 from nodes.kernel.relations import Relation
 from nodes.kernel.shapes import MEMBERSHIP, register_builtin_shapes
-from nodes.vocab.kinds import register_knowledge_vocab
-from nodes.vocab.source import SOURCE
+from tests._fixtures_profile import SOURCE, register_fixtures_profile
 
 
 def _registry() -> Registry:
     r = Registry()
     register_builtin_shapes(r)
-    register_knowledge_vocab(r)
+    register_fixtures_profile(r)
     return r
 
 
