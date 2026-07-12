@@ -31,10 +31,12 @@ Three facts gathered for this design decide the question:
   `@nodes-dev/core`'s `exports` map exposes only the root barrel, and the barrel
   does not re-export vocab. Only in-repo tests import it via source paths. The de
   facto boundary is already: kernel public, vocab internal.
-- **STANDARD never mandates the knowledge kinds.** Its vocab mentions are an
-  example in §2.3 (the `source` facet as a schema that rejects unknown keys) and
-  wording in the §6 error table ("vocabulary invariant violation"). The conformance
-  suite exercises registry mechanics — `facet-missing`, `facet-invalid`,
+- **STANDARD never mandates the knowledge kinds, but does state one vocab rule
+  normatively.** `vocab`/`vocabulary` appears at four spots: twice in §2.3 —
+  including "the vocab `source` facet MUST reject [unknown payload keys]", a
+  normative MUST — and twice in §6 (the error table's "vocabulary invariant
+  violation" and the write-boundary note's "no vocabulary validation occurs"). The
+  conformance suite exercises registry mechanics — `facet-missing`, `facet-invalid`,
   `invariant-violated`, `unknown-kind` — *through* vocab specs, and the shared
   fixtures use vocab kind strings (`note`, `topic`, `paper`), but kind names are
   free strings to the kernel; only the tests need the `KindSpec`s.
@@ -46,19 +48,32 @@ science's domain model into core.
 
 ### 2.1 The boundary
 
-Core's base vocabulary is its **structural vocabulary**: the `relatesTo` predicate,
-the `graph` and `list` structural shapes, the facet and invariant machinery, and the
-registry. Named knowledge kinds, facets, and knowledge predicates are domain
-property, registered by each downstream profile (as mindful already does and science
-will).
+Core's base vocabulary is its **structural vocabulary** — the names the substrate
+needs to be a substrate, enumerated exhaustively:
+
+- the six built-in shapes and their convenience kinds (`set`, `list`, `dict`,
+  `graph`, `dag`, `tree`; STANDARD §5),
+- the four structural facets those shapes compose (`membership`, `order`, `edges`,
+  `keys`; STANDARD §5),
+- the `relatesTo` predicate — part of the serialization contract (the shorthand
+  relation form, STANDARD §4.3), not knowledge vocabulary,
+- the facet/invariant machinery and the registry (STANDARD §2.3, §6).
+
+Structural vocabulary is Tier-1 mechanism: it is admitted and changed through
+STANDARD's own design and change policy (§12), not by consumer count. Named
+knowledge kinds, facets, and knowledge predicates — names that carry
+knowledge-representation semantics beyond structure — are domain property,
+registered by each downstream profile (as mindful already does and science will).
 
 This supersedes the substrate design's shipped-knowledge-vocab promise: the middle
 layer of `domain → knowledge vocab → kernel` becomes "whatever a domain registers,"
 not a profile core ships.
 
-### 2.2 Admission criteria
+### 2.2 Admission criteria (knowledge vocabulary)
 
-A named kind, facet, or predicate enters core only by **promotion from proven use**:
+These criteria govern **knowledge vocabulary only**; structural vocabulary (§2.1) is
+governed by STANDARD §12 instead. A named knowledge kind, facet, or predicate enters
+core only by **promotion from proven use**:
 
 - at least two independent consumers using it with matching semantics in real
   corpora, or
@@ -77,7 +92,7 @@ Applying §2.2 to every item the vocab ships:
 | `paper`, `book`, `dataset` kinds | Retire | Zero consumers; science's `article`/`book`/`dataset` are semantically richer parallels |
 | `Source` facet + identifiability invariant | Retire from shipped API | Zero consumers; science has its own source machinery. Survives only as conformance test support (§3.2) |
 | `about`, `cites`, `answers`, `asks`, `refines` predicates | Retire | Zero consumers; science has its own relation-kind registry (`addresses`, `grounds`, `disputes`, …); mindful uses `relatesTo` only |
-| `relatesTo` | Stays (kernel) | Kernel serialization mechanism (STANDARD §4.3) with a real consumer (mindful tags) |
+| `relatesTo` | Stays (kernel) | Structural vocabulary per §2.1 (serialization contract, STANDARD §4.3) — not subject to §2.2; its one real consumer (mindful tags) is corroboration, not the admission basis |
 
 Retired means deleted from both kernels. Nothing is demoted to an incubating limbo;
 git history and the knowledge-vocab design (2026-06-21) are the archive, and §2.2
@@ -113,17 +128,33 @@ Tests that today register the knowledge vocab rewire to this profile:
 The registry semantics these tests conformance-check are kernel mechanics; the vocab
 was only the vehicle. No oracle regenerates.
 
-### 3.3 STANDARD scrub (editorial)
+### 3.3 STANDARD revision (normative; 1.1 → 1.2)
 
-- §2.3: drop the "vocab `source` facet" example entirely; the paragraph keeps its
-  normative facet rules (`FacetError` surfacing, unknown-key policy is a property of
-  each facet's schema, new facet schemas SHOULD reject unknown keys) in generic
-  language, with the built-in shape form facets as the remaining concrete example.
+Retiring the vocab removes a normative rule: §2.3 currently says "the vocab `source`
+facet MUST reject [unknown payload keys]." Deleting a MUST is a contract change, not
+wording, so STANDARD bumps to **1.2** with a §12 history entry, in the same change as
+the code (per §12's same-change rule). It is recorded as a **minor** bump with
+explicit rationale: §12 defines minor as additive and major as breaking, and this
+removal breaks nothing — corpora containing vocab kind names remain readable and
+writable (kind names are free strings, validation is opt-in), and no pinned Tier-2
+behavior changes (fixtures and oracles are byte-identical; the same finding tuples
+are produced via the fixtures profile).
+
+`vocab`/`vocabulary` appears at exactly four spots; all four are rewritten:
+
+- §2.3 (two occurrences): drop the "vocab `source` facet" example and its MUST; the
+  paragraph keeps its remaining normative facet rules (`FacetError` surfacing,
+  unknown-key policy is a property of each facet's schema, new facet schemas SHOULD
+  reject unknown keys) in generic language, with the built-in shape form facets as
+  the remaining concrete example.
 - §6 error table: "Shape or vocabulary invariant violation" becomes "Shape or
   registry invariant violation."
+- §6 write-boundary note: "no vocabulary validation occurs" becomes "no registry
+  validation occurs."
 
-No version bump: STANDARD 1.1's conformance requirements never included the
-knowledge kinds, so this is wording, not semantics.
+After this revision the only `vocab` match remaining in STANDARD is the 1.2 history
+entry itself, which names the retirement (a dated record, exempt like the SP49
+self-references).
 
 ### 3.4 Living docs
 
@@ -155,10 +186,15 @@ migration.
 - Both kernels' full suites green after the deletion and rewire.
 - Conformance fixtures and oracles byte-identical (`rtk git status` clean under
   `fixtures/` at the end of the implementation).
-- Shipped-surface checks: `python -c "import nodes.vocab"` fails;
+- Shipped-surface checks, run against the Python project environment (from
+  `python/`): `rtk uv run --frozen python -c "import nodes"` exits 0 (proving the
+  environment resolves the package — a bare failure to find `nodes` would make the
+  next check vacuous), and `rtk uv run --frozen python -c "import nodes.vocab"`
+  fails with `ModuleNotFoundError: No module named 'nodes.vocab'`. On the TS side,
   `rtk grep -rn "vocab" ts/src python/src` returns nothing.
-- Living-docs check: `rtk grep -rln "vocab" README.md AGENTS.md docs/STANDARD.md`
-  returns nothing; remaining repo mentions are dated designs/plans plus this design.
+- Living-docs check: `rtk grep -rln "vocab" README.md AGENTS.md` returns nothing;
+  in `docs/STANDARD.md` the only match is the §12 1.2 history entry; remaining repo
+  mentions are dated designs/plans plus this design.
 
 ## 6. Alternatives considered
 
@@ -190,8 +226,9 @@ oracles that exist to pin cross-kernel parity.
   existence lives in a downstream profile.
 - The substrate design's three-layer diagram is superseded as recorded in §2.1;
   the substrate document itself stays verbatim as a dated record.
-- Future vocabulary proposals carry an evidence burden (§2.2) instead of a design
-  argument.
+- STANDARD advances to 1.2, its history recording the retirement (§3.3).
+- Future knowledge-vocabulary proposals carry an evidence burden (§2.2) instead of
+  a design argument.
 - The monorepo package layout follow-up inherits a simpler world: no vocab
   packaging question remains.
 - If federation later wants an interchange vocabulary, it is built from observed
@@ -201,6 +238,6 @@ oracles that exist to pin cross-kernel parity.
 
 The mechanical slice implements §3 exactly: delete the vocab modules and their
 dedicated tests, add the per-kernel fixtures profiles, rewire the listed tests,
-scrub STANDARD and living docs. It does not create packages, alter kernel
-semantics, regenerate fixtures or oracles, bump STANDARD's version, or touch
-mindful, science, or historical documents.
+revise STANDARD to 1.2 (§3.3), and update the living docs. It does not create
+packages, alter kernel semantics, regenerate fixtures or oracles, or touch mindful,
+science, or historical documents.
