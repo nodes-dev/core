@@ -133,12 +133,18 @@ was only the vehicle. No oracle regenerates.
 Retiring the vocab removes a normative rule: §2.3 currently says "the vocab `source`
 facet MUST reject [unknown payload keys]." Deleting a MUST is a contract change, not
 wording, so STANDARD bumps to **1.2** with a §12 history entry, in the same change as
-the code (per §12's same-change rule). It is recorded as a **minor** bump with
-explicit rationale: §12 defines minor as additive and major as breaking, and this
-removal breaks nothing — corpora containing vocab kind names remain readable and
-writable (kind names are free strings, validation is opt-in), and no pinned Tier-2
-behavior changes (fixtures and oracles are byte-identical; the same finding tuples
-are produced via the fixtures profile).
+the code (per §12's same-change rule).
+
+§12's change policy cannot classify this bump as written: it defines minor as
+additive (new optional fields, finding codes, fixtures) and major as breaking, and a
+normative removal is neither. The 1.2 revision therefore also **amends §12**: minor
+bumps become "backward-compatible — additive changes, or removals and relaxations
+that break neither reading/writing existing corpora nor pinned Tier-2 behavior";
+major stays as-is. Under the amended policy this retirement is minor: corpora
+containing vocab kind names remain readable and writable (kind names are free
+strings, validation is opt-in), and no pinned Tier-2 behavior changes (fixtures and
+oracles are byte-identical; the same finding tuples are produced via the fixtures
+profile).
 
 `vocab`/`vocabulary` appears at exactly four spots; all four are rewritten:
 
@@ -162,6 +168,9 @@ self-references).
   drop `nodes.vocab` / "kernel and vocab layers."
 - `AGENTS.md`: layering note drops the vocab bullet; the rule "domain kinds live in
   downstream repos" is now the whole story.
+- `ts/README.md`: drop the knowledge-vocabulary description and the
+  `registerKnowledgeVocab` documentation (lines 5, 18–19), and update the stale
+  "spec version 1.0" citation to 1.2.
 
 Historical designs and plans stay verbatim (the SP49 precedent: dated records keep
 their vocabulary).
@@ -192,9 +201,9 @@ migration.
   next check vacuous), and `rtk uv run --frozen python -c "import nodes.vocab"`
   fails with `ModuleNotFoundError: No module named 'nodes.vocab'`. On the TS side,
   `rtk grep -rn "vocab" ts/src python/src` returns nothing.
-- Living-docs check: `rtk grep -rln "vocab" README.md AGENTS.md` returns nothing;
-  in `docs/STANDARD.md` the only match is the §12 1.2 history entry; remaining repo
-  mentions are dated designs/plans plus this design.
+- Living-docs check: `rtk grep -rln "vocab" README.md AGENTS.md ts/README.md`
+  returns nothing; in `docs/STANDARD.md` the only match is the §12 1.2 history
+  entry; remaining repo mentions are dated designs/plans plus this design.
 
 ## 6. Alternatives considered
 
