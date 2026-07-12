@@ -177,7 +177,10 @@ self-references).
   downstream repos" is now the whole story.
 - `ts/README.md`: drop the knowledge-vocabulary description and the
   `registerKnowledgeVocab` documentation (lines 5, 18–19), and update the stale
-  "spec version 1.0" citation to 1.2.
+  "spec version 1.0" citation to 1.2. The same scope paragraph also still claims
+  "no membership-graph traversal yet" — false since 1.1 shipped
+  `members`/`containers`/`descendants`/`ancestors`; since this revision refreshes
+  that paragraph and the spec citation, it corrects that claim too.
 
 Historical designs and plans stay verbatim (the SP49 precedent: dated records keep
 their vocabulary).
@@ -207,7 +210,10 @@ migration.
   environment resolves the package — a bare failure to find `nodes` would make the
   next check vacuous), and `rtk uv run --frozen python -c "import nodes.vocab"`
   fails with `ModuleNotFoundError: No module named 'nodes.vocab'`. On the TS side,
-  `rtk grep -rn "vocab" ts/src python/src` returns nothing.
+  `rtk grep -rn "vocab" ts/src python/src` returns nothing, and — because the
+  package publishes `dist/` and `tsc` never removes outputs for deleted sources —
+  `ts/dist` is rebuilt from clean and `rtk npm pack --dry-run` lists no
+  `dist/vocab` entries.
 - Living-docs check: `rtk grep -rln "vocab" README.md AGENTS.md ts/README.md`
   returns nothing; in `docs/STANDARD.md` the only match is the §12 1.2 history
   entry; remaining repo mentions are dated designs/plans plus this design.
