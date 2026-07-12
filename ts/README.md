@@ -1,8 +1,7 @@
 # @nodes-dev/core (TypeScript)
 
 TypeScript implementation of Nodes core — behavioral and on-disk-format parity with
-the Python distribution. Core contains the domain-free kernel and the general-purpose
-knowledge vocabulary.
+the Python distribution. Core contains the domain-free kernel.
 
 ## Scope
 
@@ -10,17 +9,14 @@ Mirrors the current Python kernel: `Node`/`Relation`, ids, errors, frontmatter
 parse/serialize, registry, structural shapes, a slimmed `Store` (pure file mechanics),
 the in-memory structural `Index`, and the `Corpus` coordinator — the primary API for
 mutations (`add`/`get`/`rename`/`delete`), graph queries
-(`outbound`/`inbound`/`neighbors`/`dangling`), BM25F full-text `search`, opt-in
+(`outbound`/`inbound`/`neighbors`/`dangling`), membership traversal
+(`members`/`containers`/`descendants`/`ancestors`), BM25F full-text `search`, opt-in
 embedding `similar`/`queryVector`/`similarText`, snapshot persistence (`flushIndex`),
 and corpus checking (`check`). TS-only conveniences (tier 3): `idsByKind`/`allByKind`
-and corpus stat fingerprints. There is **no membership-graph traversal** yet.
-
-The knowledge vocab (`ts/src/vocab/` — `note`/`idea`/`question`/`topic`/`paper`/`book`/
-`dataset`, the `Source` facet, and the predicate vocabulary) is a separate layer that
-imports only from the kernel; register it with `registerKnowledgeVocab(reg)`.
+and corpus stat fingerprints.
 
 The portable contract this kernel implements is specified in `../docs/STANDARD.md`
-(spec version 1.0); parity with Python is pinned by the shared `../fixtures/` oracles.
+(spec version 1.2); parity with Python is pinned by the shared `../fixtures/` oracles.
 
 ## Conventions
 

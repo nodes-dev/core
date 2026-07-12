@@ -7,16 +7,15 @@ one shared on-disk format.
 
 ## Architecture
 
-Three layers, strict downward dependency:
+Two layers, strict downward dependency:
 
 ```
 domain profiles   science (Python), mindful v6 (TypeScript), …
-knowledge vocab   note / idea / question / topic / paper / book / dataset
 kernel            Node, Relation, shapes, identity, format, Corpus, indexes
 ```
 
-The kernel is domain-free (zero named knowledge kinds); the vocab imports only the
-kernel; domain profiles live in downstream repos.
+The kernel is domain-free (zero named knowledge kinds); domain profiles register
+their own kinds onto the kernel's registry and live in downstream repos.
 
 ## Repo layout
 
@@ -24,8 +23,8 @@ kernel; domain profiles live in downstream repos.
 |------|----------|
 | `docs/STANDARD.md` | **The authority** — the versioned, normative portable contract. |
 | `docs/designs/`, `docs/plans/` | Dated historical records (rationale, not authority). |
-| `python/` | Python core distribution (`nodes-core`); imports are `nodes.kernel` and `nodes.vocab`. |
-| `ts/` | TypeScript core package (`@nodes-dev/core`), containing kernel and vocab layers. |
+| `python/` | Python core distribution (`nodes-core`); imports are `nodes.kernel`. |
+| `ts/` | TypeScript core package (`@nodes-dev/core`), the domain-free kernel. |
 | `fixtures/` | Shared cross-language conformance oracles. |
 
 ## The standard

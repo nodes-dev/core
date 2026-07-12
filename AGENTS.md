@@ -11,7 +11,7 @@
 ## Layering (enforced, not conventional)
 
 - `kernel` imports nothing above it and names zero knowledge kinds.
-- `vocab` imports only the kernel. Domain kinds live in downstream repos.
+- Domain kinds live in downstream repos, registered onto the kernel's `Registry`.
 
 ## Parity tiers (before adding any feature)
 

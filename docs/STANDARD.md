@@ -1,6 +1,6 @@
 # The nodes Standard
 
-- **Spec version:** 1.1
+- **Spec version:** 1.2
 - **Status:** Living standard — the authoritative definition of the portable `nodes` contract.
 - **Implementations:** Python (`python/src/nodes/`), TypeScript (`ts/src/`).
 
@@ -70,12 +70,11 @@ defined in §4.3. Untyped links use the reserved predicate `relatesTo`.
 
 A facet is a named, typed payload attached to a node under `facets`. Payloads MUST be
 mappings. Which facets a node may or must carry is decided by its kind's registry spec
-(§6); facet payload schemas are enforced by invariants (e.g. the shape form facets §5,
-the vocab `source` facet). Typed facet accessors MUST surface a missing or malformed
-payload as `FacetError` — a raw Pydantic/Zod error never escapes a public API. Whether
-unknown payload keys are rejected is a property of each facet's schema: the vocab
-`source` facet MUST reject them (fail-early on typos); the built-in shape form facets
-(§5) currently tolerate them. New facet schemas SHOULD reject unknown keys.
+(§6); facet payload schemas are enforced by invariants (e.g. the shape form facets §5).
+Typed facet accessors MUST surface a missing or malformed payload as `FacetError` — a
+raw Pydantic/Zod error never escapes a public API. Whether unknown payload keys are
+rejected is a property of each facet's schema: the built-in shape form facets (§5)
+currently tolerate them. New facet schemas SHOULD reject unknown keys.
 
 ## 3. Identity, references & rename
 
@@ -196,14 +195,14 @@ and dangling tracking but are not relation-graph edges.
 | Live-id / deprecated-id / uid collision | `CollisionError` |
 | Unregistered kind | `UnknownKindError` |
 | Missing, unexpected, or malformed facet payload | `FacetError` |
-| Shape or vocabulary invariant violation | `InvariantError` |
+| Shape or registry invariant violation | `InvariantError` |
 | Structural node/frontmatter failure (missing required field, id/kind mismatch) | `ValidationError` |
 | Similarity API on a corpus without an embedder | `EmbedderRequiredError` |
 
 - **Write-boundary enforcement.** A corpus MAY be constructed with a registry. When
   present, `add` MUST validate before any disk write, and `rename` MUST validate the
   renamed node and every rewritten referrer before any disk write. Without a registry,
-  no vocabulary validation occurs (a deliberate composition default, not a fallback).
+  no registry validation occurs (a deliberate composition default, not a fallback).
 - **Structured checking.** The registry MUST also provide a collecting counterpart to
   `validate` (`Registry.check`, §8) that reports all violations of a node with
   machine-stable codes, without raising on content.
@@ -388,13 +387,18 @@ dates render as `YYYY-MM-DD` strings or `null`; field names use the on-disk form
 
 ## 12. Versioning & change policy
 
-- This standard carries a spec version (header). **Minor** bumps are additive (new
-  optional fields, new finding codes, new fixtures). **Major** bumps break reading or
-  writing existing corpora, or change pinned tier-2 behavior.
+- This standard carries a spec version (header). **Minor** bumps are
+  backward-compatible: additive changes (new optional fields, new finding codes, new
+  fixtures), or removals and relaxations that break neither reading/writing existing
+  corpora nor pinned tier-2 behavior. **Major** bumps break reading or writing
+  existing corpora, or change pinned tier-2 behavior.
 - Any tier-1/tier-2 change MUST update this document and the affected fixtures in the
   same change. Tier-3 additions do not touch this document.
 - History: **1.0** (2026-07-10) — initial consolidation; adds §8 corpus validity.
   **1.1** (2026-07-11) — membership traversal (§7); `dangling-member` finding (§8.2).
+  **1.2** (2026-07-12) — knowledge vocab retired from the shipped surface
+  (base-vocabulary boundary design); §2.3 source-facet rule removed; minor bumps
+  redefined to cover backward-compatible removals.
 
 ## 13. Known limitations
 
