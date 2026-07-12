@@ -317,7 +317,7 @@ artifacts must be cleaned explicitly:
 
 ```bash
 cd ~/d/nodes/ts && rm -rf dist && rtk npm run build
-cd ~/d/nodes/ts && if rtk npm pack --dry-run 2>&1 | grep -q "dist/vocab"; then echo "FAIL: dist/vocab still packed"; false; else echo "pack clean"; fi
+cd ~/d/nodes/ts && PACK="$(rtk npm pack --dry-run 2>&1)" && if printf '%s' "$PACK" | grep -q "dist/vocab"; then echo "FAIL: dist/vocab still packed"; false; else echo "pack clean"; fi
 ```
 
 Expected: build succeeds; `pack clean`. `FAIL: dist/vocab still packed` is a STOP.
@@ -327,7 +327,7 @@ Expected: build succeeds; `pack clean`. `FAIL: dist/vocab still packed` is a STO
 ```bash
 cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
 cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
-cd ~/d/nodes && test -z "$(rtk git status --porcelain fixtures/)" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS (check-oracle parity test included); `fixtures clean`.
@@ -536,7 +536,14 @@ Expected: PASS. Only the four `test_vocab_*.py` files still import `nodes.vocab`
 ```bash
 cd ~/d/nodes && rtk git rm -r python/src/nodes/vocab
 rtk git rm python/tests/test_vocab_exports.py python/tests/test_vocab_kinds.py python/tests/test_vocab_predicates.py python/tests/test_vocab_source.py
+rm -rf python/src/nodes/vocab
+test ! -e python/src/nodes/vocab && echo "vocab dir gone"
 ```
+
+`git rm` removes tracked files only; the workspace has ignored
+`python/src/nodes/vocab/__pycache__/*.pyc` which survive it, and a leftover
+directory would make `nodes.vocab` importable as a namespace package — falsely
+failing Step 8. The `rm -rf` clears the residue; expect `vocab dir gone`.
 
 - [ ] **Step 8: Verify no vocab reference survives in Python, and the shipped surface**
 
@@ -546,7 +553,9 @@ cd ~/d/nodes/python && rtk uv run --frozen python -c "import nodes; print('nodes
 cd ~/d/nodes/python && rtk uv run --frozen python -c "
 try:
     import nodes.vocab
-except ModuleNotFoundError:
+except ModuleNotFoundError as exc:
+    if exc.name != 'nodes.vocab':
+        raise
     print('nodes.vocab absent')
 else:
     raise SystemExit('FAIL: nodes.vocab importable')
@@ -564,7 +573,7 @@ fails (non-zero exit, `FAIL: nodes.vocab importable`) if the module still import
 ```bash
 cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
 cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && test -z "$(rtk git status --porcelain fixtures/)" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS (check-oracle parity test included); `fixtures clean`.
@@ -794,7 +803,7 @@ entry (design §5 exempts it as a dated record) — any other match is a STOP.
 ```bash
 cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
 cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
-cd ~/d/nodes && test -z "$(rtk git status --porcelain fixtures/)" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
@@ -826,13 +835,15 @@ cd ~/d/nodes/python && rtk uv run --frozen python -c "import nodes; print('nodes
 cd ~/d/nodes/python && rtk uv run --frozen python -c "
 try:
     import nodes.vocab
-except ModuleNotFoundError:
+except ModuleNotFoundError as exc:
+    if exc.name != 'nodes.vocab':
+        raise
     print('nodes.vocab absent')
 else:
     raise SystemExit('FAIL: nodes.vocab importable')
 "
-cd ~/d/nodes/ts && if rtk npm pack --dry-run 2>&1 | grep -q "dist/vocab"; then echo "FAIL: dist/vocab still packed"; false; else echo "pack clean"; fi
-cd ~/d/nodes && test -z "$(rtk git status --porcelain fixtures/)" && echo "fixtures clean"
+cd ~/d/nodes/ts && PACK="$(rtk npm pack --dry-run 2>&1)" && if printf '%s' "$PACK" | grep -q "dist/vocab"; then echo "FAIL: dist/vocab still packed"; false; else echo "pack clean"; fi
+cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 cd ~/d/nodes && rtk git log --oneline main..HEAD
 ```
 
