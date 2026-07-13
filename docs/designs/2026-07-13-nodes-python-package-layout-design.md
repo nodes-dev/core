@@ -32,6 +32,19 @@ Facts that bear on the decision:
   (`google-cloud-storage` → `google.cloud.storage`, `opentelemetry-sdk` →
   `opentelemetry.sdk`). Our dist is `nodes-core`; the module is `nodes.kernel`.
 - **The package ships no `py.typed`** despite being fully typed — a PEP 561 gap.
+- **The import namespace has a legacy squatter.** The abandoned PyPI project
+  `Nodes` (last release 1.2, 2009-10-28; Python 2-era) ships a regular
+  `nodes/__init__.py` and — coincidentally — a `nodes/core.py`, colliding with both
+  the namespace and the exact module path chosen here. It also owns the normalized
+  PyPI distribution name `nodes`. Empirically verified: its sdist cannot build on
+  Python 3.11 (`SyntaxError` from Python 2 `except X, e:` syntax in its
+  `ez_setup.py`), so no environment that satisfies `nodes-core`'s
+  `requires-python >= 3.11` can install it. §2.2 records the acceptance decision.
+- **PEP 794 (Import Name Metadata) is Accepted.** Projects should declare their
+  import names and shared namespaces in `[project]` (`import-names`,
+  `import-namespaces`), enabling compatible installers to detect import-name
+  conflicts. Hatchling supports it from 1.30.0 (2026-05-31); our floor is
+  `hatchling>=1.24`.
 - **Irreversibility is one-directional.** Deleting `nodes/__init__.py` (namespace)
   is reversible for as long as only `nodes-core` ships into the namespace: adding the
   file back later breaks nobody. The reverse — publishing with a regular
@@ -65,6 +78,29 @@ Recorded for future first-party distributions:
   asymmetry with the npm scope; unchanged by this decision; re-evaluate if PEP
   752/755 namespace grants ship).
 
+### 2.2 The legacy `Nodes` collision: accepted
+
+The 2009 `Nodes` project's `nodes/__init__.py` would, if co-installed, convert the
+namespace back to a regular package and shadow `nodes.core` with its own
+`nodes/core.py` (PyPA's namespace-package guidance is explicit that one regular
+`__init__.py` breaks native composition). The design accepts this collision:
+
+- The colliding artifact is uninstallable in any environment `nodes-core` supports
+  (verified: its build fails with a Python 2 syntax error on 3.11), so the shadowing
+  cannot occur in practice.
+- PyPI reserves import names for no one; every unpublished import name carries the
+  same class of risk, and dodging this corpse by renaming the family namespace
+  (e.g. `nodes_dev`) would trade a provably-inert collision for a permanently worse
+  import surface.
+- Going forward, the PEP 794 metadata declared in §3 lets compatible installers
+  detect import-name conflicts among modern artifacts. It cannot flag the legacy
+  artifact (which predates the metadata), but the legacy artifact cannot install
+  anyway.
+- Optional, out-of-scope follow-up: a PEP 541 abandoned-project transfer request
+  for the PyPI `nodes` name would take ownership of the distribution name and
+  prevent third-party revival. It is not a precondition for this layout; even a
+  granted transfer cannot delete the 2009 artifact.
+
 ## 3. Mechanics
 
 - Delete `python/src/nodes/__init__.py` (its only statement,
@@ -76,8 +112,13 @@ Recorded for future first-party distributions:
 - `nodes/core/__init__.py` stays — `nodes.core` is a regular package inside the
   namespace.
 - Add `python/src/nodes/core/py.typed` (empty marker file, PEP 561). Hatchling's
-  `packages = ["src/nodes"]` includes it in the wheel; the config and the
-  distribution name `nodes-core` are unchanged.
+  `packages = ["src/nodes"]` includes it in the wheel; the distribution name
+  `nodes-core` is unchanged.
+- Declare PEP 794 import metadata in `python/pyproject.toml` `[project]`:
+  `import-names = ["nodes.core"]` and `import-namespaces = ["nodes"]`. Raise the
+  build requirement from `hatchling>=1.24` to `hatchling>=1.30` (the first version
+  that understands the fields and emits `Import-Name`/`Import-Namespace` core
+  metadata).
 
 ## 4. Normative and documentation impact
 
@@ -108,7 +149,10 @@ Recorded for future first-party distributions:
   retirement. The implementation plan must remove the residual directory and assert
   it is gone before running import checks.
 - Tooling: pytest, ruff, pyright, and hatchling all support PEP 420 with the src
-  layout; the gates verify rather than assume.
+  layout; the gates verify rather than assume. The PEP 794 keys were probed
+  empirically before acceptance: the project's `uv` (0.11.28) parses
+  `import-names`/`import-namespaces` in `[project]` and builds the package with
+  `hatchling>=1.30` without complaint.
 
 ## 6. Testing strategy
 
@@ -116,7 +160,8 @@ Recorded for future first-party distributions:
   guards against accidental cross-tree damage even though no TS file changes).
 - The layout test of §5 passes.
 - Packaging check with teeth: `rtk uv build` from `python/`, then assert the built
-  wheel lists `nodes/core/py.typed` and does **not** list `nodes/__init__.py`.
+  wheel lists `nodes/core/py.typed`, does **not** list `nodes/__init__.py`, and its
+  `METADATA` carries `Import-Name: nodes.core` and `Import-Namespace: nodes`.
 - Conformance fixtures and oracles untouched: `rtk git status --porcelain fixtures/`
   is empty (kind names and finding tuples never mention import paths).
 
@@ -155,6 +200,9 @@ the other way around.
 - The `nodes.kernel` import path dies pre-release with no deprecation shim
   (fail-early; no consumers exist; consistent with the identity-migration and
   vocab-retirement precedents).
+- The bare PyPI distribution name `nodes` remains owned by the abandoned 2009
+  project (§2.2); the family publishes under `nodes-*` names only, and a PEP 541
+  transfer request stays available as an independent follow-up.
 
 ## 9. Implementation boundary
 
