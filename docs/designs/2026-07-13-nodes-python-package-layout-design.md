@@ -85,17 +85,22 @@ namespace back to a regular package and shadow `nodes.core` with its own
 `nodes/core.py` (PyPA's namespace-package guidance is explicit that one regular
 `__init__.py` breaks native composition). The design accepts this collision:
 
-- The colliding artifact is uninstallable in any environment `nodes-core` supports
-  (verified: its build fails with a Python 2 syntax error on 3.11), so the shadowing
-  cannot occur in practice.
+- The collision is dormant, not extinct. Every published release is uninstallable
+  in any environment `nodes-core` supports (verified: the 1.2 build fails with a
+  Python 2 syntax error on 3.11), so shadowing cannot occur with any artifact that
+  exists today. The residual risk — the current owner, or a PEP 541 adoptee,
+  publishing a Python-3-compatible release someday — is explicitly accepted: the
+  project has been dead since 2009, and PEP 794 metadata is a SHOULD, so even
+  installer-side conflict detection could be evaded by such a release. Accepting a
+  dormant third-party revival risk beats the alternatives below.
 - PyPI reserves import names for no one; every unpublished import name carries the
   same class of risk, and dodging this corpse by renaming the family namespace
-  (e.g. `nodes_dev`) would trade a provably-inert collision for a permanently worse
+  (e.g. `nodes_dev`) would trade a dormant collision for a permanently worse
   import surface.
 - Going forward, the PEP 794 metadata declared in §3 lets compatible installers
-  detect import-name conflicts among modern artifacts. It cannot flag the legacy
-  artifact (which predates the metadata), but the legacy artifact cannot install
-  anyway.
+  detect import-name conflicts among modern artifacts that declare theirs. It
+  cannot flag the legacy artifact (which predates the metadata), and a hypothetical
+  revival could omit it.
 - Optional, out-of-scope follow-up: a PEP 541 abandoned-project transfer request
   for the PyPI `nodes` name would take ownership of the distribution name and
   prevent third-party revival. It is not a precondition for this layout; even a
@@ -108,7 +113,10 @@ namespace back to a regular package and shadow `nodes.core` with its own
   annotations).
 - `git mv python/src/nodes/kernel python/src/nodes/core`; rewrite every
   `nodes.kernel` import to `nodes.core` (12 kernel modules import siblings
-  absolutely; ~41 test files including `python/tests/_fixtures_profile.py`).
+  absolutely; ~41 test files including `python/tests/_fixtures_profile.py`; and
+  the three oracle generators `python/scripts/gen_search_oracle.py`,
+  `gen_similarity_oracle.py`, `gen_tokenizer_oracle.py` — no gate executes these,
+  so a stale import would survive the suites silently).
 - `nodes/core/__init__.py` stays — `nodes.core` is a regular package inside the
   namespace.
 - Add `python/src/nodes/core/py.typed` (empty marker file, PEP 561). Hatchling's
@@ -159,6 +167,9 @@ namespace back to a regular package and shadow `nodes.core` with its own
 - Both kernels' full suites green after the rename (all six gates; the TS suite
   guards against accidental cross-tree damage even though no TS file changes).
 - The layout test of §5 passes.
+- Zero-match rewrite guard (covers the generators the gates never execute):
+  `rtk grep -rn "nodes\.kernel" python/src python/tests python/scripts` returns
+  nothing, with no-match (exit 1) distinguished from grep failure (exit ≥ 2).
 - Packaging check with teeth: `rtk uv build` from `python/`, then assert the built
   wheel lists `nodes/core/py.typed`, does **not** list `nodes/__init__.py`, and its
   `METADATA` carries `Import-Name: nodes.core` and `Import-Namespace: nodes`.
