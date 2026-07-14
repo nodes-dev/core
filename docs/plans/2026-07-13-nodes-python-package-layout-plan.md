@@ -22,7 +22,9 @@ backend), TypeScript gates run as cross-tree guards only.
 - Work on branch `refactor/python-package-layout` off `main` in `~/d/nodes`; merge to
   main only after all three tasks and final verification pass.
 - All git commands through `rtk` (`rtk git …`); npm through `rtk npm …`; uv through
-  `rtk uv …`.
+  `rtk uv …`. Exception, on purpose: checks that capture command output use raw
+  `git` — `rtk git status` rewrites empty output to `ok`, which breaks
+  emptiness tests.
 - Stage explicitly by path. Never `git add -A` or `git add .`.
 - Do NOT add any AI-attribution trailer or footer to commit messages ("Co-Authored-By",
   "Generated with Claude Code", etc.).
@@ -36,8 +38,8 @@ backend), TypeScript gates run as cross-tree guards only.
   emptiness checks use `test $? -eq 1` so that no-match (exit 1) is distinguished
   from an operational failure (exit ≥ 2).
 - `fixtures/` is untouchable: at every commit,
-  `FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"`
-  must print `fixtures clean`.
+  `FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"`
+  must print `fixtures clean` (raw `git` per the exception above).
 - `python/dist/` is NOT gitignored: remove it after every `uv build` and never stage
   it.
 - Kernel behavior is untouchable: the only source changes are the dotted-path
@@ -81,55 +83,11 @@ cd ~/d/nodes && rtk git checkout -b refactor/python-package-layout
 
 Expected: all gates pass on main before branching. If any fail, STOP and report.
 
-- [ ] **Step 2: Delete the top-level init and move the package directory**
+- [ ] **Step 2: Write the layout-regression test (it must fail on the old layout)**
 
-```bash
-cd ~/d/nodes && rtk git rm python/src/nodes/__init__.py
-rtk git mv python/src/nodes/kernel python/src/nodes/core
-```
-
-The deleted `__init__.py` contains only `from __future__ import annotations` (dead
-in an init with no annotations); removing it is what makes `nodes` a PEP 420
-namespace.
-
-- [ ] **Step 3: Clear bytecode residue from the move**
-
-`git mv` relocates the ignored `__pycache__` along with the directory (or leaves it
-behind — both are hazards): stale bytecode under a surviving
-`python/src/nodes/kernel/` would resurrect `nodes.kernel` as a namespace package —
-the exact failure mode hit after the vocab retirement.
-
-```bash
-cd ~/d/nodes && rm -rf python/src/nodes/kernel python/src/nodes/core/__pycache__ python/scripts/__pycache__
-test ! -e python/src/nodes/kernel && echo "kernel dir gone"
-```
-
-Expected: `kernel dir gone`.
-
-- [ ] **Step 4: Rewrite every `nodes.kernel` import to `nodes.core`**
-
-```bash
-cd ~/d/nodes && grep -rl "nodes\.kernel" python/src python/tests python/scripts | xargs sed -i 's/nodes\.kernel/nodes.core/g'
-```
-
-This covers the 12 core modules (absolute sibling imports), all 41 test files
-(including `python/tests/_fixtures_profile.py` and `_canonical.py`), and the three
-oracle generators (`gen_search_oracle.py`, `gen_similarity_oracle.py`,
-`gen_tokenizer_oracle.py`) that no gate executes.
-
-- [ ] **Step 5: Zero-match rewrite guard**
-
-```bash
-cd ~/d/nodes && rtk grep -rn "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
-```
-
-Expected: `kernel path retired` on its own (no match lines above it). Match lines,
-or a missing message (grep exit 0 = matches survive; exit ≥ 2 = grep itself failed),
-is a STOP.
-
-- [ ] **Step 6: Write the layout-regression test**
-
-Create `python/tests/test_namespace_layout.py`:
+Create `python/tests/test_namespace_layout.py`. The legacy dotted path is assembled
+at runtime (never written literally) so the repo-wide zero-match guards for the old
+path stay satisfiable:
 
 ```python
 """Pins the PEP 420 layout (layout design §5).
@@ -140,7 +98,11 @@ Create `python/tests/test_namespace_layout.py`:
 """
 from __future__ import annotations
 
+import importlib
+
 import pytest
+
+LEGACY_PATH = ".".join(["nodes", "kernel"])  # assembled so guards never match it
 
 
 def test_core_is_importable() -> None:
@@ -156,15 +118,79 @@ def test_nodes_is_a_namespace_package() -> None:
     assert getattr(nodes, "__file__", None) is None
 
 
-def test_kernel_import_path_is_gone() -> None:
+def test_legacy_import_path_is_gone() -> None:
     with pytest.raises(ModuleNotFoundError) as excinfo:
-        import nodes.kernel  # noqa: F401
+        importlib.import_module(LEGACY_PATH)
 
     # Name-checked so a broken internal dependency cannot masquerade as absence.
-    assert excinfo.value.name == "nodes.kernel"
+    assert excinfo.value.name == LEGACY_PATH
 ```
 
-- [ ] **Step 7: Run the new test, then the full Python suite**
+- [ ] **Step 3: Run the test to verify it fails against the current layout**
+
+```bash
+cd ~/d/nodes/python && rtk uv run --frozen pytest tests/test_namespace_layout.py -v
+```
+
+Expected: FAIL with exactly 3 failures — `test_core_is_importable` raises
+`ModuleNotFoundError` (no `nodes.core` yet), `test_nodes_is_a_namespace_package`
+fails its assertion (`nodes.__file__` points at the current init), and
+`test_legacy_import_path_is_gone` fails with `DID NOT RAISE` (the legacy path still
+imports). Any other failure shape is a STOP.
+
+- [ ] **Step 4: Delete the top-level init and move the package directory**
+
+```bash
+cd ~/d/nodes && rtk git rm python/src/nodes/__init__.py
+rtk git mv python/src/nodes/kernel python/src/nodes/core
+```
+
+The deleted `__init__.py` contains only `from __future__ import annotations` (dead
+in an init with no annotations); removing it is what makes `nodes` a PEP 420
+namespace.
+
+- [ ] **Step 5: Clear bytecode residue from the move**
+
+`git mv` relocates the ignored `__pycache__` along with the directory (or leaves it
+behind — both are hazards): stale bytecode under a surviving
+`python/src/nodes/kernel/` would resurrect the legacy path as a namespace package —
+the exact failure mode hit after the vocab retirement.
+
+```bash
+cd ~/d/nodes && rm -rf python/src/nodes/kernel python/src/nodes/core/__pycache__ python/scripts/__pycache__
+test ! -e python/src/nodes/kernel && echo "kernel dir gone"
+```
+
+Expected: `kernel dir gone`.
+
+- [ ] **Step 6: Rewrite every `nodes.kernel` import to `nodes.core`**
+
+Restricted to `*.py`: compiled bytecode under `python/tests/__pycache__/` also
+contains the dotted path, and whether `grep` matches binary files is
+locale-dependent — an unrestricted sweep could feed `.pyc` files to `sed` and
+corrupt them.
+
+```bash
+cd ~/d/nodes && grep -rl --include="*.py" "nodes\.kernel" python/src python/tests python/scripts | xargs sed -i 's/nodes\.kernel/nodes.core/g'
+```
+
+This covers the 12 core modules (absolute sibling imports), all 41 pre-existing
+test files (including `python/tests/_fixtures_profile.py` and `_canonical.py`), and
+the three oracle generators (`gen_search_oracle.py`, `gen_similarity_oracle.py`,
+`gen_tokenizer_oracle.py`) that no gate executes. The new
+`test_namespace_layout.py` contains no literal match (Step 2) and is untouched.
+
+- [ ] **Step 7: Zero-match rewrite guard**
+
+```bash
+cd ~/d/nodes && rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
+```
+
+Expected: `kernel path retired` on its own (no match lines above it). Match lines,
+or a missing message (grep exit 0 = matches survive; exit ≥ 2 = grep itself failed),
+is a STOP.
+
+- [ ] **Step 8: Run the layout test (now green), then the full Python suite**
 
 ```bash
 cd ~/d/nodes/python && rtk uv run --frozen pytest tests/test_namespace_layout.py -v
@@ -174,17 +200,17 @@ cd ~/d/nodes/python && rtk uv run --frozen pytest -q
 Expected: 3/3 PASS, then full suite PASS (uv rebuilds the project on the changed
 layout automatically).
 
-- [ ] **Step 8: Gates (all six — both languages, per Global Constraints)**
+- [ ] **Step 9: Gates (all six — both languages, per Global Constraints)**
 
 ```bash
 cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
 cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 cd ~/d/nodes && rtk git add python/src python/tests python/scripts && rtk git commit -m "refactor(python): convert nodes to a namespace package with nodes.core"
@@ -269,7 +295,7 @@ the stdlib `zipfile` against the built artifact, not the project environment.)
 ```bash
 cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
 cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
@@ -327,7 +353,7 @@ Expected: `living docs clean` on its own. A match line or missing message is a S
 ```bash
 cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
 cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
@@ -354,7 +380,7 @@ Expected: all PASS.
 - [ ] **Step 2: Design §6 exit criteria**
 
 ```bash
-cd ~/d/nodes && rtk grep -rn "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
+cd ~/d/nodes && rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
 cd ~/d/nodes/python && rtk uv run --frozen pytest tests/test_namespace_layout.py -q
 cd ~/d/nodes/python && rm -rf dist && rtk uv build && python3 -c "
 import glob, zipfile
@@ -367,7 +393,7 @@ with zipfile.ZipFile(whl) as z:
 assert 'Import-Name: nodes.core' in metadata and 'Import-Namespace: nodes' in metadata
 print('wheel layout ok')
 " && rm -rf dist
-cd ~/d/nodes && FIXSTAT="$(rtk git status --porcelain fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 cd ~/d/nodes && rtk git log --oneline main..HEAD
 ```
 

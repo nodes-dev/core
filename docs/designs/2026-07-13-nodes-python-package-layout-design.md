@@ -168,8 +168,11 @@ namespace back to a regular package and shadow `nodes.core` with its own
   guards against accidental cross-tree damage even though no TS file changes).
 - The layout test of §5 passes.
 - Zero-match rewrite guard (covers the generators the gates never execute):
-  `rtk grep -rn "nodes\.kernel" python/src python/tests python/scripts` returns
-  nothing, with no-match (exit 1) distinguished from grep failure (exit ≥ 2).
+  `rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests
+  python/scripts` returns nothing, with no-match (exit 1) distinguished from grep
+  failure (exit ≥ 2). Restricted to `*.py` because compiled bytecode under
+  `__pycache__/` also carries the dotted path (and matches locale-dependently);
+  the layout test satisfies the guard by assembling the legacy name at runtime.
 - Packaging check with teeth: `rtk uv build` from `python/`, then assert the built
   wheel lists `nodes/core/py.typed`, does **not** list `nodes/__init__.py`, and its
   `METADATA` carries `Import-Name: nodes.core` and `Import-Namespace: nodes`.
