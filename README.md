@@ -23,7 +23,7 @@ their own kinds onto the kernel's registry and live in downstream repos.
 |------|----------|
 | `docs/STANDARD.md` | **The authority** — the versioned, normative portable contract. |
 | `docs/designs/`, `docs/plans/` | Dated historical records (rationale, not authority). |
-| `python/` | Python core distribution (`nodes-core`); imports are `nodes.kernel`. |
+| `python/` | Python core distribution (`nodes-core`); imports are `nodes.core`. |
 | `ts/` | TypeScript core package (`@nodes-dev/core`), the domain-free kernel. |
 | `fixtures/` | Shared cross-language conformance oracles. |
 

@@ -10,7 +10,7 @@
 
 ## Layering (enforced, not conventional)
 
-- `kernel` imports nothing above it and names zero knowledge kinds.
+- `nodes.core` (the kernel) imports nothing above it and names zero knowledge kinds.
 - Domain kinds live in downstream repos, registered onto the kernel's `Registry`.
 
 ## Parity tiers (before adding any feature)
