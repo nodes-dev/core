@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import RefError
-from nodes.kernel.relations import RELATES_TO, Relation, relates_to, tag_to_relation
+from nodes.core.errors import RefError
+from nodes.core.relations import RELATES_TO, Relation, relates_to, tag_to_relation
 
 
 def test_node_relation_roundtrip_drops_source():

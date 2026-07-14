@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.structural_index import Index
-from nodes.kernel.node import Node
-from nodes.kernel.relations import Relation, relates_to
+from nodes.core.structural_index import Index
+from nodes.core.node import Node
+from nodes.core.relations import Relation, relates_to
 
 # Reuse the equivalence normalizer that already pins structural state.
 from tests.test_index_rebuild_equivalence import _normalize
@@ -273,7 +273,7 @@ def test_extract_out_refs_still_works_after_refactor():
 
 
 def test_structural_refs_round_trip():
-    from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
+    from nodes.core.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
 
     g = Node(id="graph:g", kind="graph", title="G",
              facets={MEMBERSHIP: {"members": ["topic:a", "topic:b"]},

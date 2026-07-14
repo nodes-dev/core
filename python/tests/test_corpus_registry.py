@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.errors import InvariantError, UnknownKindError
-from nodes.kernel.node import Node
-from nodes.kernel.registry import Registry
+from nodes.core.corpus import Corpus
+from nodes.core.errors import InvariantError, UnknownKindError
+from nodes.core.node import Node
+from nodes.core.registry import Registry
 from tests._fixtures_profile import SOURCE, register_fixtures_profile
 
 
@@ -41,8 +41,8 @@ def test_registry_accepts_valid_node(tmp_path):
     assert c.get("paper:a").title == "A"
 
 
-from nodes.kernel.errors import FacetError, RefError  # noqa: E402
-from nodes.kernel.relations import Relation  # noqa: E402
+from nodes.core.errors import FacetError, RefError  # noqa: E402
+from nodes.core.relations import Relation  # noqa: E402
 
 
 def test_rename_validates_renamed_node_no_write(tmp_path):

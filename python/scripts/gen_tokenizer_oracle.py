@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from nodes.kernel.search import tokenize
+from nodes.core.search import tokenize
 
 ORACLE = Path(__file__).parent.parent.parent / "fixtures" / "search.tokenizer.json"
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import (
+from nodes.core.errors import (
     CollisionError,
     FacetError,
     IdError,

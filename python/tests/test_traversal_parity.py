@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from nodes.kernel.corpus import Corpus
+from nodes.core.corpus import Corpus
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"
 CORPUS = FIXTURES / "check-corpus"

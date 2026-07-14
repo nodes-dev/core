@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.errors import EmbedderRequiredError
-from nodes.kernel.node import Node
+from nodes.core.corpus import Corpus
+from nodes.core.errors import EmbedderRequiredError
+from nodes.core.node import Node
 
 
 class DictEmbedder:
@@ -64,7 +64,7 @@ def test_query_vector_and_similar_text(tmp_path):
 
 
 def test_similar_unknown_ref_raises_referror(tmp_path):
-    from nodes.kernel.errors import RefError
+    from nodes.core.errors import RefError
 
     c = Corpus(tmp_path, embedder=_embedder())
     _seed(c)

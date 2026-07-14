@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.ranking import score_key
+from nodes.core.corpus import Corpus
+from nodes.core.ranking import score_key
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"
 CORPUS = FIXTURES / "search-corpus"

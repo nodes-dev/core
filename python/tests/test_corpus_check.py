@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.node import Node
-from nodes.kernel.registry import Registry
-from nodes.kernel.relations import Relation
-from nodes.kernel.shapes import MEMBERSHIP, register_builtin_shapes
+from nodes.core.corpus import Corpus
+from nodes.core.node import Node
+from nodes.core.registry import Registry
+from nodes.core.relations import Relation
+from nodes.core.shapes import MEMBERSHIP, register_builtin_shapes
 from tests._fixtures_profile import SOURCE, register_fixtures_profile
 
 

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import ValidationError
-from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown, split_frontmatter
-from nodes.kernel.node import Node
-from nodes.kernel.relations import Relation, relates_to
+from nodes.core.errors import ValidationError
+from nodes.core.frontmatter import node_from_markdown, node_to_markdown, split_frontmatter
+from nodes.core.node import Node
+from nodes.core.relations import Relation, relates_to
 
 
 def test_split_no_frontmatter():

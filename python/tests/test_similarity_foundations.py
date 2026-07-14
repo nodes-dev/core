@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-from nodes.kernel.node import Node
-from nodes.kernel.similarity import (
+from nodes.core.node import Node
+from nodes.core.similarity import (
     _normalize,
     _validate_finite,
     embed_text,

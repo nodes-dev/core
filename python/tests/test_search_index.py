@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import CollisionError
-from nodes.kernel.node import Node
-from nodes.kernel.search import SearchIndex
+from nodes.core.errors import CollisionError
+from nodes.core.node import Node
+from nodes.core.search import SearchIndex
 
 
 def _norm(idx: SearchIndex) -> dict:

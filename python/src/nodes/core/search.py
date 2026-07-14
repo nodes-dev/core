@@ -6,9 +6,9 @@ import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from nodes.kernel.errors import CollisionError
-from nodes.kernel.node import Node
-from nodes.kernel.ranking import score_key
+from nodes.core.errors import CollisionError
+from nodes.core.node import Node
+from nodes.core.ranking import score_key
 
 STOP_WORDS: frozenset[str] = frozenset(
     {

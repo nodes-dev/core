@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
-from nodes.kernel.snapshot import iter_corpus_files, load_snapshot, read_json, snapshot_path
+from nodes.core.corpus import Corpus
+from nodes.core.node import Node
+from nodes.core.relations import relates_to
+from nodes.core.snapshot import iter_corpus_files, load_snapshot, read_json, snapshot_path
 
 
 class FixedEmbedder:
@@ -87,9 +87,9 @@ def test_flush_after_mutations_reloads_equivalently(tmp_path):
 
 
 def test_rename_rewrites_structure_form_facet_refs_without_registry(tmp_path):
-    from nodes.kernel.corpus import Corpus
-    from nodes.kernel.node import Node
-    from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
+    from nodes.core.corpus import Corpus
+    from nodes.core.node import Node
+    from nodes.core.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
 
     c = Corpus(tmp_path)  # no registry attached
     c.store.write_file(Node(id="topic:a", kind="topic", title="A"))

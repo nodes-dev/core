@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
+from nodes.core.frontmatter import node_from_markdown, node_to_markdown
 
 from tests._canonical import to_canonical
 

@@ -6,16 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from nodes.kernel.errors import CollisionError, EmbedderRequiredError, RefError
-from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
-from nodes.kernel.ids import NodeId
-from nodes.kernel.structural_index import Index, ResolvedEdge
-from nodes.kernel.node import Node
-from nodes.kernel.registry import Registry
-from nodes.kernel.search import SearchHit, SearchIndex
-from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
-from nodes.kernel.similarity import Embedder, SimilarHit, Vector, VectorCache, VectorIndex
-from nodes.kernel.snapshot import (
+from nodes.core.errors import CollisionError, EmbedderRequiredError, RefError
+from nodes.core.frontmatter import node_from_markdown, node_to_markdown
+from nodes.core.ids import NodeId
+from nodes.core.structural_index import Index, ResolvedEdge
+from nodes.core.node import Node
+from nodes.core.registry import Registry
+from nodes.core.search import SearchHit, SearchIndex
+from nodes.core.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
+from nodes.core.similarity import Embedder, SimilarHit, Vector, VectorCache, VectorIndex
+from nodes.core.snapshot import (
     ManifestEntry,
     Snapshot,
     hash_bytes,
@@ -23,7 +23,7 @@ from nodes.kernel.snapshot import (
     load_snapshot,
     write_snapshot,
 )
-from nodes.kernel.store import Store
+from nodes.core.store import Store
 
 
 def _rewrite_refs(node: Node, old: str, new: str) -> None:

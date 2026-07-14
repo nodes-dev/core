@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.structural_index import Index
-from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
+from nodes.core.corpus import Corpus
+from nodes.core.structural_index import Index
+from nodes.core.node import Node
+from nodes.core.relations import relates_to
 
 
 def _relation_signature(out_ref) -> tuple | None:

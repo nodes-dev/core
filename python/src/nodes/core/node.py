@@ -5,9 +5,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
-from nodes.kernel.errors import IdError, ValidationError
-from nodes.kernel.ids import NodeId
-from nodes.kernel.relations import Relation
+from nodes.core.errors import IdError, ValidationError
+from nodes.core.ids import NodeId
+from nodes.core.relations import Relation
 
 
 def new_uid() -> str:

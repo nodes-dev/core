@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.node import Node
-from nodes.kernel.ranking import score_key
-from nodes.kernel.similarity import VectorCache, VectorIndex, embed_text
+from nodes.core.node import Node
+from nodes.core.ranking import score_key
+from nodes.core.similarity import VectorCache, VectorIndex, embed_text
 
 
 class DictEmbedder:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.node import Node
-from nodes.kernel.similarity import VectorCache, VectorIndex
+from nodes.core.node import Node
+from nodes.core.similarity import VectorCache, VectorIndex
 
 
 class ListEmbedder:

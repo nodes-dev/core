@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import CollisionError
-from nodes.kernel.node import Node
-from nodes.kernel.similarity import VectorCache, VectorIndex, embed_text
+from nodes.core.errors import CollisionError
+from nodes.core.node import Node
+from nodes.core.similarity import VectorCache, VectorIndex, embed_text
 
 
 class DictEmbedder:

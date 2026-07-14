@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import ValidationError
-from nodes.kernel.node import Node, new_uid
+from nodes.core.errors import ValidationError
+from nodes.core.node import Node, new_uid
 
 
 def test_node_minimal_defaults():

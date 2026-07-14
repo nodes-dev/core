@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from nodes.kernel.ranking import score_key
+from nodes.core.ranking import score_key
 
 
 def test_score_key_rounds_to_6dp():

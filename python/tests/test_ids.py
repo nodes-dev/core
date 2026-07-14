@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import IdError
-from nodes.kernel.ids import NodeId
+from nodes.core.errors import IdError
+from nodes.core.ids import NodeId
 
 
 def test_parse_simple():

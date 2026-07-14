@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from nodes.kernel.errors import CollisionError
-from nodes.kernel.node import Node
-from nodes.kernel.ranking import score_key
+from nodes.core.errors import CollisionError
+from nodes.core.node import Node
+from nodes.core.ranking import score_key
 
 Vector = tuple[float, ...]
 

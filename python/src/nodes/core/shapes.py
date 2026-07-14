@@ -5,10 +5,10 @@ from typing import TypeVar
 from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
-from nodes.kernel.errors import FacetError, InvariantError
-from nodes.kernel.node import Node
-from nodes.kernel.registry import KindSpec, Registry, ShapeSpec
-from nodes.kernel.relations import Relation
+from nodes.core.errors import FacetError, InvariantError
+from nodes.core.node import Node
+from nodes.core.registry import KindSpec, Registry, ShapeSpec
+from nodes.core.relations import Relation
 
 _M = TypeVar("_M", bound=BaseModel)
 

@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from nodes.kernel.snapshot import (
+from nodes.core.snapshot import (
     SNAPSHOT_LANG,
     SNAPSHOT_SCHEMA_VERSION,
     CorpusFile,

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nodes.kernel.errors import RefError
-from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
-from nodes.kernel.ids import NodeId
-from nodes.kernel.node import Node
-from nodes.kernel.snapshot import iter_corpus_files
+from nodes.core.errors import RefError
+from nodes.core.frontmatter import node_from_markdown, node_to_markdown
+from nodes.core.ids import NodeId
+from nodes.core.node import Node
+from nodes.core.snapshot import iter_corpus_files
 
 
 class Store:

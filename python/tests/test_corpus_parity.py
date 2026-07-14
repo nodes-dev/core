@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from nodes.kernel.corpus import Corpus
+from nodes.core.corpus import Corpus
 
 from tests._canonical import to_canonical
 

@@ -4,9 +4,9 @@ from typing import Any
 
 import yaml
 
-from nodes.kernel.errors import ValidationError
-from nodes.kernel.node import Node, NodeMetadata
-from nodes.kernel.relations import RELATES_TO, Relation, relates_to
+from nodes.core.errors import ValidationError
+from nodes.core.node import Node, NodeMetadata
+from nodes.core.relations import RELATES_TO, Relation, relates_to
 
 
 def split_frontmatter(text: str) -> tuple[dict, str]:

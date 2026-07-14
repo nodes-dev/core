@@ -4,8 +4,8 @@ from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nodes.kernel.errors import FacetError, InvariantError, UnknownKindError, ValidationError
-from nodes.kernel.node import Node
+from nodes.core.errors import FacetError, InvariantError, UnknownKindError, ValidationError
+from nodes.core.node import Node
 
 Invariant = Callable[[Node], None]
 

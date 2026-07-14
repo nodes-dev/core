@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import FacetError, InvariantError, UnknownKindError, ValidationError
-from nodes.kernel.node import Node
-from nodes.kernel.registry import KindSpec, Registry, ShapeSpec
+from nodes.core.errors import FacetError, InvariantError, UnknownKindError, ValidationError
+from nodes.core.node import Node
+from nodes.core.registry import KindSpec, Registry, ShapeSpec
 
 
 def _node(**facets) -> Node:

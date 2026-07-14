@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.node import Node
-from nodes.kernel.registry import KindSpec, Registry
+from nodes.core.node import Node
+from nodes.core.registry import KindSpec, Registry
 from tests._fixtures_profile import SOURCE, register_fixtures_profile
 
 
@@ -70,7 +70,7 @@ def test_non_kernel_invariant_exception_propagates():
 
 
 def test_validate_behavior_unchanged(reg):
-    from nodes.kernel.errors import FacetError
+    from nodes.core.errors import FacetError
 
     with pytest.raises(FacetError):
         reg.validate(Node(id="paper:p", kind="paper", title="P"))

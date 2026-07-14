@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from nodes.kernel.similarity import VectorCache
+from nodes.core.similarity import VectorCache
 
 H = "a" * 64   # a valid 64-char lowercase-hex cache key
 H2 = "b" * 64

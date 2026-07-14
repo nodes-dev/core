@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nodes.kernel.frontmatter import node_from_markdown, node_to_markdown
+from nodes.core.frontmatter import node_from_markdown, node_to_markdown
 
 FIXTURE = Path(__file__).parent.parent.parent / "fixtures" / "gene_phf19.md"
 

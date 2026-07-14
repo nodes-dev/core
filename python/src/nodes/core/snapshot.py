@@ -7,10 +7,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from nodes.kernel.ids import NodeId
-from nodes.kernel.structural_index import Index
-from nodes.kernel.search import SearchIndex
-from nodes.kernel.similarity import VectorIndex
+from nodes.core.ids import NodeId
+from nodes.core.structural_index import Index
+from nodes.core.search import SearchIndex
+from nodes.core.similarity import VectorIndex
 
 SNAPSHOT_SCHEMA_VERSION = 2
 SNAPSHOT_LANG = "py"

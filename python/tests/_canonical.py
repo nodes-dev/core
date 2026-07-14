@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from nodes.kernel.node import Node
+from nodes.core.node import Node
 
 
 def to_canonical(node: Node) -> dict:

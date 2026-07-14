@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.errors import RefError
-from nodes.kernel.node import Node
-from nodes.kernel.store import Store
+from nodes.core.corpus import Corpus
+from nodes.core.errors import RefError
+from nodes.core.node import Node
+from nodes.core.store import Store
 
 
 def test_write_file_read_file_roundtrip(tmp_path):

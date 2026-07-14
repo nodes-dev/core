@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.errors import RefError
-from nodes.kernel.node import Node
-from nodes.kernel.shapes import MEMBERSHIP
+from nodes.core.corpus import Corpus
+from nodes.core.errors import RefError
+from nodes.core.node import Node
+from nodes.core.shapes import MEMBERSHIP
 
 
 def _set_node(node_id: str, members: list[str]) -> Node:

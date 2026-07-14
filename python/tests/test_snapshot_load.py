@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from nodes.kernel.structural_index import Index
-from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
-from nodes.kernel.search import SearchIndex
-from nodes.kernel.snapshot import (
+from nodes.core.structural_index import Index
+from nodes.core.node import Node
+from nodes.core.relations import relates_to
+from nodes.core.search import SearchIndex
+from nodes.core.snapshot import (
     ManifestEntry,
     Snapshot,
     load_snapshot,

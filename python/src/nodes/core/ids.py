@@ -4,7 +4,7 @@ import re
 
 from pydantic import BaseModel
 
-from nodes.kernel.errors import IdError
+from nodes.core.errors import IdError
 
 Ref = str
 

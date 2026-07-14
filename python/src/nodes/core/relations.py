@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from nodes.kernel.errors import RefError
+from nodes.core.errors import RefError
 
 RELATES_TO = "relatesTo"
 

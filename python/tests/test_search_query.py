@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-from nodes.kernel.node import Node
-from nodes.kernel.search import SearchHit, SearchIndex
+from nodes.core.node import Node
+from nodes.core.search import SearchHit, SearchIndex
 
 
 def _two_doc_index() -> SearchIndex:

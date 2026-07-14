@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import CollisionError
-from nodes.kernel.structural_index import Index
-from nodes.kernel.node import Node
-from nodes.kernel.node import Node as _Node
-from nodes.kernel.relations import Relation, relates_to
-from nodes.kernel.shapes import EDGES as _EDGES
-from nodes.kernel.shapes import KEYS as _KEYS
-from nodes.kernel.shapes import MEMBERSHIP as _MEMBERSHIP
-from nodes.kernel.shapes import ORDER as _ORDER
+from nodes.core.errors import CollisionError
+from nodes.core.structural_index import Index
+from nodes.core.node import Node
+from nodes.core.node import Node as _Node
+from nodes.core.relations import Relation, relates_to
+from nodes.core.shapes import EDGES as _EDGES
+from nodes.core.shapes import KEYS as _KEYS
+from nodes.core.shapes import MEMBERSHIP as _MEMBERSHIP
+from nodes.core.shapes import ORDER as _ORDER
 
 
 def test_build_and_resolve_live_id():

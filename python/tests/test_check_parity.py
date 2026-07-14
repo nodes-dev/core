@@ -4,9 +4,9 @@ import json
 import shutil
 from pathlib import Path
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.registry import Registry
-from nodes.kernel.shapes import register_builtin_shapes
+from nodes.core.corpus import Corpus
+from nodes.core.registry import Registry
+from nodes.core.shapes import register_builtin_shapes
 from tests._fixtures_profile import register_fixtures_profile
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"

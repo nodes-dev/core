@@ -9,11 +9,11 @@ from typing import Literal
 
 from pydantic import ValidationError as PydanticValidationError
 
-from nodes.kernel.errors import CollisionError, IdError
-from nodes.kernel.ids import NodeId
-from nodes.kernel.node import Node
-from nodes.kernel.relations import Relation
-from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
+from nodes.core.errors import CollisionError, IdError
+from nodes.core.ids import NodeId
+from nodes.core.node import Node
+from nodes.core.relations import Relation
+from nodes.core.shapes import EDGES, KEYS, MEMBERSHIP, ORDER
 
 Role = Literal[
     "relation_source",

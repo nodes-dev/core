@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nodes.kernel.search import STOP_WORDS, tokenize
+from nodes.core.search import STOP_WORDS, tokenize
 
 ORACLE = Path(__file__).parent.parent.parent / "fixtures" / "search.tokenizer.json"
 

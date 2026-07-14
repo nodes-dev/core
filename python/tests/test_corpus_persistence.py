@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.errors import CollisionError
-from nodes.kernel.frontmatter import node_to_markdown
-from nodes.kernel.structural_index import Index
-from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
-from nodes.kernel.search import SearchIndex
-from nodes.kernel.snapshot import ManifestEntry, hash_bytes, load_snapshot, snapshot_path, write_snapshot
+from nodes.core.corpus import Corpus
+from nodes.core.errors import CollisionError
+from nodes.core.frontmatter import node_to_markdown
+from nodes.core.structural_index import Index
+from nodes.core.node import Node
+from nodes.core.relations import relates_to
+from nodes.core.search import SearchIndex
+from nodes.core.snapshot import ManifestEntry, hash_bytes, load_snapshot, snapshot_path, write_snapshot
 
 
 class TermEmbedder:

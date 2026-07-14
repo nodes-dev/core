@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.errors import CollisionError, RefError
-from nodes.kernel.node import Node
-from nodes.kernel.relations import relates_to
+from nodes.core.corpus import Corpus
+from nodes.core.errors import CollisionError, RefError
+from nodes.core.node import Node
+from nodes.core.relations import relates_to
 
 
 def test_add_get_roundtrip(tmp_path):
@@ -153,7 +153,7 @@ def test_rename_rewrites_list_order(tmp_path):
 def test_rename_rewrites_own_relation_source(tmp_path):
     # A node whose outgoing relation had explicit source == old_id must, after rename,
     # serialize that relation with the container source (no stale source: old_id).
-    from nodes.kernel.relations import Relation
+    from nodes.core.relations import Relation
     c = Corpus(tmp_path)
     c.add(Node(id="topic:t", kind="topic", title="T"))
     c.add(Node(id="topic:old", kind="topic", title="Old",
@@ -168,7 +168,7 @@ def test_rename_rewrites_own_relation_source(tmp_path):
 
 def test_rename_multi_ref_referrer_written_once(tmp_path):
     # A referrer that points at old_id from several positions is rewritten correctly.
-    from nodes.kernel.relations import Relation
+    from nodes.core.relations import Relation
     c = Corpus(tmp_path)
     c.add(Node(id="topic:old", kind="topic", title="Old"))
     c.add(Node(id="topic:r", kind="topic", title="R", relations=[

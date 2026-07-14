@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from nodes.kernel.errors import FacetError, InvariantError
-from nodes.kernel.node import Node
-from nodes.kernel.registry import Registry
-from nodes.kernel.shapes import EDGES, KEYS, MEMBERSHIP, ORDER, register_builtin_shapes
+from nodes.core.errors import FacetError, InvariantError
+from nodes.core.node import Node
+from nodes.core.registry import Registry
+from nodes.core.shapes import EDGES, KEYS, MEMBERSHIP, ORDER, register_builtin_shapes
 
 
 def _struct(kind: str, **facets) -> Node:

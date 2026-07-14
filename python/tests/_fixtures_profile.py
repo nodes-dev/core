@@ -8,9 +8,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
-from nodes.kernel.errors import FacetError, InvariantError
-from nodes.kernel.node import Node
-from nodes.kernel.registry import KindSpec, Registry
+from nodes.core.errors import FacetError, InvariantError
+from nodes.core.node import Node
+from nodes.core.registry import KindSpec, Registry
 
 SOURCE = "source"
 NOTE = "note"

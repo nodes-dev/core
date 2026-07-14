@@ -5,9 +5,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.ranking import score_key
-from nodes.kernel.similarity import Vector, embed_text
+from nodes.core.corpus import Corpus
+from nodes.core.ranking import score_key
+from nodes.core.similarity import Vector, embed_text
 
 FIXTURES = Path(__file__).parent.parent.parent / "fixtures"
 CORPUS = FIXTURES / "similarity-corpus"

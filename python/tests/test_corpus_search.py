@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from nodes.kernel.corpus import Corpus
-from nodes.kernel.node import Node
+from nodes.core.corpus import Corpus
+from nodes.core.node import Node
 
 
 def _seed(c: Corpus) -> None:
