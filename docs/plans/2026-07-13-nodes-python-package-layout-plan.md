@@ -19,8 +19,14 @@ backend), TypeScript gates run as cross-tree guards only.
 
 ## Global Constraints
 
-- Work on branch `refactor/python-package-layout` off `main` in `~/d/nodes`; merge to
-  main only after all three tasks and final verification pass.
+- Before Task 1, the execution controller MUST use
+  `superpowers:using-git-worktrees` to create or verify an isolated checkout on branch
+  `refactor/python-package-layout` off `main`. The plan never creates the branch or
+  assumes the primary `~/d/nodes` checkout is the active workspace.
+- Every command resolves the active checkout with
+  `ROOT="$(git rev-parse --show-toplevel)"` on the same command line. Do not replace
+  that with a hardcoded `cd ~/d/nodes`: execution may be inside a linked worktree, and
+  environment variables do not persist across separate tool calls.
 - All git commands through `rtk` (`rtk git …`); npm through `rtk npm …`; uv through
   `rtk uv …`. Exception, on purpose: checks that capture command output use raw
   `git` — `rtk git status` rewrites empty output to `ok`, which breaks
@@ -73,15 +79,16 @@ backend), TypeScript gates run as cross-tree guards only.
   `nodes` importable only as a namespace package. Tasks 2–3 rely on the path and on
   `python/tests/test_namespace_layout.py` existing.
 
-- [ ] **Step 1: Baseline gates on main, then branch**
+- [ ] **Step 1: Confirm the isolated branch, then run baseline gates**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
-cd ~/d/nodes && rtk git checkout -b refactor/python-package-layout
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && test "$(git branch --show-current)" = "refactor/python-package-layout" && echo "isolated branch ready"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/ts" && rtk npm test && rtk npm run typecheck && rtk npm run check
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
 ```
 
-Expected: all gates pass on main before branching. If any fail, STOP and report.
+Expected: `isolated branch ready`, then all baseline gates pass from the isolated
+checkout. A branch mismatch or failed gate is a STOP.
 
 - [ ] **Step 2: Write the layout-regression test (it must fail on the old layout)**
 
@@ -129,7 +136,7 @@ def test_legacy_import_path_is_gone() -> None:
 - [ ] **Step 3: Run the test to verify it fails against the current layout**
 
 ```bash
-cd ~/d/nodes/python && rtk uv run --frozen pytest tests/test_namespace_layout.py -v
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest tests/test_namespace_layout.py -v
 ```
 
 Expected: FAIL with exactly 3 failures — `test_core_is_importable` raises
@@ -141,8 +148,8 @@ imports). Any other failure shape is a STOP.
 - [ ] **Step 4: Delete the top-level init and move the package directory**
 
 ```bash
-cd ~/d/nodes && rtk git rm python/src/nodes/__init__.py
-rtk git mv python/src/nodes/kernel python/src/nodes/core
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git rm python/src/nodes/__init__.py
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git mv python/src/nodes/kernel python/src/nodes/core
 ```
 
 The deleted `__init__.py` contains only `from __future__ import annotations` (dead
@@ -157,8 +164,8 @@ behind — both are hazards): stale bytecode under a surviving
 the exact failure mode hit after the vocab retirement.
 
 ```bash
-cd ~/d/nodes && rm -rf python/src/nodes/kernel python/src/nodes/core/__pycache__ python/scripts/__pycache__
-test ! -e python/src/nodes/kernel && echo "kernel dir gone"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rm -rf python/src/nodes/kernel python/src/nodes/core/__pycache__ python/scripts/__pycache__
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && test ! -e python/src/nodes/kernel && echo "kernel dir gone"
 ```
 
 Expected: `kernel dir gone`.
@@ -171,7 +178,7 @@ locale-dependent — an unrestricted sweep could feed `.pyc` files to `sed` and
 corrupt them.
 
 ```bash
-cd ~/d/nodes && grep -rl --include="*.py" "nodes\.kernel" python/src python/tests python/scripts | xargs sed -i 's/nodes\.kernel/nodes.core/g'
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && grep -rl --include="*.py" "nodes\.kernel" python/src python/tests python/scripts | xargs sed -i 's/nodes\.kernel/nodes.core/g'
 ```
 
 This covers the 12 core modules (absolute sibling imports), all 41 pre-existing
@@ -183,7 +190,7 @@ the three oracle generators (`gen_search_oracle.py`, `gen_similarity_oracle.py`,
 - [ ] **Step 7: Zero-match rewrite guard**
 
 ```bash
-cd ~/d/nodes && rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
 ```
 
 Expected: `kernel path retired` on its own (no match lines above it). Match lines,
@@ -193,8 +200,8 @@ is a STOP.
 - [ ] **Step 8: Run the layout test (now green), then the full Python suite**
 
 ```bash
-cd ~/d/nodes/python && rtk uv run --frozen pytest tests/test_namespace_layout.py -v
-cd ~/d/nodes/python && rtk uv run --frozen pytest -q
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest tests/test_namespace_layout.py -v
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest -q
 ```
 
 Expected: 3/3 PASS, then full suite PASS (uv rebuilds the project on the changed
@@ -203,9 +210,9 @@ layout automatically).
 - [ ] **Step 9: Gates (all six — both languages, per Global Constraints)**
 
 ```bash
-cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/ts" && rtk npm test && rtk npm run typecheck && rtk npm run check
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
@@ -213,7 +220,7 @@ Expected: all six gates PASS; `fixtures clean`.
 - [ ] **Step 10: Commit**
 
 ```bash
-cd ~/d/nodes && rtk git add python/src python/tests python/scripts && rtk git commit -m "refactor(python): convert nodes to a namespace package with nodes.core"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git add python/src python/tests python/scripts && rtk git commit -m "refactor(python): convert nodes to a namespace package with nodes.core"
 ```
 
 ---
@@ -260,14 +267,14 @@ neither edit touches locked dependencies.)
 - [ ] **Step 3: Add the PEP 561 marker**
 
 ```bash
-cd ~/d/nodes && touch python/src/nodes/core/py.typed
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && touch python/src/nodes/core/py.typed
 ```
 
 - [ ] **Step 4: Wheel-content check (design §6 teeth)**
 
 ```bash
-cd ~/d/nodes/python && rm -rf dist && rtk uv build
-cd ~/d/nodes/python && python3 - <<'EOF'
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rm -rf dist && rtk uv build
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && python3 - <<'EOF'
 import glob
 import zipfile
 
@@ -283,7 +290,7 @@ assert "Import-Name: nodes.core" in metadata, "Import-Name missing from METADATA
 assert "Import-Namespace: nodes" in metadata, "Import-Namespace missing from METADATA"
 print("wheel layout ok")
 EOF
-cd ~/d/nodes/python && rm -rf dist && test ! -e dist && echo "dist not left behind"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rm -rf dist && test ! -e dist && echo "dist not left behind"
 ```
 
 Expected: `Building…` then `wheel layout ok` then `dist not left behind`. Any
@@ -293,9 +300,9 @@ the stdlib `zipfile` against the built artifact, not the project environment.)
 - [ ] **Step 5: Gates (all six — both languages, per Global Constraints)**
 
 ```bash
-cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/ts" && rtk npm test && rtk npm run typecheck && rtk npm run check
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
@@ -303,7 +310,7 @@ Expected: all six gates PASS; `fixtures clean`.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd ~/d/nodes && rtk git add python/pyproject.toml python/src/nodes/core/py.typed && rtk git commit -m "chore(python): ship py.typed and declare PEP 794 import metadata"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git add python/pyproject.toml python/src/nodes/core/py.typed && rtk git commit -m "chore(python): ship py.typed and declare PEP 794 import metadata"
 ```
 
 ---
@@ -343,7 +350,7 @@ The following bullet ("Domain kinds live in downstream repos…") is unchanged.
 - [ ] **Step 3: Verify no living doc references the old path**
 
 ```bash
-cd ~/d/nodes && rtk grep -rn "nodes\.kernel" README.md AGENTS.md ts/README.md docs/STANDARD.md; test $? -eq 1 && echo "living docs clean"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk grep -rn "nodes\.kernel" README.md AGENTS.md ts/README.md docs/STANDARD.md; test $? -eq 1 && echo "living docs clean"
 ```
 
 Expected: `living docs clean` on its own. A match line or missing message is a STOP.
@@ -351,9 +358,9 @@ Expected: `living docs clean` on its own. A match line or missing message is a S
 - [ ] **Step 4: Gates (all six — both languages, per Global Constraints)**
 
 ```bash
-cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/ts" && rtk npm test && rtk npm run typecheck && rtk npm run check
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
 ```
 
 Expected: all six gates PASS; `fixtures clean`.
@@ -361,7 +368,7 @@ Expected: all six gates PASS; `fixtures clean`.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/d/nodes && rtk git add README.md AGENTS.md && rtk git commit -m "docs: point living docs at nodes.core"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git add README.md AGENTS.md && rtk git commit -m "docs: point living docs at nodes.core"
 ```
 
 ---
@@ -371,8 +378,8 @@ cd ~/d/nodes && rtk git add README.md AGENTS.md && rtk git commit -m "docs: poin
 - [ ] **Step 1: Full gates at branch HEAD**
 
 ```bash
-cd ~/d/nodes/ts && rtk npm test && rtk npm run typecheck && rtk npm run check
-cd ~/d/nodes/python && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/ts" && rtk npm test && rtk npm run typecheck && rtk npm run check
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest -q && rtk uv run --frozen ruff check . && rtk uv run --frozen pyright src
 ```
 
 Expected: all PASS.
@@ -380,9 +387,9 @@ Expected: all PASS.
 - [ ] **Step 2: Design §6 exit criteria**
 
 ```bash
-cd ~/d/nodes && rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
-cd ~/d/nodes/python && rtk uv run --frozen pytest tests/test_namespace_layout.py -q
-cd ~/d/nodes/python && rm -rf dist && rtk uv build && python3 -c "
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk grep -rn --include="*.py" "nodes\.kernel" python/src python/tests python/scripts; test $? -eq 1 && echo "kernel path retired"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rtk uv run --frozen pytest tests/test_namespace_layout.py -q
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rm -rf dist && rtk uv build && python3 -c "
 import glob, zipfile
 whl = glob.glob('dist/nodes_core-*.whl')[0]
 with zipfile.ZipFile(whl) as z:
@@ -393,8 +400,8 @@ with zipfile.ZipFile(whl) as z:
 assert 'Import-Name: nodes.core' in metadata and 'Import-Namespace: nodes' in metadata
 print('wheel layout ok')
 " && rm -rf dist
-cd ~/d/nodes && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
-cd ~/d/nodes && rtk git log --oneline main..HEAD
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && FIXSTAT="$(git status --porcelain -- fixtures/)" && test -z "$FIXSTAT" && echo "fixtures clean"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git log --oneline main..HEAD
 ```
 
 Expected: `kernel path retired`; layout test passes; `wheel layout ok`;
