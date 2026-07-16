@@ -88,7 +88,10 @@ publishes, which is `ts/`). Manifests carry the SPDX expression: PEP 639
 
 ### 2.4 Workflows
 
-Two workflows, sharing the six gates:
+Two workflows, sharing the six gates. Both pin every external action to a
+verified full-length commit SHA (with its release version in a comment), never
+a mutable branch or tag. All non-publishing jobs grant only `contents: read`;
+each publishing job explicitly grants `contents: read` plus `id-token: write`.
 
 - **`.github/workflows/ci.yml`** — on pushes to `main` and pull requests. Two
   matrix jobs mirroring the gates exactly, each run at the declared floor and a
@@ -104,39 +107,45 @@ Two workflows, sharing the six gates:
   on `github.event_name == 'push' && startsWith(github.ref,
   'refs/tags/core/v')`. Dispatch inputs are caller-supplied values and cannot
   carry a release invariant, and a dispatch has no tag to check versions
-  against — so publishing is conditioned on the tag ref alone, and the
-  tag↔manifest consistency check runs only on tag pushes. Jobs, in dependency
-  order:
+  against — so publishing is conditioned on the tag ref alone. Every run first
+  requires the two manifest versions to agree; tag pushes additionally require
+  `core/vX.Y.Z` to equal that shared version. Runs are serialized by tag ref
+  (`cancel-in-progress: false`) so two attempts cannot race one another at the
+  registries. Jobs, in dependency order:
   - **gates** — the six gates, reusing the CI matrix (floors and current
     versions).
   - **build** — each artifact is built exactly once and uploaded as a workflow
-    artifact. On tag pushes, the job first checks tag↔manifest consistency
-    (`core/vX.Y.Z` must equal both `package.json` and `pyproject.toml`
-    versions) before building. Python: `uv build` (sdist + wheel). TypeScript:
-    `npm ci`, `rm -rf dist`, `npm run build`, then `npm pack` — the compile
-    step is explicit because nothing in `package.json` attaches it to packing
-    (`files: ["dist"]`, no `prepare`/`prepack`), and `tsc` never deletes stale
-    outputs, so packing without a clean build ships either nothing or stale
-    files.
+    artifact. It checks manifest equality on every run and tag↔manifest
+    consistency on tag pushes before building. Python: `uv build` creates the
+    sdist and then builds the wheel from that sdist, so the sdist is the source
+    of truth for both published files. TypeScript: `npm ci`, `rm -rf dist`,
+    `npm run build`, then `npm pack` — the compile step is explicit because
+    nothing in `package.json` attaches it to packing (`files: ["dist"]`, no
+    `prepare`/`prepack`), and `tsc` never deletes stale outputs, so packing
+    without a clean build ships either nothing or stale files.
   - **verify-artifacts** — downloads the built artifacts and verifies those
-    exact files: the wheel-content assertions from the layout design §6
-    (`nodes/core/py.typed` present, `nodes/__init__.py` absent,
-    `Import-Name: nodes.core` and `Import-Namespace: nodes` in METADATA); the
-    npm tarball contains `dist/index.js` and `dist/index.d.ts` and no paths
-    outside `dist/`, `README.md`, `LICENSE`, and `package.json`; and
-    install/import smoke tests — the wheel installs into a scratch environment
-    and passes the namespace-layout checks, the tarball installs into a scratch
-    project and `@nodes-dev/core` imports.
+    exact files. Both Python distributions pass metadata checks; the sdist
+    contains `pyproject.toml`, `README.md`, `LICENSE`, and
+    `src/nodes/core/py.typed`, and excludes `src/nodes/__init__.py`; and the
+    wheel passes the layout design §6 assertions (`nodes/core/py.typed`
+    present, `nodes/__init__.py` absent, `Import-Name: nodes.core` and
+    `Import-Namespace: nodes` in METADATA). Each Python file is installed
+    independently into a scratch environment and passes the namespace-layout
+    smoke checks — installing the sdist necessarily rebuilds it and proves it
+    is a usable source artifact. The npm tarball contains `dist/index.js` and
+    `dist/index.d.ts` and no paths outside `dist/`, `README.md`, `LICENSE`, and
+    `package.json`; it installs into a scratch project and `@nodes-dev/core`
+    imports.
   - **publish-npm** and **publish-pypi** — tag pushes only; each depends on
     gates, build, and verify-artifacts, and **downloads and publishes the same
     verified artifacts** (`npm publish <tarball>`; `pypa/gh-action-pypi-publish`
-    pointed at the downloaded dist directory) — never a rebuild. Both artifacts
-    exist and are verified before either upload starts (all-or-nothing up to
-    the upload boundary, which is as far as two registries allow). Each runs in
-    the protected `release` GitHub environment with `id-token: write`. npm
-    publishes with OIDC and automatic provenance on Node 24 (meets npm
-    trusted-publishing requirements); PyPI publishes with OIDC and PEP 740
-    attestations.
+    pointed at the downloaded dist directory) — never a rebuild. All three
+    distribution files exist and are verified before either registry upload
+    starts (all-or-nothing up to the upload boundary, which is as far as two
+    registries allow). Each runs in the protected `release` GitHub environment
+    with its job-scoped OIDC permission. npm publishes with OIDC and automatic
+    provenance on Node 24 (meets npm trusted-publishing requirements); PyPI
+    publishes with OIDC and PEP 740 attestations.
 
 ### 2.5 Registry setup and the npm bootstrap
 
@@ -156,9 +165,8 @@ instructions in the implementation plan:
   `dist/` still contains retired `dist/vocab/` outputs, which is exactly the
   stale-output hazard — and its tarball is checked with the same content
   assertions as §2.4's verify-artifacts before upload. The bootstrap does not
-  conflict
-  with the identity design's "no empty placeholders" rule: that rule forbids
-  reserving *domain* names on PyPI with nothing behind them; this is a
+  conflict with the identity design's "no empty placeholders" rule: that rule
+  forbids reserving *domain* names on PyPI with nothing behind them; this is a
   registry-imposed bootstrap for a package shipping the same day, on the same
   version line.
 - **PyPI:** add a pending trusted publisher for `nodes-core` (same
@@ -182,8 +190,9 @@ the slice.
 
 ## 3. Error handling
 
-- **Version skew fails closed:** the build job rejects any tag whose version
-  does not equal both manifests, before either artifact builds.
+- **Version skew fails closed:** the build job rejects manifest disagreement on
+  every run and, on a tag push, rejects a tag version that does not equal the
+  shared manifest version — all before either artifact builds.
 - **Gate or verification failure publishes nothing:** publish jobs are
   unreachable unless the gates, both builds, and the artifact verification all
   succeed.
@@ -194,14 +203,18 @@ the slice.
   never reused.
 - **Partial upload within PyPI recovers file-by-file:** PyPI filenames are
   immutable — if the sdist uploaded and the wheel did not, the sdist's filename
-  can never be uploaded again, so a blind re-run would fail forever. The PyPI
-  publish step therefore sets `skip-existing: true`. This is safe here because
-  a re-run of the publish job downloads the same stored workflow artifacts —
-  byte-identical files — so already-accepted filenames are skipped and only
-  missing files upload; it cannot mask content drift, because the bytes cannot
-  differ within a run and PyPI rejects same-filename-different-content
-  regardless. npm has no within-registry partial state (one tarball); a failed
-  `npm publish` uploaded nothing and re-runs cleanly.
+  can never be uploaded again, so a blind re-run would fail forever. Before
+  every upload, the publish job queries PyPI's project JSON for the target
+  version and compares the remote file set with the two local artifacts (an
+  absent project or version is the expected empty set on first publish). An
+  unexpected filename or any SHA-256 mismatch fails closed; matching existing
+  files are the byte-identical artifacts from an earlier partial attempt. Only
+  after that check does the action run with `skip-existing: true`, allowing it
+  to skip matching files and upload only missing ones. A post-upload query must
+  find exactly the expected two filenames with matching SHA-256 digests. The
+  per-tag workflow concurrency guard prevents two attempts from racing between
+  the preflight and upload. npm has no within-registry partial state (one
+  tarball); a failed `npm publish` uploaded nothing and re-runs cleanly.
 - **Rehearsal before reality:** a plain `workflow_dispatch` run exercises
   gates, build, and artifact verification (including `npm publish --dry-run`
   against the tarball) with the publish jobs skipped by their tag-ref
@@ -218,7 +231,8 @@ the slice.
   environment and run the namespace-layout smoke checks (`import nodes.core`;
   `getattr(nodes, "__file__", None) is None`; `nodes.kernel` raises name-checked
   `ModuleNotFoundError`); `npm view @nodes-dev/core` shows 0.1.0 with
-  provenance; the npm 0.0.0 bootstrap is deprecated.
+  provenance; install `@nodes-dev/core@0.1.0` from npm into a fresh scratch
+  project and import it; the npm 0.0.0 bootstrap is deprecated.
 - All six gates before every commit, as always; fixtures untouched.
 
 ## 5. Alternatives considered
