@@ -1,0 +1,215 @@
+# Nodes first publish: public home and lockstep 0.1.0 release
+
+- **Date:** 2026-07-16
+- **Status:** Accepted
+- **Follows:** `~/d/nodes/docs/designs/2026-07-11-nodes-package-identity-and-ownership-design.md`
+  (which fixed the names, ownership model, and lockstep release contract) and
+  `~/d/nodes/docs/designs/2026-07-13-nodes-python-package-layout-design.md` (which
+  closed the last pre-release layout blocker).
+
+## 1. Context
+
+Every design-level pre-release blocker is closed: the identity design fixed the
+public names (`nodes-dev/core`, `@nodes-dev/core`, `nodes-core`), and the layout
+design stabilized the Python import surface (`nodes` namespace, `nodes.core`).
+What remains is operational: the project has no public home and no release
+machinery.
+
+Facts that bear on the design:
+
+- **The repository has no git remote.** `nodes-dev/core` does not exist yet;
+  creating the public home means pushing this local repository to GitHub, not
+  transferring an existing one. The `nodes-dev` GitHub organization already exists
+  (identity design §2.2). Both stored `gh` tokens are currently invalid;
+  re-authentication is a prerequisite.
+- **No CI exists.** There is no `.github/` directory; all six gates
+  (Python pytest/ruff/pyright, TypeScript test/typecheck/biome) run locally via
+  `rtk`. Trusted OIDC publishing requires GitHub Actions workflows.
+- **Nothing is licensed.** There is no `LICENSE` file and neither manifest carries
+  license metadata. Public registry releases need this decided and shipped.
+- **Manifests are close but not publish-ready.** `ts/package.json` lacks
+  `license`, `repository`, and `publishConfig.access` (scoped packages default to
+  restricted). `python/pyproject.toml` lacks `license`, `readme`, `authors`, and
+  `[project.urls]`, and `python/` has no README for the sdist/wheel to carry.
+  Both versions already read 0.1.0.
+- **`python/uv.lock` is gitignored.** The gates mandate `uv run --frozen`, but the
+  lockfile they freeze against exists only on one machine. CI cannot run frozen
+  gates against an untracked lockfile. (`ts/package-lock.json` is already tracked.)
+- **npm trusted publishing cannot create a package.** A trusted publisher is
+  configured on an existing package's settings page, which does not exist before
+  the first publish (npm/cli#8544, open as of 2026-07). A one-time manual
+  bootstrap publish is unavoidable on the npm side.
+- **PyPI has no such gap.** A *pending trusted publisher* binds a not-yet-existing
+  project name to a repository, workflow file, and environment; the first
+  pipeline upload creates the project. The PyPI organization request (identity
+  design §2.2) is approval-gated but does not block first publish: projects can
+  be moved into an organization later.
+
+## 2. Decision
+
+Create the public home and publish the first lockstep release — `nodes-core`
+0.1.0 on PyPI and `@nodes-dev/core` 0.1.0 on npm — from one tag, `core/v0.1.0`,
+through a tag-driven GitHub Actions pipeline using trusted OIDC publishing on
+both registries. No long-lived registry tokens are created for the pipeline; the
+only manual publish ever performed is the npm bootstrap (§2.5).
+
+### 2.1 Repository home
+
+`nodes-dev/core` is created public and `main` is pushed with full history — the
+dated designs and plans are part of the project's public record. This checkout
+(`~/d/nodes`) remains the primary working copy and gains `origin`. Interactive
+prerequisite: `gh auth refresh` for the account that controls the `nodes-dev`
+organization.
+
+### 2.2 License
+
+MIT, copyright Keith Hughitt. The canonical text lives at the repository root
+(`LICENSE`); identical copies live at `python/LICENSE` and `ts/LICENSE` because
+each packaging tool collects license files from its own package directory and
+neither reaches above it (hatchling's `license-files` resolves inside the
+project directory; npm auto-includes `LICENSE` from the package root it
+publishes, which is `ts/`). Manifests carry the SPDX expression: PEP 639
+`license = "MIT"` plus `license-files` in `python/pyproject.toml`, and
+`"license": "MIT"` in `ts/package.json`.
+
+### 2.3 Manifest completion
+
+- `ts/package.json` adds `license`, `repository` (git URL with
+  `"directory": "ts"`), `homepage`, `bugs`, and
+  `publishConfig: { "access": "public" }`. Provenance is generated automatically
+  by OIDC publishing and is not configured in the manifest.
+- `python/pyproject.toml` adds `license`, `license-files`, `readme`, `authors`,
+  `[project.urls]` (Homepage, Repository, Issues), and the `Typing :: Typed`
+  classifier. A short `python/README.md` is created as the PyPI landing page
+  (`ts/README.md` already serves npm).
+- `uv.lock` leaves `.gitignore` and `python/uv.lock` is committed. This makes the
+  frozen gates mean the same thing locally and in CI, and makes local runs
+  reproducible across machines.
+
+### 2.4 Workflows
+
+Two workflows, sharing the six gates:
+
+- **`.github/workflows/ci.yml`** — on pushes to `main` and pull requests. Two
+  jobs mirroring the gates exactly: Python via `astral-sh/setup-uv`
+  (`uv sync --frozen`, then `uv run --frozen pytest -q`, `ruff check .`,
+  `pyright src`) and TypeScript via `actions/setup-node` on Node 24 (`npm ci`,
+  then `npm test`, `npm run typecheck`, `npm run check`). The commands are the
+  AGENTS.md gates without the local `rtk` wrapper.
+- **`.github/workflows/release.yml`** — on tags matching `core/v*`, plus a
+  `workflow_dispatch` input (`publish: false`) for rehearsing the full pipeline
+  without uploading. Jobs:
+  - **verify** — all six gates; tag↔manifest consistency (`core/vX.Y.Z` must
+    equal both `package.json` and `pyproject.toml` versions, checked before
+    anything builds); and the wheel-content assertions from the layout design §6
+    (`nodes/core/py.typed` present, `nodes/__init__.py` absent,
+    `Import-Name: nodes.core` and `Import-Namespace: nodes` in METADATA).
+  - **build** — `uv build` (sdist + wheel) and `npm pack`, artifacts uploaded.
+  - **publish-npm** and **publish-pypi** — each depends on verify *and* both
+    builds, so both artifacts exist and are verified before either upload starts
+    (all-or-nothing up to the upload boundary, which is as far as two registries
+    allow). Each runs in the protected `release` GitHub environment with
+    `id-token: write`. npm publishes with OIDC and automatic provenance; PyPI
+    publishes via `pypa/gh-action-pypi-publish` with OIDC and PEP 740
+    attestations.
+
+### 2.5 Registry setup and the npm bootstrap
+
+Interactive administrative steps, driven by the project owner with exact
+instructions in the implementation plan:
+
+- **npm:** create the `nodes-dev` organization on the free public-packages plan
+  (this reserves the `@nodes-dev` scope), then perform the one-time bootstrap:
+  manually publish `@nodes-dev/core` **0.0.0** from a workstation to create the
+  package, configure the trusted publisher (repository `nodes-dev/core`,
+  workflow `release.yml`, environment `release`), and after the real release
+  `npm deprecate` 0.0.0 pointing at `>=0.1.0`. The bootstrap does not conflict
+  with the identity design's "no empty placeholders" rule: that rule forbids
+  reserving *domain* names on PyPI with nothing behind them; this is a
+  registry-imposed bootstrap for a package shipping the same day, on the same
+  version line.
+- **PyPI:** add a pending trusted publisher for `nodes-core` (same
+  repository/workflow/environment binding) on the owner's account. No
+  placeholder, no token. The PyPI organization request remains a separate,
+  approval-gated follow-up outside this design.
+- **GitHub:** create the `release` environment on `nodes-dev/core`.
+
+### 2.6 First release
+
+Versions already read 0.1.0 on both sides; no bump. Push tag `core/v0.1.0`; the
+pipeline publishes both artifacts. Post-release verification (§5) then closes
+the slice.
+
+## 3. Error handling
+
+- **Version skew fails closed:** the verify job rejects any tag whose version
+  does not equal both manifests, before either artifact builds.
+- **Gate failure publishes nothing:** publish jobs are unreachable unless verify
+  and both builds succeed.
+- **Partial publish is loud, and recovery rolls forward:** if one registry
+  upload fails after the other succeeded, the workflow run fails visibly.
+  Recovery re-runs the failed publish job at the same version; the successful
+  artifact is never retracted (identity design §2.4). Registry versions are
+  never reused.
+- **Rehearsal before reality:** the `workflow_dispatch` dry-run exercises
+  verify + build (and `npm publish --dry-run`) without uploading, so the first
+  tag push is not the pipeline's first execution.
+
+## 4. Testing and verification
+
+- CI green on `main` after the push (both gate jobs).
+- Release rehearsal (dry-run dispatch) green before tagging.
+- After `core/v0.1.0`: install `nodes-core` from PyPI into a scratch
+  environment and run the namespace-layout smoke checks (`import nodes.core`;
+  `getattr(nodes, "__file__", None) is None`; `nodes.kernel` raises name-checked
+  `ModuleNotFoundError`); `npm view @nodes-dev/core` shows 0.1.0 with
+  provenance; the npm 0.0.0 bootstrap is deprecated.
+- All six gates before every commit, as always; fixtures untouched.
+
+## 5. Alternatives considered
+
+### 5.1 Manual first publish, automation later
+
+Publish 0.1.0 by hand with short-lived tokens and build the pipeline in a later
+slice. Rejected: the permanent pipeline stays unbuilt and untested, and the
+first — most scrutinized — artifacts ship without provenance or attestations.
+
+### 5.2 CI verify, manual upload
+
+Let CI build and verify on the tag, download artifacts, upload by hand.
+Rejected: keeps a human token path alive indefinitely and gives up provenance
+for no operational gain over the dry-run rehearsal.
+
+### 5.3 Fresh public history
+
+Start `nodes-dev/core` from a squashed initial commit. Rejected: the dated
+design and plan record is part of the project's value, and the history is
+clean.
+
+### 5.4 npm bootstrap with the real 0.1.0
+
+Publish 0.1.0 manually as the bootstrap instead of 0.0.0. Rejected: the first
+real version would lack provenance and would not validate the pipeline; a
+deprecated 0.0.0 placeholder is the established community pattern for npm's
+first-publish gap.
+
+## 6. Consequences
+
+- `pip install nodes-core` and `npm install @nodes-dev/core` work; science can
+  adopt `nodes.core` / `@nodes-dev/core` as real dependencies (next design, in
+  the science repo).
+- The release path is tag-driven and tokenless from the first real version;
+  npm 0.0.0 remains visible but deprecated.
+- `python/uv.lock` becomes tracked; dependency updates now appear in diffs.
+- The repository, its designs, and its history are public.
+- Follow-ups explicitly out of scope: PyPI organization request, PEP 541
+  transfer of the legacy `nodes` name, branch protection, domain packages.
+
+## 7. Implementation boundary
+
+One implementation slice in this repository: license files, manifest and
+README additions, lockfile tracking, the two workflows, the interactive
+registry/bootstrap steps (owner-driven, plan-guided), the repository push, and
+the `core/v0.1.0` release with its post-release verification. It does not touch
+kernel code, fixtures, `docs/STANDARD.md`, science, or mindful, and it does not
+file the PyPI organization or PEP 541 requests.
