@@ -91,26 +91,51 @@ publishes, which is `ts/`). Manifests carry the SPDX expression: PEP 639
 Two workflows, sharing the six gates:
 
 - **`.github/workflows/ci.yml`** — on pushes to `main` and pull requests. Two
-  jobs mirroring the gates exactly: Python via `astral-sh/setup-uv`
-  (`uv sync --frozen`, then `uv run --frozen pytest -q`, `ruff check .`,
-  `pyright src`) and TypeScript via `actions/setup-node` on Node 24 (`npm ci`,
-  then `npm test`, `npm run typecheck`, `npm run check`). The commands are the
-  AGENTS.md gates without the local `rtk` wrapper.
-- **`.github/workflows/release.yml`** — on tags matching `core/v*`, plus a
-  `workflow_dispatch` input (`publish: false`) for rehearsing the full pipeline
-  without uploading. Jobs:
-  - **verify** — all six gates; tag↔manifest consistency (`core/vX.Y.Z` must
-    equal both `package.json` and `pyproject.toml` versions, checked before
-    anything builds); and the wheel-content assertions from the layout design §6
+  matrix jobs mirroring the gates exactly, each run at the declared floor and a
+  current version: Python on **3.11 (the `requires-python` floor) and 3.13** via
+  `astral-sh/setup-uv` (`uv sync --frozen`, then `uv run --frozen pytest -q`,
+  `ruff check .`, `pyright src`) and TypeScript on **Node 20 (the `engines`
+  floor) and 24** via `actions/setup-node` (`npm ci`, then `npm test`,
+  `npm run typecheck`, `npm run check`). The commands are the AGENTS.md gates
+  without the local `rtk` wrapper.
+- **`.github/workflows/release.yml`** — on `push` of tags matching `core/v*`,
+  plus a plain `workflow_dispatch` (no inputs) that is unconditionally a
+  rehearsal: dispatch runs everything except the publish jobs, which are gated
+  on `github.event_name == 'push' && startsWith(github.ref,
+  'refs/tags/core/v')`. Dispatch inputs are caller-supplied values and cannot
+  carry a release invariant, and a dispatch has no tag to check versions
+  against — so publishing is conditioned on the tag ref alone, and the
+  tag↔manifest consistency check runs only on tag pushes. Jobs, in dependency
+  order:
+  - **gates** — the six gates, reusing the CI matrix (floors and current
+    versions).
+  - **build** — each artifact is built exactly once and uploaded as a workflow
+    artifact. On tag pushes, the job first checks tag↔manifest consistency
+    (`core/vX.Y.Z` must equal both `package.json` and `pyproject.toml`
+    versions) before building. Python: `uv build` (sdist + wheel). TypeScript:
+    `npm ci`, `rm -rf dist`, `npm run build`, then `npm pack` — the compile
+    step is explicit because nothing in `package.json` attaches it to packing
+    (`files: ["dist"]`, no `prepare`/`prepack`), and `tsc` never deletes stale
+    outputs, so packing without a clean build ships either nothing or stale
+    files.
+  - **verify-artifacts** — downloads the built artifacts and verifies those
+    exact files: the wheel-content assertions from the layout design §6
     (`nodes/core/py.typed` present, `nodes/__init__.py` absent,
-    `Import-Name: nodes.core` and `Import-Namespace: nodes` in METADATA).
-  - **build** — `uv build` (sdist + wheel) and `npm pack`, artifacts uploaded.
-  - **publish-npm** and **publish-pypi** — each depends on verify *and* both
-    builds, so both artifacts exist and are verified before either upload starts
-    (all-or-nothing up to the upload boundary, which is as far as two registries
-    allow). Each runs in the protected `release` GitHub environment with
-    `id-token: write`. npm publishes with OIDC and automatic provenance; PyPI
-    publishes via `pypa/gh-action-pypi-publish` with OIDC and PEP 740
+    `Import-Name: nodes.core` and `Import-Namespace: nodes` in METADATA); the
+    npm tarball contains `dist/index.js` and `dist/index.d.ts` and no paths
+    outside `dist/`, `README.md`, `LICENSE`, and `package.json`; and
+    install/import smoke tests — the wheel installs into a scratch environment
+    and passes the namespace-layout checks, the tarball installs into a scratch
+    project and `@nodes-dev/core` imports.
+  - **publish-npm** and **publish-pypi** — tag pushes only; each depends on
+    gates, build, and verify-artifacts, and **downloads and publishes the same
+    verified artifacts** (`npm publish <tarball>`; `pypa/gh-action-pypi-publish`
+    pointed at the downloaded dist directory) — never a rebuild. Both artifacts
+    exist and are verified before either upload starts (all-or-nothing up to
+    the upload boundary, which is as far as two registries allow). Each runs in
+    the protected `release` GitHub environment with `id-token: write`. npm
+    publishes with OIDC and automatic provenance on Node 24 (meets npm
+    trusted-publishing requirements); PyPI publishes with OIDC and PEP 740
     attestations.
 
 ### 2.5 Registry setup and the npm bootstrap
@@ -122,8 +147,16 @@ instructions in the implementation plan:
   (this reserves the `@nodes-dev` scope), then perform the one-time bootstrap:
   manually publish `@nodes-dev/core` **0.0.0** from a workstation to create the
   package, configure the trusted publisher (repository `nodes-dev/core`,
-  workflow `release.yml`, environment `release`), and after the real release
-  `npm deprecate` 0.0.0 pointing at `>=0.1.0`. The bootstrap does not conflict
+  workflow `release.yml`, environment `release`, allowed action
+  `npm publish` — configurations created after 2026-05-20 must select allowed
+  actions), and after the real release `npm deprecate` 0.0.0 pointing at
+  `>=0.1.0`. The bootstrap publish MUST be made from a clean build
+  (`rm -rf dist && npm ci && npm run build`), never from an existing
+  workstation `dist/` — at the time of writing this workstation's ignored
+  `dist/` still contains retired `dist/vocab/` outputs, which is exactly the
+  stale-output hazard — and its tarball is checked with the same content
+  assertions as §2.4's verify-artifacts before upload. The bootstrap does not
+  conflict
   with the identity design's "no empty placeholders" rule: that rule forbids
   reserving *domain* names on PyPI with nothing behind them; this is a
   registry-imposed bootstrap for a package shipping the same day, on the same
@@ -132,33 +165,55 @@ instructions in the implementation plan:
   repository/workflow/environment binding) on the owner's account. No
   placeholder, no token. The PyPI organization request remains a separate,
   approval-gated follow-up outside this design.
-- **GitHub:** create the `release` environment on `nodes-dev/core`.
+- **GitHub:** create the `release` environment on `nodes-dev/core` with its
+  deployment policy restricted to **selected tags matching `core/v*`** (no
+  branches), so a publish job can only ever run against a release tag even if a
+  workflow bug loosened its own conditions. No required reviewers: the project
+  has a single maintainer and the pipeline is designed to run unattended once a
+  tag is pushed; the tag push itself is the human approval. Both trusted
+  publishers name this environment, so the registry bindings and the
+  environment policy enforce the same invariant from both sides.
 
 ### 2.6 First release
 
 Versions already read 0.1.0 on both sides; no bump. Push tag `core/v0.1.0`; the
-pipeline publishes both artifacts. Post-release verification (§5) then closes
+pipeline publishes both artifacts. Post-release verification (§4) then closes
 the slice.
 
 ## 3. Error handling
 
-- **Version skew fails closed:** the verify job rejects any tag whose version
+- **Version skew fails closed:** the build job rejects any tag whose version
   does not equal both manifests, before either artifact builds.
-- **Gate failure publishes nothing:** publish jobs are unreachable unless verify
-  and both builds succeed.
+- **Gate or verification failure publishes nothing:** publish jobs are
+  unreachable unless the gates, both builds, and the artifact verification all
+  succeed.
 - **Partial publish is loud, and recovery rolls forward:** if one registry
   upload fails after the other succeeded, the workflow run fails visibly.
   Recovery re-runs the failed publish job at the same version; the successful
   artifact is never retracted (identity design §2.4). Registry versions are
   never reused.
-- **Rehearsal before reality:** the `workflow_dispatch` dry-run exercises
-  verify + build (and `npm publish --dry-run`) without uploading, so the first
-  tag push is not the pipeline's first execution.
+- **Partial upload within PyPI recovers file-by-file:** PyPI filenames are
+  immutable — if the sdist uploaded and the wheel did not, the sdist's filename
+  can never be uploaded again, so a blind re-run would fail forever. The PyPI
+  publish step therefore sets `skip-existing: true`. This is safe here because
+  a re-run of the publish job downloads the same stored workflow artifacts —
+  byte-identical files — so already-accepted filenames are skipped and only
+  missing files upload; it cannot mask content drift, because the bytes cannot
+  differ within a run and PyPI rejects same-filename-different-content
+  regardless. npm has no within-registry partial state (one tarball); a failed
+  `npm publish` uploaded nothing and re-runs cleanly.
+- **Rehearsal before reality:** a plain `workflow_dispatch` run exercises
+  gates, build, and artifact verification (including `npm publish --dry-run`
+  against the tarball) with the publish jobs skipped by their tag-ref
+  condition, so the first tag push is not the pipeline's first execution.
 
 ## 4. Testing and verification
 
-- CI green on `main` after the push (both gate jobs).
-- Release rehearsal (dry-run dispatch) green before tagging.
+- CI green on `main` after the push (both gate matrices, including the Node 20
+  and Python 3.11 floor legs — the first time the declared floors are actually
+  tested).
+- Release rehearsal (plain `workflow_dispatch`) green before tagging,
+  including the artifact verification job against real built artifacts.
 - After `core/v0.1.0`: install `nodes-core` from PyPI into a scratch
   environment and run the namespace-layout smoke checks (`import nodes.core`;
   `getattr(nodes, "__file__", None) is None`; `nodes.kernel` raises name-checked
