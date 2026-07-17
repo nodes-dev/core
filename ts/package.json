@@ -2,6 +2,14 @@
   "name": "@nodes-dev/core",
   "version": "0.1.0",
   "description": "Nodes core: a problem-agnostic knowledge substrate (TypeScript)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nodes-dev/core.git",
+    "directory": "ts"
+  },
+  "homepage": "https://github.com/nodes-dev/core",
+  "bugs": { "url": "https://github.com/nodes-dev/core/issues" },
   "type": "module",
   "engines": { "node": ">=20" },
   "packageManager": "npm@11.11.0",
@@ -14,6 +22,7 @@
     }
   },
   "files": ["dist"],
+  "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",

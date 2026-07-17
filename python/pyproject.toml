@@ -4,11 +4,21 @@ import-names = ["nodes.core"]
 import-namespaces = ["nodes"]
 version = "0.1.0"
 description = "Nodes core: a problem-agnostic knowledge substrate"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Keith Hughitt", email = "keith.hughitt@gmail.com" }]
 requires-python = ">=3.11"
+classifiers = ["Typing :: Typed"]
 dependencies = [
   "pydantic>=2.0",
   "pyyaml>=6.0.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nodes-dev/core"
+Repository = "https://github.com/nodes-dev/core"
+Issues = "https://github.com/nodes-dev/core/issues"
 
 [build-system]
 requires = ["hatchling>=1.30"]
