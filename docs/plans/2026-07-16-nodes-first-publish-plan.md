@@ -556,13 +556,13 @@ ROOT="$(git rev-parse --show-toplevel)" && chmod +x "$ROOT/.github/scripts/smoke
 
 Fabricate the historical failure (retired vocab outputs surviving in `dist/`) deterministically:
 
-The setup runs on `&&` (a setup failure stops the chain before the assertion); the guard's exit status is captured and asserted to be exactly 1 — a bare `echo "exit=$?"` would leave the chain fail-open at exit 0 whether the guard passed, failed, or crashed:
+The setup runs on `&&` (a setup failure stops the chain before the assertion). The guard's exit status **and exact diagnostic** are asserted: uncaught Python exceptions normally exit 1 too, so checking the status alone would accept a traceback as the intended rejection.
 
 ```bash
-ROOT="$(git rev-parse --show-toplevel)" && S="$(mktemp -d)" && cd "$ROOT/ts" && rm -rf dist && rtk npm run build && mkdir -p dist/vocab && echo "// stale" > dist/vocab/kinds.js && rtk npm pack --pack-destination "$S" && { python3 "$ROOT/.github/scripts/verify_npm_tarball.py" "$S"/nodes-dev-core-0.1.0.tgz; STATUS=$?; test "$STATUS" -eq 1 && echo "red ok: stale dist rejected"; }
+ROOT="$(git rev-parse --show-toplevel)" && S="$(mktemp -d)" && cd "$ROOT/ts" && rm -rf dist && rtk npm run build && mkdir -p dist/vocab && echo "// stale" > dist/vocab/kinds.js && rtk npm pack --pack-destination "$S" && { OUT="$(python3 "$ROOT/.github/scripts/verify_npm_tarball.py" "$S"/nodes-dev-core-0.1.0.tgz 2>&1)"; STATUS=$?; printf '%s\n' "$OUT"; test "$STATUS" -eq 1 && test "$OUT" = "FAIL: tarball contains retired paths (stale dist/): ['package/dist/vocab/kinds.js']" && echo "red ok: stale dist rejected"; }
 ```
 
-Expected: `FAIL: tarball contains retired paths (stale dist/): ['package/dist/vocab/kinds.js']` followed by `red ok: stale dist rejected`, overall exit 0. Any other outcome (including the guard crashing with exit 2) leaves the chain failed: STOP.
+Expected: `FAIL: tarball contains retired paths (stale dist/): ['package/dist/vocab/kinds.js']` followed by `red ok: stale dist rejected`, overall exit 0. Any other output or status — including a traceback that exits 1 — leaves the chain failed: STOP.
 
 - [ ] **Step 7: Green — clean builds pass all local checks**
 
@@ -577,12 +577,12 @@ Expected: `npm tarball ok`, `npm import smoke ok (…)`, `python artifacts ok`, 
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && python3 "$ROOT/.github/scripts/pypi_upload_check.py" pre --project nodes-core --version 0.1.0 --dist dist
-ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && { python3 "$ROOT/.github/scripts/pypi_upload_check.py" post --project nodes-core --version 0.1.0 --dist dist; STATUS=$?; test "$STATUS" -eq 1 && echo "red ok: post demands presence"; }
-ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && { python3 "$ROOT/.github/scripts/pypi_upload_check.py" pre --project requests --version 2.32.3 --dist dist; STATUS=$?; test "$STATUS" -eq 1 && echo "red ok: foreign files rejected"; }
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && { OUT="$(python3 "$ROOT/.github/scripts/pypi_upload_check.py" post --project nodes-core --version 0.1.0 --dist dist 2>&1)"; STATUS=$?; printf '%s\n' "$OUT"; test "$STATUS" -eq 1 && case "$OUT" in "FAIL: files still missing on PyPI after upload: "*) echo "red ok: post demands presence";; *) false;; esac; }
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && { OUT="$(python3 "$ROOT/.github/scripts/pypi_upload_check.py" pre --project requests --version 2.32.3 --dist dist 2>&1)"; STATUS=$?; printf '%s\n' "$OUT"; test "$STATUS" -eq 1 && case "$OUT" in "FAIL: PyPI has files for requests 2.32.3 that are not ours: "*) echo "red ok: foreign files rejected";; *) false;; esac; }
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rm -rf dist && test ! -e dist && echo "dist not left behind"
 ```
 
-Expected, in order: `pypi pre-check ok: 0/2 files present and matching` (project not yet on PyPI = empty set); `FAIL: files still missing on PyPI…` + `red ok: post demands presence`; `FAIL: PyPI has files … that are not ours` + `red ok: foreign files rejected`; `dist not left behind`. Each red line asserts the guard's exit status is exactly 1 (a crash with exit 2 fails the chain): any missing `red ok` line is a STOP.
+Expected, in order: `pypi pre-check ok: 0/2 files present and matching` (project not yet on PyPI = empty set); `FAIL: files still missing on PyPI…` + `red ok: post demands presence`; `FAIL: PyPI has files … that are not ours` + `red ok: foreign files rejected`; `dist not left behind`. Each red line requires exit 1 **and** the corresponding `FAIL:` prefix, so a traceback cannot satisfy it. Any missing `red ok` line is a STOP.
 
 - [ ] **Step 9: Run all six gates + fixtures check**
 
@@ -966,31 +966,21 @@ npm org ls nodes-dev
 
 Expected: a member table listing the owner (no 404).
 
-- [ ] **Step 3 [OWNER]: npm login on the workstation**
+- [ ] **Step 3 [OWNER]: Bootstrap-publish `@nodes-dev/core` 0.0.0 with a short-lived login**
+
+The owner login, build, verify, publish, registry-readback, scratch cleanup, and credential revocation run in ONE shell block — there is no authenticated pause between plan steps, and variables do not persist across tool calls. The artifact is built from a clean `git archive` copy so no workstation `dist/` residue can leak (design §2.5). The operation records its status instead of exiting early so cleanup always runs; the block returns non-zero after cleanup if login, publishing, or readback failed. The Task 2 guard runs immediately before the upload:
 
 ```bash
-npm login
-npm whoami
+ROOT="$(git rev-parse --show-toplevel)" && S="$(mktemp -d)" && { PUBLISH_STATUS=0; npm login || PUBLISH_STATUS=$?; if test "$PUBLISH_STATUS" -eq 0; then npm whoami && ( set -o pipefail; git -C "$ROOT" archive HEAD ts | tar -x -C "$S" && cd "$S/ts" && npm ci && npm run build && npm version 0.0.0 --no-git-tag-version && npm pack && python3 "$ROOT/.github/scripts/verify_npm_tarball.py" nodes-dev-core-0.0.0.tgz && npm publish nodes-dev-core-0.0.0.tgz && npm view @nodes-dev/core@0.0.0 version ) || PUBLISH_STATUS=$?; fi; rm -rf "$S"; LOGOUT_OUT="$(npm logout 2>&1)"; LOGOUT_STATUS=$?; OUT="$(npm whoami 2>&1)"; WHOAMI_STATUS=$?; if [ "$LOGOUT_STATUS" -ne 0 ]; then echo "FAIL: npm logout failed: $LOGOUT_OUT"; CREDENTIAL_STATUS=1; elif [ "$WHOAMI_STATUS" -eq 0 ]; then echo "FAIL: npm still authenticated as $OUT"; CREDENTIAL_STATUS=1; elif printf '%s' "$OUT" | grep -q "ENEEDAUTH"; then echo "npm bootstrap credential revoked"; CREDENTIAL_STATUS=0; else echo "FAIL: whoami failed for another reason: $OUT"; CREDENTIAL_STATUS=1; fi; test "$CREDENTIAL_STATUS" -eq 0 && test "$PUBLISH_STATUS" -eq 0; }
 ```
 
-Expected: `npm whoami` prints the owner's npm username. This credential is temporary: it exists for the bootstrap publish and the final 0.0.0 deprecation, and Task 7 Step 4 revokes it with `npm logout`.
+Expected: `npm whoami` prints the owner's username; then `npm tarball ok`, `0.0.0` from `npm view`, and `npm bootstrap credential revoked`; overall exit 0. A login/publish/readback failure still runs logout and then leaves the block non-zero: STOP after confirming the revocation line. If `npm publish` succeeded but the immediate readback failed, wait for registry propagation and query 0.0.0 again without logging in — never attempt to republish that immutable version. The `--access public` flag is unnecessary because `publishConfig.access` is inside the tarball's package.json.
 
-- [ ] **Step 4: Bootstrap-publish `@nodes-dev/core` 0.0.0**
-
-Built from a clean `git archive` copy so no workstation `dist/` residue can leak (design §2.5). Build, verify, and publish run in ONE command chain — shell variables do not persist across separate tool calls, and each `&&` stops the chain (including the publish) on any failure. The Task 2 guard runs immediately before the upload:
-
-```bash
-ROOT="$(git rev-parse --show-toplevel)" && S="$(mktemp -d)" && git -C "$ROOT" archive HEAD ts | tar -x -C "$S" && cd "$S/ts" && npm ci && npm run build && npm version 0.0.0 --no-git-tag-version && npm pack && python3 "$ROOT/.github/scripts/verify_npm_tarball.py" nodes-dev-core-0.0.0.tgz && npm publish nodes-dev-core-0.0.0.tgz && rm -rf "$S"
-npm view @nodes-dev/core@0.0.0 version
-```
-
-Expected: `npm tarball ok` in the chain's output, then `0.0.0` from `npm view`. The `--access public` flag is unnecessary — `publishConfig.access` is inside the tarball's package.json.
-
-- [ ] **Step 5 [OWNER]: Configure the npm trusted publisher**
+- [ ] **Step 4 [OWNER]: Configure the npm trusted publisher**
 
 On npmjs.com: package page for `@nodes-dev/core` → **Settings** → **Trusted publisher**: publisher **GitHub Actions**; organization/user `nodes-dev`; repository `core`; workflow filename `release.yml`; environment `release`; allowed action **`npm publish`** (configurations created after 2026-05-20 must select allowed actions). Save.
 
-- [ ] **Step 6 [OWNER]: Add the PyPI pending trusted publisher**
+- [ ] **Step 5 [OWNER]: Add the PyPI pending trusted publisher**
 
 On pypi.org (owner's account, 2FA enabled): **Account settings → Publishing** (`https://pypi.org/manage/account/publishing/`) → **Add a new pending publisher** → GitHub: PyPI project name `nodes-core`; owner `nodes-dev`; repository name `core`; workflow name `release.yml`; environment name `release`. Save. (First pipeline upload creates the project; no placeholder, no token.)
 
@@ -1000,13 +990,13 @@ On pypi.org (owner's account, 2FA enabled): **Account settings → Publishing** 
 
 - [ ] **Step 1: Rehearse the pipeline (no publish)**
 
-One command chain (shell variables do not persist across tool calls). Event + commit alone are not unique when a rehearsal is repeated on the same commit, so the chain snapshots the newest existing dispatch run first and waits for a run with a *different* ID; the job listing is joined with `&&` so a failed watch fails the whole chain instead of being masked by a successful `run view`:
+One command chain (shell variables do not persist across tool calls). Event + commit alone are not unique when a rehearsal is repeated on the same commit, so the chain snapshots the newest existing dispatch run **for that same commit** and waits for a run with a *different* ID; the job listing is joined with `&&` so a failed watch fails the whole chain instead of being masked by a successful `run view`:
 
 ```bash
-ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && PREV="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')" && gh workflow run release.yml --repo nodes-dev/core --ref main && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"; if test -n "$RUN_ID" && test "$RUN_ID" != "$PREV"; then break; fi; RUN_ID=""; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID" && gh run view --repo nodes-dev/core "$RUN_ID" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && PREV="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')" && gh workflow run release.yml --repo nodes-dev/core --ref main && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"; if test -n "$RUN_ID" && test "$RUN_ID" != "$PREV"; then break; fi; RUN_ID=""; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID" && gh run view --repo nodes-dev/core "$RUN_ID" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
 ```
 
-(`PREV` is empty on the first-ever rehearsal; the inequality test still holds.)
+(`PREV` is empty on the first-ever rehearsal for this commit; the inequality test still holds. Filtering both snapshot and poll by `$SHA` prevents an older run for this commit from being mistaken for the new run merely because the globally newest dispatch belonged to another commit.)
 
 Expected: overall success; `build`, `verify-artifacts`, and all `gates / …` legs report `success`; `publish-npm` and `publish-pypi` report `skipped` (their tag-ref condition is false on dispatch). Anything publishing on a dispatch is a critical bug: STOP.
 
@@ -1045,9 +1035,53 @@ rm -rf "$S"
 
 Expected: `pypi install smoke ok`. (If the install 404s within the first minutes, index propagation may lag; retry after ~2 minutes before treating it as a failure.)
 
-- [ ] **Step 4: Verify npm and deprecate the bootstrap**
+Then require PEP 740 provenance for **both** uploaded filenames and bind it to the configured publisher identity, rather than relying on the project-page badge:
 
-Assertions parse `npm view --json` — the human-readable forms exit 0 even when attestations or a deprecation are absent:
+```bash
+python3 - <<'EOF'
+import json
+import urllib.parse
+import urllib.request
+
+project = "nodes-core"
+version = "0.1.0"
+expected = {
+    "nodes_core-0.1.0-py3-none-any.whl",
+    "nodes_core-0.1.0.tar.gz",
+}
+with urllib.request.urlopen(f"https://pypi.org/pypi/{project}/{version}/json", timeout=30) as response:
+    release = json.load(response)
+filenames = {item["filename"] for item in release["urls"]}
+assert filenames == expected, f"unexpected PyPI file set: {sorted(filenames)}"
+
+for filename in sorted(expected):
+    quoted = urllib.parse.quote(filename, safe="")
+    request = urllib.request.Request(
+        f"https://pypi.org/integrity/{project}/{version}/{quoted}/provenance",
+        headers={"Accept": "application/vnd.pypi.integrity.v1+json"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        provenance = json.load(response)
+    bundles = provenance.get("attestation_bundles", [])
+    matching = [
+        bundle
+        for bundle in bundles
+        if bundle.get("attestations")
+        and bundle.get("publisher", {}).get("kind") == "GitHub"
+        and bundle["publisher"].get("repository") == "nodes-dev/core"
+        and bundle["publisher"].get("workflow") == "release.yml"
+        and bundle["publisher"].get("environment") == "release"
+    ]
+    assert matching, f"expected release publisher provenance missing for {filename}"
+print("pypi attestations ok: 2 files")
+EOF
+```
+
+Expected: `pypi attestations ok: 2 files`. A 404 means that file has no provenance: STOP. If the release JSON or integrity endpoint is briefly unavailable immediately after publishing, retry after ~2 minutes; never treat absence as propagation success.
+
+- [ ] **Step 4 [OWNER]: Verify npm and deprecate the bootstrap with a short-lived login**
+
+First run the read-only assertions without a workstation credential. They parse `npm view --json` — the human-readable forms exit 0 even when attestations are absent:
 
 ```bash
 npm view @nodes-dev/core@0.1.0 --json | python3 -c "
@@ -1059,26 +1093,23 @@ assert att and att.get('url'), f'attestations missing: {att!r}'
 print('npm 0.1.0 present with attestations')
 "
 S="$(mktemp -d)" && cd "$S" && npm init -y >/dev/null && npm install --no-audit --no-fund @nodes-dev/core@0.1.0 >/dev/null && node --input-type=module -e "const core = await import('@nodes-dev/core'); if (Object.keys(core).length === 0) throw new Error('no exports'); console.log('npm registry smoke ok');" && cd / && rm -rf "$S"
-npm deprecate @nodes-dev/core@0.0.0 "Bootstrap release for trusted-publishing setup; use >=0.1.0."
-npm view @nodes-dev/core@0.0.0 --json | python3 -c "
+```
+
+Expected: `npm 0.1.0 present with attestations`; `npm registry smoke ok`.
+
+Then the owner runs the authenticated mutation and revocation in one shell block. As with the bootstrap, the mutation status is retained while logout and the fail-closed `whoami` check always run:
+
+```bash
+DEPRECATE_STATUS=0; npm login || DEPRECATE_STATUS=$?; if test "$DEPRECATE_STATUS" -eq 0; then npm whoami && ( set -o pipefail; npm deprecate @nodes-dev/core@0.0.0 "Bootstrap release for trusted-publishing setup; use >=0.1.0." && npm view @nodes-dev/core@0.0.0 --json | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 dep = d.get('deprecated')
 assert dep == 'Bootstrap release for trusted-publishing setup; use >=0.1.0.', f'deprecation missing or wrong: {dep!r}'
 print('0.0.0 deprecated')
-"
+") || DEPRECATE_STATUS=$?; fi; LOGOUT_OUT="$(npm logout 2>&1)"; LOGOUT_STATUS=$?; OUT="$(npm whoami 2>&1)"; WHOAMI_STATUS=$?; if [ "$LOGOUT_STATUS" -ne 0 ]; then echo "FAIL: npm logout failed: $LOGOUT_OUT"; CREDENTIAL_STATUS=1; elif [ "$WHOAMI_STATUS" -eq 0 ]; then echo "FAIL: npm still authenticated as $OUT"; CREDENTIAL_STATUS=1; elif printf '%s' "$OUT" | grep -q "ENEEDAUTH"; then echo "npm deprecation credential revoked"; CREDENTIAL_STATUS=0; else echo "FAIL: whoami failed for another reason: $OUT"; CREDENTIAL_STATUS=1; fi; test "$CREDENTIAL_STATUS" -eq 0 && test "$DEPRECATE_STATUS" -eq 0
 ```
 
-Expected: `npm 0.1.0 present with attestations`; `npm registry smoke ok`; `0.0.0 deprecated`.
-
-Then revoke the workstation npm credential created in Task 6 Step 3 — the deprecation above was its last authenticated use, and the pipeline never needs it. The check distinguishes auth-absence from other failures (a network error must not pass as proof of revocation):
-
-```bash
-npm logout
-OUT="$(npm whoami 2>&1)"; STATUS=$?; if [ "$STATUS" -eq 0 ]; then echo "FAIL: npm still authenticated as $OUT"; false; elif printf '%s' "$OUT" | grep -q "ENEEDAUTH"; then echo "npm credential revoked"; else echo "FAIL: whoami failed for another reason: $OUT"; false; fi
-```
-
-Expected: `npm credential revoked`. (`npm logout` invalidates the token server-side, not just locally.)
+Expected: `npm whoami` prints the owner's username; then `0.0.0 deprecated` and `npm deprecation credential revoked`; overall exit 0. A login/deprecation/readback failure still runs logout and leaves the block non-zero. The `whoami` check distinguishes auth absence from unrelated failures, so a network error cannot pass as revocation proof. (`npm logout` invalidates the token server-side, not just locally.)
 
 - [ ] **Step 5: Final repo hygiene check**
 
@@ -1096,7 +1127,7 @@ Expected: `worktree clean`, `no python dist residue`, `no ts dist residue`. The 
 
 - All six gates green locally; CI green on `main`.
 - `pip install nodes-core==0.1.0` and `npm install @nodes-dev/core@0.1.0` both work from clean environments (Task 7 Steps 3–4).
-- `npm view @nodes-dev/core@0.1.0 dist.attestations` shows provenance; PyPI project page for `nodes-core` shows 0.1.0 with attestations.
-- npm 0.0.0 bootstrap deprecated; workstation npm credential revoked (`npm whoami` fails).
+- Parsed npm metadata proves 0.1.0 provenance; PyPI's Integrity API proves both 0.1.0 files carry attestations from `nodes-dev/core` / `release.yml` / environment `release`.
+- npm 0.0.0 bootstrap deprecated; both short-lived workstation npm credentials revoked with `ENEEDAUTH`-specific `npm whoami` checks.
 - Tag `core/v0.1.0` exists on `origin` and points at the released commit: `rtk git ls-remote origin refs/tags/core/v0.1.0`.
 - No new local commits beyond the merge: `rtk git log --oneline origin/main..HEAD` is empty.
