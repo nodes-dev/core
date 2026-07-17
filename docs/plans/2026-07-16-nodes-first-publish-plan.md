@@ -604,19 +604,21 @@ ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git add .github/scr
 
 - [ ] **Step 1: Resolve action SHAs**
 
-For each action, list its release tags and record the **peeled commit SHA** (`^{}` line) of the **latest stable release tag** (highest version, no pre-release suffix):
+For each action, list its release tags **sorted by semantic version, descending** and record the **peeled commit SHA** (`^{}` line) of the **latest stable release tag** (no `-rc`/`-beta`/`-alpha` suffix). `--sort=-v:refname` is required — plain `ls-remote | tail` is lexicographic and ranks e.g. `v1.9.0` above `v1.14.0`:
 
 ```bash
-git ls-remote --tags https://github.com/actions/checkout | tail -12
-git ls-remote --tags https://github.com/actions/setup-node | tail -12
-git ls-remote --tags https://github.com/astral-sh/setup-uv | tail -12
+git ls-remote --tags --sort=-v:refname https://github.com/actions/checkout 'v*.*.*' | head -6
+git ls-remote --tags --sort=-v:refname https://github.com/actions/setup-node 'v*.*.*' | head -6
+git ls-remote --tags --sort=-v:refname https://github.com/astral-sh/setup-uv 'v*.*.*' | head -6
 ```
 
-For each: the annotated tag appears twice — `refs/tags/vX.Y.Z` and `refs/tags/vX.Y.Z^{}`; pin the `^{}` SHA (the commit itself). If a tag has no `^{}` line it is lightweight and its own SHA is the commit. Record `SHA + tag` for: `actions/checkout`, `actions/setup-node`, `astral-sh/setup-uv`. Cross-check each SHA resolves on GitHub before use:
+(The `v*.*.*` pattern selects exact release tags and skips mutable major aliases like `v5`.) For each: an annotated tag appears twice — `refs/tags/vX.Y.Z` (the tag object) and `refs/tags/vX.Y.Z^{}` (the peeled commit); pin the `^{}` SHA. If a tag has no `^{}` line it is lightweight and its own SHA is the commit. Record `SHA + tag` for: `actions/checkout`, `actions/setup-node`, `astral-sh/setup-uv`. Independently confirm each pinned SHA is a real commit in that repository via the GitHub commits API (`ls-remote <url> <sha>` does NOT do this — its arguments are ref-name patterns, and a valid SHA prints nothing):
 
 ```bash
-git ls-remote https://github.com/actions/checkout <sha> | head -1
+curl -fsS "https://api.github.com/repos/actions/checkout/commits/<pinned-sha>" -o /dev/null && echo "actions/checkout sha ok"
 ```
+
+(Unauthenticated is fine at this volume; `-f` makes an unknown SHA fail with a non-zero exit instead of printing an error page.)
 
 - [ ] **Step 2: Write `.github/workflows/ci.yml`**
 
@@ -711,12 +713,12 @@ ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git add .github/wor
 
 - [ ] **Step 1: Resolve additional action SHAs**
 
-Same procedure as Task 3 Step 1 for: `actions/upload-artifact`, `actions/download-artifact`, `pypa/gh-action-pypi-publish` (for the last, use the latest stable `vX.Y.Z` release tag — not the mutable `release/v1` branch).
+Same procedure as Task 3 Step 1 (semver-descending sort, pin the peeled `^{}` SHA, cross-check via the commits API) for: `actions/upload-artifact`, `actions/download-artifact`, `pypa/gh-action-pypi-publish` (for the last, use the latest stable `vX.Y.Z` release tag — not the mutable `release/v1` branch):
 
 ```bash
-git ls-remote --tags https://github.com/actions/upload-artifact | tail -12
-git ls-remote --tags https://github.com/actions/download-artifact | tail -12
-git ls-remote --tags https://github.com/pypa/gh-action-pypi-publish | tail -16
+git ls-remote --tags --sort=-v:refname https://github.com/actions/upload-artifact 'v*.*.*' | head -6
+git ls-remote --tags --sort=-v:refname https://github.com/actions/download-artifact 'v*.*.*' | head -6
+git ls-remote --tags --sort=-v:refname https://github.com/pypa/gh-action-pypi-publish 'v*.*.*' | head -6
 ```
 
 - [ ] **Step 2: Write `.github/workflows/release.yml`**
@@ -744,6 +746,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    needs: gates
     steps:
       - uses: <SHA:actions/checkout> # vX.Y.Z
       - name: Check version consistency
@@ -927,8 +930,10 @@ ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git push -u origin 
 
 - [ ] **Step 4: Watch CI go green**
 
+Bind the run lookup to the exact event and commit — an unfiltered `--limit 1` can select a stale or unrelated run:
+
 ```bash
-RUN_ID="$(gh run list --repo nodes-dev/core --workflow ci.yml --limit 1 --json databaseId --jq '.[0].databaseId')" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow ci.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
 ```
 
 Expected: success with all four matrix legs (Python 3.11, 3.13; Node 20, 24). This is the first time the declared floors are actually tested — a floor-leg failure is a real compatibility bug: STOP, fix on a branch, merge, re-push; do not proceed to registry setup until CI is green.
@@ -966,7 +971,7 @@ npm login
 npm whoami
 ```
 
-Expected: `npm whoami` prints the owner's npm username.
+Expected: `npm whoami` prints the owner's npm username. This credential is temporary: it exists for the bootstrap publish and the final 0.0.0 deprecation, and Task 7 Step 4 revokes it with `npm logout`.
 
 - [ ] **Step 4: Bootstrap-publish `@nodes-dev/core` 0.0.0**
 
@@ -993,10 +998,10 @@ On pypi.org (owner's account, 2FA enabled): **Account settings → Publishing** 
 
 - [ ] **Step 1: Rehearse the pipeline (no publish)**
 
+One command chain (shell variables do not persist across tool calls), with the run lookup bound to the dispatch event and the exact commit:
+
 ```bash
-gh workflow run release.yml --repo nodes-dev/core --ref main
-sleep 5 && RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
-gh run view --repo nodes-dev/core "$RUN_ID" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && gh workflow run release.yml --repo nodes-dev/core --ref main && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"; gh run view --repo nodes-dev/core "$RUN_ID" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
 ```
 
 Expected: overall success; `build`, `verify-artifacts`, and all `gates / …` legs report `success`; `publish-npm` and `publish-pypi` report `skipped` (their tag-ref condition is false on dispatch). Anything publishing on a dispatch is a critical bug: STOP.
@@ -1005,10 +1010,12 @@ Expected: overall success; `build`, `verify-artifacts`, and all `gates / …` le
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git tag core/v0.1.0 && rtk git push origin core/v0.1.0
-sleep 5 && RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse 'core/v0.1.0^{commit}')" && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
 ```
 
-Expected: full success including both publish jobs. Recovery on partial publish (design §3): re-run only the failed job at the same version (`gh run rerun "$RUN_ID" --failed`); never retract the successful artifact; never move the tag.
+The `--event push --commit` filter is what distinguishes this run from the earlier rehearsal dispatch on the same workflow — an unfiltered lookup could select that older successful run and falsely conclude the release published.
+
+Expected: full success including both publish jobs. Recovery on partial publish (design §3): re-run only the failed job at the same version (`gh run rerun --repo nodes-dev/core <run-id> --failed`, with the run id re-derived via the same filtered lookup); never retract the successful artifact; never move the tag.
 
 - [ ] **Step 3: Verify PyPI**
 
@@ -1045,6 +1052,15 @@ npm view @nodes-dev/core versions
 
 Expected: `0.1.0` with a non-empty `dist.attestations` (provenance); `npm registry smoke ok`; `versions` lists `["0.0.0","0.1.0"]` with 0.0.0 deprecated (deprecation shows on `npm view @nodes-dev/core@0.0.0`).
 
+Then revoke the workstation npm credential created in Task 6 Step 3 — the deprecation above was its last authenticated use, and the pipeline never needs it:
+
+```bash
+npm logout
+if npm whoami >/dev/null 2>&1; then echo "FAIL: npm still authenticated"; false; else echo "npm credential revoked"; fi
+```
+
+Expected: `npm credential revoked`. (`npm logout` invalidates the token server-side, not just locally.)
+
 - [ ] **Step 5: Final repo hygiene check**
 
 ```bash
@@ -1061,6 +1077,6 @@ Expected: `worktree clean`, `no dist residue`.
 - All six gates green locally; CI green on `main`.
 - `pip install nodes-core==0.1.0` and `npm install @nodes-dev/core@0.1.0` both work from clean environments (Task 7 Steps 3–4).
 - `npm view @nodes-dev/core@0.1.0 dist.attestations` shows provenance; PyPI project page for `nodes-core` shows 0.1.0 with attestations.
-- npm 0.0.0 bootstrap deprecated.
+- npm 0.0.0 bootstrap deprecated; workstation npm credential revoked (`npm whoami` fails).
 - Tag `core/v0.1.0` exists on `origin` and points at the released commit: `rtk git ls-remote origin refs/tags/core/v0.1.0`.
 - No new local commits beyond the merge: `rtk git log --oneline origin/main..HEAD` is empty.
