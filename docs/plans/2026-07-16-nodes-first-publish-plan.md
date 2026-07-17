@@ -556,11 +556,13 @@ ROOT="$(git rev-parse --show-toplevel)" && chmod +x "$ROOT/.github/scripts/smoke
 
 Fabricate the historical failure (retired vocab outputs surviving in `dist/`) deterministically:
 
+The setup runs on `&&` (a setup failure stops the chain before the assertion); the guard's exit status is captured and asserted to be exactly 1 — a bare `echo "exit=$?"` would leave the chain fail-open at exit 0 whether the guard passed, failed, or crashed:
+
 ```bash
-ROOT="$(git rev-parse --show-toplevel)" && S="$(mktemp -d)" && cd "$ROOT/ts" && rm -rf dist && rtk npm run build && mkdir -p dist/vocab && echo "// stale" > dist/vocab/kinds.js && rtk npm pack --pack-destination "$S" && python3 "$ROOT/.github/scripts/verify_npm_tarball.py" "$S"/nodes-dev-core-0.1.0.tgz; echo "exit=$?"
+ROOT="$(git rev-parse --show-toplevel)" && S="$(mktemp -d)" && cd "$ROOT/ts" && rm -rf dist && rtk npm run build && mkdir -p dist/vocab && echo "// stale" > dist/vocab/kinds.js && rtk npm pack --pack-destination "$S" && { python3 "$ROOT/.github/scripts/verify_npm_tarball.py" "$S"/nodes-dev-core-0.1.0.tgz; STATUS=$?; test "$STATUS" -eq 1 && echo "red ok: stale dist rejected"; }
 ```
 
-Expected: `FAIL: tarball contains retired paths (stale dist/): ['package/dist/vocab/kinds.js']` and `exit=1`. Any other outcome is a STOP.
+Expected: `FAIL: tarball contains retired paths (stale dist/): ['package/dist/vocab/kinds.js']` followed by `red ok: stale dist rejected`, overall exit 0. Any other outcome (including the guard crashing with exit 2) leaves the chain failed: STOP.
 
 - [ ] **Step 7: Green — clean builds pass all local checks**
 
@@ -575,12 +577,12 @@ Expected: `npm tarball ok`, `npm import smoke ok (…)`, `python artifacts ok`, 
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && python3 "$ROOT/.github/scripts/pypi_upload_check.py" pre --project nodes-core --version 0.1.0 --dist dist
-ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && python3 "$ROOT/.github/scripts/pypi_upload_check.py" post --project nodes-core --version 0.1.0 --dist dist; echo "exit=$?"
-ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && python3 "$ROOT/.github/scripts/pypi_upload_check.py" pre --project requests --version 2.32.3 --dist dist; echo "exit=$?"
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && { python3 "$ROOT/.github/scripts/pypi_upload_check.py" post --project nodes-core --version 0.1.0 --dist dist; STATUS=$?; test "$STATUS" -eq 1 && echo "red ok: post demands presence"; }
+ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && { python3 "$ROOT/.github/scripts/pypi_upload_check.py" pre --project requests --version 2.32.3 --dist dist; STATUS=$?; test "$STATUS" -eq 1 && echo "red ok: foreign files rejected"; }
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT/python" && rm -rf dist && test ! -e dist && echo "dist not left behind"
 ```
 
-Expected, in order: `pypi pre-check ok: 0/2 files present and matching` (project not yet on PyPI = empty set); `FAIL: files still missing on PyPI…` with `exit=1` (post demands presence); `FAIL: PyPI has files … that are not ours` with `exit=1` (foreign files fail closed); `dist not left behind`.
+Expected, in order: `pypi pre-check ok: 0/2 files present and matching` (project not yet on PyPI = empty set); `FAIL: files still missing on PyPI…` + `red ok: post demands presence`; `FAIL: PyPI has files … that are not ours` + `red ok: foreign files rejected`; `dist not left behind`. Each red line asserts the guard's exit status is exactly 1 (a crash with exit 2 fails the chain): any missing `red ok` line is a STOP.
 
 - [ ] **Step 9: Run all six gates + fixtures check**
 
@@ -933,7 +935,7 @@ ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git push -u origin 
 Bind the run lookup to the exact event and commit — an unfiltered `--limit 1` can select a stale or unrelated run:
 
 ```bash
-ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow ci.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow ci.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
 ```
 
 Expected: success with all four matrix legs (Python 3.11, 3.13; Node 20, 24). This is the first time the declared floors are actually tested — a floor-leg failure is a real compatibility bug: STOP, fix on a branch, merge, re-push; do not proceed to registry setup until CI is green.
@@ -998,11 +1000,13 @@ On pypi.org (owner's account, 2FA enabled): **Account settings → Publishing** 
 
 - [ ] **Step 1: Rehearse the pipeline (no publish)**
 
-One command chain (shell variables do not persist across tool calls), with the run lookup bound to the dispatch event and the exact commit:
+One command chain (shell variables do not persist across tool calls). Event + commit alone are not unique when a rehearsal is repeated on the same commit, so the chain snapshots the newest existing dispatch run first and waits for a run with a *different* ID; the job listing is joined with `&&` so a failed watch fails the whole chain instead of being masked by a successful `run view`:
 
 ```bash
-ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && gh workflow run release.yml --repo nodes-dev/core --ref main && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"; gh run view --repo nodes-dev/core "$RUN_ID" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse HEAD)" && PREV="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')" && gh workflow run release.yml --repo nodes-dev/core --ref main && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"; if test -n "$RUN_ID" && test "$RUN_ID" != "$PREV"; then break; fi; RUN_ID=""; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID" && gh run view --repo nodes-dev/core "$RUN_ID" --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
 ```
+
+(`PREV` is empty on the first-ever rehearsal; the inequality test still holds.)
 
 Expected: overall success; `build`, `verify-artifacts`, and all `gates / …` legs report `success`; `publish-npm` and `publish-pypi` report `skipped` (their tag-ref condition is false on dispatch). Anything publishing on a dispatch is a critical bug: STOP.
 
@@ -1010,7 +1014,7 @@ Expected: overall success; `build`, `verify-artifacts`, and all `gates / …` le
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && rtk git tag core/v0.1.0 && rtk git push origin core/v0.1.0
-ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse 'core/v0.1.0^{commit}')" && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
+ROOT="$(git rev-parse --show-toplevel)" && SHA="$(git -C "$ROOT" rev-parse 'core/v0.1.0^{commit}')" && RUN_ID="" && for _ in $(seq 1 24); do RUN_ID="$(gh run list --repo nodes-dev/core --workflow release.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"; test -n "$RUN_ID" && break; sleep 5; done && test -n "$RUN_ID" && gh run watch --repo nodes-dev/core --exit-status "$RUN_ID"
 ```
 
 The `--event push --commit` filter is what distinguishes this run from the earlier rehearsal dispatch on the same workflow — an unfiltered lookup could select that older successful run and falsely conclude the release published.
@@ -1043,20 +1047,35 @@ Expected: `pypi install smoke ok`. (If the install 404s within the first minutes
 
 - [ ] **Step 4: Verify npm and deprecate the bootstrap**
 
+Assertions parse `npm view --json` — the human-readable forms exit 0 even when attestations or a deprecation are absent:
+
 ```bash
-npm view @nodes-dev/core@0.1.0 version dist.attestations
+npm view @nodes-dev/core@0.1.0 --json | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+assert d['version'] == '0.1.0', d['version']
+att = d.get('dist', {}).get('attestations')
+assert att and att.get('url'), f'attestations missing: {att!r}'
+print('npm 0.1.0 present with attestations')
+"
 S="$(mktemp -d)" && cd "$S" && npm init -y >/dev/null && npm install --no-audit --no-fund @nodes-dev/core@0.1.0 >/dev/null && node --input-type=module -e "const core = await import('@nodes-dev/core'); if (Object.keys(core).length === 0) throw new Error('no exports'); console.log('npm registry smoke ok');" && cd / && rm -rf "$S"
 npm deprecate @nodes-dev/core@0.0.0 "Bootstrap release for trusted-publishing setup; use >=0.1.0."
-npm view @nodes-dev/core versions
+npm view @nodes-dev/core@0.0.0 --json | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+dep = d.get('deprecated')
+assert dep == 'Bootstrap release for trusted-publishing setup; use >=0.1.0.', f'deprecation missing or wrong: {dep!r}'
+print('0.0.0 deprecated')
+"
 ```
 
-Expected: `0.1.0` with a non-empty `dist.attestations` (provenance); `npm registry smoke ok`; `versions` lists `["0.0.0","0.1.0"]` with 0.0.0 deprecated (deprecation shows on `npm view @nodes-dev/core@0.0.0`).
+Expected: `npm 0.1.0 present with attestations`; `npm registry smoke ok`; `0.0.0 deprecated`.
 
-Then revoke the workstation npm credential created in Task 6 Step 3 — the deprecation above was its last authenticated use, and the pipeline never needs it:
+Then revoke the workstation npm credential created in Task 6 Step 3 — the deprecation above was its last authenticated use, and the pipeline never needs it. The check distinguishes auth-absence from other failures (a network error must not pass as proof of revocation):
 
 ```bash
 npm logout
-if npm whoami >/dev/null 2>&1; then echo "FAIL: npm still authenticated"; false; else echo "npm credential revoked"; fi
+OUT="$(npm whoami 2>&1)"; STATUS=$?; if [ "$STATUS" -eq 0 ]; then echo "FAIL: npm still authenticated as $OUT"; false; elif printf '%s' "$OUT" | grep -q "ENEEDAUTH"; then echo "npm credential revoked"; else echo "FAIL: whoami failed for another reason: $OUT"; false; fi
 ```
 
 Expected: `npm credential revoked`. (`npm logout` invalidates the token server-side, not just locally.)
@@ -1065,10 +1084,11 @@ Expected: `npm credential revoked`. (`npm logout` invalidates the token server-s
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)" && cd "$ROOT" && FIXSTAT="$(git status --porcelain)" && test -z "$FIXSTAT" && echo "worktree clean"
-ROOT="$(git rev-parse --show-toplevel)" && test ! -e "$ROOT/python/dist" && echo "no dist residue"
+ROOT="$(git rev-parse --show-toplevel)" && test ! -e "$ROOT/python/dist" && echo "no python dist residue"
+ROOT="$(git rev-parse --show-toplevel)" && rm -rf "$ROOT/ts/dist" && test ! -e "$ROOT/ts/dist" && echo "no ts dist residue"
 ```
 
-Expected: `worktree clean`, `no dist residue`.
+Expected: `worktree clean`, `no python dist residue`, `no ts dist residue`. The `ts/dist` removal is deliberate: it is ignored build output that is known to hold stale retired `dist/vocab/` files on the primary checkout — deleting it guarantees the next local build starts clean (nothing consumes it uncommitted; CI and the pipeline always rebuild).
 
 ---
 
