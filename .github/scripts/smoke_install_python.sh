@@ -4,6 +4,14 @@
 set -euo pipefail
 
 DIST="$1"
+scratch=""
+cleanup() {
+  if [[ -n "$scratch" ]]; then
+    rm -rf "$scratch"
+  fi
+}
+trap cleanup EXIT
+
 for artifact in "$DIST"/nodes_core-*-py3-none-any.whl "$DIST"/nodes_core-*.tar.gz; do
   scratch="$(mktemp -d)"
   uv venv "$scratch/venv" >/dev/null
@@ -25,5 +33,6 @@ else:
 EOF
   echo "smoke ok: $(basename "$artifact")"
   rm -rf "$scratch"
+  scratch=""
 done
 echo "python install smoke ok"

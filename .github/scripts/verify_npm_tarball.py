@@ -8,6 +8,7 @@ stale outputs.
 
 import sys
 import tarfile
+from pathlib import PurePosixPath
 
 REQUIRED = {
     "package/package.json",
@@ -29,7 +30,18 @@ def main() -> None:
     if len(sys.argv) != 2:
         fail("usage: verify_npm_tarball.py <tarball.tgz>")
     with tarfile.open(sys.argv[1]) as t:
-        names = set(t.getnames())
+        members = t.getmembers()
+    names: set[str] = set()
+    for member in members:
+        name = member.name
+        path = PurePosixPath(name)
+        if "\\" in name or path.is_absolute() or str(path) != name or any(part in {".", ".."} for part in path.parts):
+            fail(f"tarball contains non-canonical path: {name!r}")
+        if name in names:
+            fail(f"tarball contains duplicate path: {name!r}")
+        if not member.isfile():
+            fail(f"tarball contains non-regular member: {name!r}")
+        names.add(name)
     missing = REQUIRED - names
     if missing:
         fail(f"tarball missing {sorted(missing)}")

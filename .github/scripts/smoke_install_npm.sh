@@ -4,6 +4,15 @@
 set -euo pipefail
 
 TARBALL="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+scratch=""
+cleanup() {
+  if [[ -n "$scratch" ]]; then
+    cd /
+    rm -rf "$scratch"
+  fi
+}
+trap cleanup EXIT
+
 scratch="$(mktemp -d)"
 cd "$scratch"
 npm init -y >/dev/null
@@ -15,3 +24,4 @@ if (keys.length === 0) throw new Error('no exports');
 console.log('npm import smoke ok (' + keys.length + ' exports)');
 "
 cd / && rm -rf "$scratch"
+scratch=""
