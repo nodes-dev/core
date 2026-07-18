@@ -21,13 +21,28 @@ def fail(msg: str) -> None:
     sys.exit(1)
 
 
-def local_files(dist: str) -> dict[str, str]:
+def local_files(dist: str, *, require_attestations: bool) -> dict[str, str]:
+    names = sorted(os.listdir(dist))
+    wheels = [name for name in names if name.endswith(".whl")]
+    sdists = [name for name in names if name.endswith(".tar.gz")]
+    if len(wheels) != 1 or len(sdists) != 1:
+        fail(f"expected exactly 1 wheel and 1 sdist, found wheels={wheels}, sdists={sdists}")
+
+    distributions = wheels + sdists
+    expected_attestations = {f"{name}.publish.attestation" for name in distributions}
+    present_attestations = {name for name in names if name.endswith(".publish.attestation")}
+    unexpected = sorted(set(names) - set(distributions) - expected_attestations)
+    if unexpected:
+        fail(f"unexpected files in distribution directory: {unexpected}")
+    if require_attestations:
+        missing = sorted(expected_attestations - present_attestations)
+        if missing:
+            fail(f"missing distribution attestations: {missing}")
+
     out: dict[str, str] = {}
-    for name in sorted(os.listdir(dist)):
+    for name in distributions:
         with open(os.path.join(dist, name), "rb") as fh:
             out[name] = hashlib.sha256(fh.read()).hexdigest()
-    if len(out) != 2:
-        fail(f"expected exactly 2 local distribution files, found {sorted(out)}")
     return out
 
 
@@ -51,7 +66,7 @@ def main() -> None:
     parser.add_argument("--dist", required=True)
     args = parser.parse_args()
 
-    local = local_files(args.dist)
+    local = local_files(args.dist, require_attestations=args.mode == "post")
     remote = remote_files(args.project, args.version)
 
     unexpected = sorted(set(remote) - set(local))
