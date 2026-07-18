@@ -35,12 +35,14 @@ DOWNLOAD_ARTIFACT_ACTION = (
 EXTERNAL_ACTION_LINE = re.compile(
     r"^\s+(?:- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$"
 )
-CREDENTIAL_ENV_NAME = re.compile(
-    r"(?:TOKEN|PASSWORD|CREDENTIAL|API_?KEY|UV_PUBLISH_|TWINE_)",
+CREDENTIAL_MATERIAL = re.compile(
+    r"(?:secrets\.|(?<![A-Za-z])(?:token|password|credential|api[-_]?key|username)(?![A-Za-z]))",
     re.IGNORECASE,
 )
 REBUILD_COMMAND = re.compile(
-    r"(?:^|[\s;&|])(?:uv build|hatch build|python3? -m build)(?:\s|$)",
+    r"(?:^|[\s;&|])(?:uv build|hatch build|python3? -m build|"
+    r"npm (?:ci|install|build|pack|run (?:build|typecheck|tsc)|exec tsc)|"
+    r"npx(?: --no-install)? tsc|tsc)(?:\s|$)",
 )
 
 
@@ -108,12 +110,6 @@ def _job_steps(path: Path, job_name: str) -> list[dict[str, object]]:
     return steps
 
 
-def _unique_named_step(steps: list[dict[str, object]], name: str) -> dict[str, object]:
-    matches = [step for step in steps if step.get("name") == name]
-    assert len(matches) == 1
-    return matches[0]
-
-
 def _normalized_run(step: dict[str, object]) -> str:
     return " ".join(str(step.get("run", "")).split())
 
@@ -131,16 +127,47 @@ def _external_action_lines(path: Path) -> list[str]:
     return lines
 
 
-def _environment_entries(
-    job: dict[str, object],
+def _ordered_named_commands(
     steps: list[dict[str, object]],
-) -> list[tuple[str, object]]:
-    entries = []
-    for container in [job, *steps]:
-        environment = container.get("env", {})
-        assert isinstance(environment, dict)
-        entries.extend((str(name), value) for name, value in environment.items())
-    return entries
+    expected_names: list[str],
+) -> list[tuple[str, str]]:
+    actual_names = [step.get("name") for step in steps]
+    for name in expected_names:
+        assert actual_names.count(name) == 1
+    return [
+        (name, _normalized_run(step))
+        for step in steps
+        if isinstance((name := step.get("name")), str) and name in expected_names
+    ]
+
+
+def _mapping_material(
+    container: dict[str, object],
+    field: str,
+    context: str,
+) -> list[tuple[str, str]]:
+    mapping = container.get(field, {})
+    assert isinstance(mapping, dict)
+    return [
+        (f"{context}.{field}.{key}", f"{key}={value}") for key, value in mapping.items()
+    ]
+
+
+def _publish_job_surfaces(job_name: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    job = _job(RELEASE_WORKFLOW, job_name)
+    steps = _job_steps(RELEASE_WORKFLOW, job_name)
+    material = _mapping_material(job, "env", job_name)
+    runs = []
+    for index, step in enumerate(steps):
+        context = f"{job_name}.steps[{index}]"
+        material.extend(_mapping_material(step, "env", context))
+        material.extend(_mapping_material(step, "with", context))
+        if "run" in step:
+            assert isinstance(step["run"], str)
+            run = _normalized_run(step)
+            material.append((f"{context}.run", run))
+            runs.append((f"{context}.run", run))
+    return material, runs
 
 
 @pytest.mark.parametrize(
@@ -211,16 +238,12 @@ def test_release_limits_oidc_to_inputless_tag_gated_publish_jobs() -> None:
         assert jobs[name]["permissions"] == {"contents": "read", "id-token": "write"}
 
 
-def test_release_pypi_job_binds_verified_artifacts_without_credentials_or_rebuild() -> None:
+def test_release_pypi_job_binds_verified_artifacts() -> None:
     job = _job(RELEASE_WORKFLOW, "publish-pypi")
     steps = _job_steps(RELEASE_WORKFLOW, "publish-pypi")
     downloads = [
         step for step in steps if str(step.get("uses", "")).startswith("actions/download-artifact@")
     ]
-    pre_check = _unique_named_step(steps, "PyPI pre-upload check")
-    post_check = _unique_named_step(steps, "PyPI post-upload check")
-    environment_entries = _environment_entries(job, steps)
-    commands = [_normalized_run(step) for step in steps]
 
     assert job["needs"] == ["gates", "build", "verify-artifacts"]
     assert downloads == [
@@ -229,42 +252,59 @@ def test_release_pypi_job_binds_verified_artifacts_without_credentials_or_rebuil
             "with": {"name": "python-dist", "path": "dist"},
         }
     ]
-    assert _normalized_run(pre_check) == (
-        "python3 .github/scripts/pypi_upload_check.py pre --project nodes-core "
-        '--version "${GITHUB_REF#refs/tags/core/v}" --dist dist'
-    )
-    assert _normalized_run(post_check) == (
-        "python3 .github/scripts/pypi_upload_check.py post --project nodes-core "
-        '--version "${GITHUB_REF#refs/tags/core/v}" --dist dist'
-    )
-    assert [name for name, _ in environment_entries if CREDENTIAL_ENV_NAME.search(name)] == []
-    assert [value for _, value in environment_entries if "secrets." in str(value).lower()] == []
-    assert [command for command in commands if REBUILD_COMMAND.search(command)] == []
+
+
+def test_publish_jobs_contain_no_credentials_or_rebuilds() -> None:
+    credential_findings = []
+    rebuild_findings = []
+    for job_name in ["publish-npm", "publish-pypi"]:
+        material, runs = _publish_job_surfaces(job_name)
+        credential_findings.extend(
+            (context, value)
+            for context, value in material
+            if CREDENTIAL_MATERIAL.search(value)
+        )
+        rebuild_findings.extend(
+            (context, command)
+            for context, command in runs
+            if REBUILD_COMMAND.search(command)
+        )
+
+    assert (credential_findings, rebuild_findings) == ([], [])
 
 
 def test_release_pypi_job_signs_validates_and_publishes_default_dist() -> None:
     job = _job(RELEASE_WORKFLOW, "publish-pypi")
     steps = _job_steps(RELEASE_WORKFLOW, "publish-pypi")
-    names = [step.get("name") for step in steps]
-    commands = [_normalized_run(step) for step in steps]
     uses = [str(step.get("uses", "")) for step in steps]
+    expected_sequence = [
+        (
+            "PyPI pre-upload check",
+            "python3 .github/scripts/pypi_upload_check.py pre --project nodes-core "
+            '--version "${GITHUB_REF#refs/tags/core/v}" --dist dist',
+        ),
+        (
+            "Generate PyPI attestations",
+            "uvx --from pypi-attestations==0.0.29 python -m pypi_attestations sign "
+            "dist/*.whl dist/*.tar.gz",
+        ),
+        ("Validate signed PyPI upload set", "uv publish --dry-run --trusted-publishing never"),
+        (
+            "Publish to PyPI",
+            "uv publish --trusted-publishing always --check-url https://pypi.org/simple/",
+        ),
+        (
+            "PyPI post-upload check",
+            "python3 .github/scripts/pypi_upload_check.py post --project nodes-core "
+            '--version "${GITHUB_REF#refs/tags/core/v}" --dist dist',
+        ),
+    ]
 
     assert job["if"] == "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/core/v')"
     assert job["environment"] == "release"
     assert job["permissions"] == {"contents": "read", "id-token": "write"}
     assert not any(value.startswith("pypa/gh-action-pypi-publish@") for value in uses)
-    assert (
-        "uvx --from pypi-attestations==0.0.29 python -m pypi_attestations sign "
-        "dist/*.whl dist/*.tar.gz"
-    ) in commands
-    assert "uv publish --dry-run --trusted-publishing never" in commands
-    assert (
-        "uv publish --trusted-publishing always --check-url https://pypi.org/simple/"
-    ) in commands
-    assert names.index("PyPI pre-upload check") < names.index("Generate PyPI attestations")
-    assert names.index("Generate PyPI attestations") < names.index("Validate signed PyPI upload set")
-    assert names.index("Validate signed PyPI upload set") < names.index("Publish to PyPI")
-    assert names.index("Publish to PyPI") < names.index("PyPI post-upload check")
+    assert _ordered_named_commands(steps, [name for name, _ in expected_sequence]) == expected_sequence
 
 
 def _regular_file(name: str, content: bytes = b"content") -> tuple[tarfile.TarInfo, bytes]:
