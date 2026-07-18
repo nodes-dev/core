@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tarfile
@@ -27,6 +28,20 @@ REQUIRED = (
 )
 UV_VERSION = "0.11.29"
 EXPECTED_RELEASE_VERSION = "0.1.1"
+PUBLISH_GATE = "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/core/v')"
+DOWNLOAD_ARTIFACT_ACTION = (
+    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+)
+EXTERNAL_ACTION_LINE = re.compile(
+    r"^\s+(?:- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$"
+)
+CREDENTIAL_ENV_NAME = re.compile(
+    r"(?:TOKEN|PASSWORD|CREDENTIAL|API_?KEY|UV_PUBLISH_|TWINE_)",
+    re.IGNORECASE,
+)
+REBUILD_COMMAND = re.compile(
+    r"(?:^|[\s;&|])(?:uv build|hatch build|python3? -m build)(?:\s|$)",
+)
 
 
 def test_release_manifests_and_lockfiles_are_lockstep_0_1_1() -> None:
@@ -51,24 +66,81 @@ def test_release_manifests_and_lockfiles_are_lockstep_0_1_1() -> None:
     assert versions == {name: EXPECTED_RELEASE_VERSION for name in versions}
 
 
-def _workflow_steps(path: Path) -> list[dict[str, object]]:
+def _workflow(path: Path) -> dict[str | bool, object]:
     workflow = yaml.safe_load(path.read_text())
+    assert isinstance(workflow, dict)
+    return workflow
+
+
+def _jobs(path: Path) -> dict[str, dict[str, object]]:
+    jobs = _workflow(path)["jobs"]
+    assert isinstance(jobs, dict)
+    assert all(isinstance(name, str) and isinstance(job, dict) for name, job in jobs.items())
+    return jobs
+
+
+def _workflow_triggers(path: Path) -> dict[str, object]:
+    workflow = _workflow(path)
+    assert "on" not in workflow
+    assert True in workflow, "PyYAML SafeLoader no longer parses the YAML 1.1 'on' key as True"
+    triggers = workflow[True]
+    assert isinstance(triggers, dict)
+    return triggers
+
+
+def _job(path: Path, job_name: str) -> dict[str, object]:
+    return _jobs(path)[job_name]
+
+
+def _workflow_steps(path: Path) -> list[dict[str, object]]:
     return [
         step
-        for job in workflow["jobs"].values()
-        if isinstance(job, dict)
+        for job in _jobs(path).values()
         for step in job.get("steps", [])
         if isinstance(step, dict)
     ]
 
 
 def _job_steps(path: Path, job_name: str) -> list[dict[str, object]]:
-    workflow = yaml.safe_load(path.read_text())
-    return workflow["jobs"][job_name]["steps"]
+    steps = _job(path, job_name)["steps"]
+    assert isinstance(steps, list)
+    assert all(isinstance(step, dict) for step in steps)
+    return steps
+
+
+def _unique_named_step(steps: list[dict[str, object]], name: str) -> dict[str, object]:
+    matches = [step for step in steps if step.get("name") == name]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def _normalized_run(step: dict[str, object]) -> str:
     return " ".join(str(step.get("run", "")).split())
+
+
+def _external_action_lines(path: Path) -> list[str]:
+    lines = []
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("uses: ", "- uses: ")):
+            continue
+        reference = stripped.split("uses: ", maxsplit=1)[1]
+        if not reference.startswith("./"):
+            lines.append(line)
+    assert lines
+    return lines
+
+
+def _environment_entries(
+    job: dict[str, object],
+    steps: list[dict[str, object]],
+) -> list[tuple[str, object]]:
+    entries = []
+    for container in [job, *steps]:
+        environment = container.get("env", {})
+        assert isinstance(environment, dict)
+        entries.extend((str(name), value) for name, value in environment.items())
+    return entries
 
 
 @pytest.mark.parametrize(
@@ -86,6 +158,13 @@ def test_workflows_pin_every_setup_uv_binary(workflow: Path, expected_count: int
     assert {step.get("with", {}).get("version") for step in steps} == {UV_VERSION}
 
 
+@pytest.mark.parametrize("workflow", [CI_WORKFLOW, RELEASE_WORKFLOW])
+def test_workflows_pin_external_actions_to_full_shas_with_version_comments(workflow: Path) -> None:
+    lines = _external_action_lines(workflow)
+
+    assert [line for line in lines if not EXTERNAL_ACTION_LINE.fullmatch(line)] == []
+
+
 def test_release_workflow_uses_explicit_filesystem_tarball_paths() -> None:
     commands = [
         line.strip()
@@ -100,17 +179,71 @@ def test_release_workflow_uses_explicit_filesystem_tarball_paths() -> None:
 
 
 def test_release_rehearses_uv_against_only_python_distributions() -> None:
-    commands = [_normalized_run(step) for step in _job_steps(RELEASE_WORKFLOW, "verify-artifacts")]
+    commands = [
+        command
+        for step in _job_steps(RELEASE_WORKFLOW, "verify-artifacts")
+        if (command := _normalized_run(step)).startswith("uv publish")
+    ]
 
-    assert (
+    assert commands == [
         "uv publish --dry-run --trusted-publishing never "
         "dist-python/*.whl dist-python/*.tar.gz"
-    ) in commands
+    ]
+
+
+def test_release_limits_oidc_to_inputless_tag_gated_publish_jobs() -> None:
+    workflow = _workflow(RELEASE_WORKFLOW)
+    jobs = _jobs(RELEASE_WORKFLOW)
+    triggers = _workflow_triggers(RELEASE_WORKFLOW)
+    id_token_jobs = {
+        name: permissions["id-token"]
+        for name, job in jobs.items()
+        if isinstance((permissions := job.get("permissions", {})), dict)
+        and "id-token" in permissions
+    }
+
+    assert workflow["permissions"] == {"contents": "read"}
+    assert triggers["workflow_dispatch"] is None
+    assert id_token_jobs == {"publish-npm": "write", "publish-pypi": "write"}
+    for name in id_token_jobs:
+        assert jobs[name]["if"] == PUBLISH_GATE
+        assert jobs[name]["environment"] == "release"
+        assert jobs[name]["permissions"] == {"contents": "read", "id-token": "write"}
+
+
+def test_release_pypi_job_binds_verified_artifacts_without_credentials_or_rebuild() -> None:
+    job = _job(RELEASE_WORKFLOW, "publish-pypi")
+    steps = _job_steps(RELEASE_WORKFLOW, "publish-pypi")
+    downloads = [
+        step for step in steps if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    ]
+    pre_check = _unique_named_step(steps, "PyPI pre-upload check")
+    post_check = _unique_named_step(steps, "PyPI post-upload check")
+    environment_entries = _environment_entries(job, steps)
+    commands = [_normalized_run(step) for step in steps]
+
+    assert job["needs"] == ["gates", "build", "verify-artifacts"]
+    assert downloads == [
+        {
+            "uses": DOWNLOAD_ARTIFACT_ACTION,
+            "with": {"name": "python-dist", "path": "dist"},
+        }
+    ]
+    assert _normalized_run(pre_check) == (
+        "python3 .github/scripts/pypi_upload_check.py pre --project nodes-core "
+        '--version "${GITHUB_REF#refs/tags/core/v}" --dist dist'
+    )
+    assert _normalized_run(post_check) == (
+        "python3 .github/scripts/pypi_upload_check.py post --project nodes-core "
+        '--version "${GITHUB_REF#refs/tags/core/v}" --dist dist'
+    )
+    assert [name for name, _ in environment_entries if CREDENTIAL_ENV_NAME.search(name)] == []
+    assert [value for _, value in environment_entries if "secrets." in str(value).lower()] == []
+    assert [command for command in commands if REBUILD_COMMAND.search(command)] == []
 
 
 def test_release_pypi_job_signs_validates_and_publishes_default_dist() -> None:
-    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
-    job = workflow["jobs"]["publish-pypi"]
+    job = _job(RELEASE_WORKFLOW, "publish-pypi")
     steps = _job_steps(RELEASE_WORKFLOW, "publish-pypi")
     names = [step.get("name") for step in steps]
     commands = [_normalized_run(step) for step in steps]
