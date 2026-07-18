@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 NPM_VERIFIER = ROOT / ".github/scripts/verify_npm_tarball.py"
 NPM_SMOKE = ROOT / ".github/scripts/smoke_install_npm.sh"
 PYTHON_SMOKE = ROOT / ".github/scripts/smoke_install_python.sh"
+RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
 REQUIRED = (
     "package/package.json",
     "package/README.md",
@@ -20,6 +21,19 @@ REQUIRED = (
     "package/dist/index.js",
     "package/dist/index.d.ts",
 )
+
+
+def test_release_workflow_uses_explicit_filesystem_tarball_paths() -> None:
+    commands = [
+        line.strip()
+        for line in RELEASE_WORKFLOW.read_text().splitlines()
+        if line.strip().startswith(("run: npm publish", "- run: npm publish"))
+    ]
+
+    assert commands == [
+        'run: npm publish --dry-run "./$(ls dist-npm/*.tgz)"',
+        '- run: npm publish "./$(ls dist-npm/*.tgz)"',
+    ]
 
 
 def _regular_file(name: str, content: bytes = b"content") -> tuple[tarfile.TarInfo, bytes]:
