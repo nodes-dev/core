@@ -1,6 +1,6 @@
 {
   "name": "@nodes-dev/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Nodes core: a problem-agnostic knowledge substrate (TypeScript)",
   "license": "MIT",
   "repository": {

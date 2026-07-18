@@ -2,7 +2,7 @@
 name = "nodes-core"
 import-names = ["nodes.core"]
 import-namespaces = ["nodes"]
-version = "0.1.0"
+version = "0.1.1"
 description = "Nodes core: a problem-agnostic knowledge substrate"
 readme = "README.md"
 license = "MIT"

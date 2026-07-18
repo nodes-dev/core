@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
+import tomllib
 
 import pytest
 import yaml
@@ -24,6 +26,29 @@ REQUIRED = (
     "package/dist/index.d.ts",
 )
 UV_VERSION = "0.11.29"
+EXPECTED_RELEASE_VERSION = "0.1.1"
+
+
+def test_release_manifests_and_lockfiles_are_lockstep_0_1_1() -> None:
+    pyproject = tomllib.loads((ROOT / "python/pyproject.toml").read_text())
+    uv_lock = tomllib.loads((ROOT / "python/uv.lock").read_text())
+    package_json = json.loads((ROOT / "ts/package.json").read_text())
+    package_lock = json.loads((ROOT / "ts/package-lock.json").read_text())
+    editable = [
+        package
+        for package in uv_lock["package"]
+        if package["name"] == "nodes-core" and package.get("source") == {"editable": "."}
+    ]
+    assert len(editable) == 1
+
+    versions = {
+        "python/pyproject.toml": pyproject["project"]["version"],
+        "python/uv.lock": editable[0]["version"],
+        "ts/package.json": package_json["version"],
+        "ts/package-lock.json root": package_lock["version"],
+        "ts/package-lock.json package": package_lock["packages"][""]["version"],
+    }
+    assert versions == {name: EXPECTED_RELEASE_VERSION for name in versions}
 
 
 def _workflow_steps(path: Path) -> list[dict[str, object]]:
