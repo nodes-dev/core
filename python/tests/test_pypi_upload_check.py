@@ -49,6 +49,23 @@ def test_local_files_accepts_matching_signed_postcheck_directory(tmp_path: Path)
     assert set(files) == {WHEEL, SDIST}
 
 
+def test_local_files_rejects_attestation_directories(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    dist = tmp_path / "dist"
+    _write_distributions(dist)
+    (dist / f"{WHEEL}.publish.attestation").mkdir()
+    (dist / f"{SDIST}.publish.attestation").mkdir()
+
+    with pytest.raises(SystemExit, match="1"):
+        CHECK.local_files(str(dist), require_attestations=True)
+
+    assert capsys.readouterr().out == (
+        "FAIL: non-regular entries in distribution directory: "
+        f"['{WHEEL}.publish.attestation', '{SDIST}.publish.attestation']\n"
+    )
+
+
 def test_local_files_requires_both_postcheck_attestations(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

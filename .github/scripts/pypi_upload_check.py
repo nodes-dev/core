@@ -4,7 +4,7 @@
 pre:  every file PyPI already has for this version must be one of ours with a
       matching SHA-256 (an absent project/version is the expected empty set on
       first publish). Unexpected filenames or digest mismatches fail closed.
-post: additionally, every local file must now be present on PyPI.
+post: additionally, every local distribution must now be present on PyPI.
 """
 
 import argparse
@@ -22,7 +22,13 @@ def fail(msg: str) -> None:
 
 
 def local_files(dist: str, *, require_attestations: bool) -> dict[str, str]:
-    names = sorted(os.listdir(dist))
+    with os.scandir(dist) as iterator:
+        entries = sorted(iterator, key=lambda entry: entry.name)
+    non_regular = [entry.name for entry in entries if not entry.is_file(follow_symlinks=False)]
+    if non_regular:
+        fail(f"non-regular entries in distribution directory: {non_regular}")
+
+    names = [entry.name for entry in entries]
     wheels = [name for name in names if name.endswith(".whl")]
     sdists = [name for name in names if name.endswith(".tar.gz")]
     if len(wheels) != 1 or len(sdists) != 1:
