@@ -37,8 +37,11 @@ changes the first usable version and the PyPI publishing implementation.
 
 ### 2.1 Versions and identities
 
-- Set `python/pyproject.toml`, `python/uv.lock`, `ts/package.json`, and
-  `ts/package-lock.json` to 0.1.1.
+- Set `~/d/nodes/python/pyproject.toml` and its regenerated
+  `~/d/nodes/python/uv.lock` to 0.1.1 with
+  `uv version 0.1.1 --no-sync`. Set `~/d/nodes/ts/package.json` and both
+  version entries in its regenerated `~/d/nodes/ts/package-lock.json` with
+  `npm version 0.1.1 --no-git-tag-version`. Do not hand-edit either lockfile.
 - Do not publish, reuse, delete, or move version/tag 0.1.0.
 - Continue using one shared tag and one pair of artifacts for the lockstep
   release.
@@ -47,11 +50,25 @@ changes the first usable version and the PyPI publishing implementation.
 
 ### 2.2 Pre-publish compatibility gate
 
-Add `uv publish --dry-run --trusted-publishing never` to `verify-artifacts` for
-the exact downloaded Python distributions. This exercises the uploader's
-metadata parser during rehearsals and tag runs while explicitly forbidding
-credential discovery or upload. It closes the gap that allowed the
-Twine/Metadata 2.5 incompatibility to survive the original rehearsal.
+Pin every `astral-sh/setup-uv` invocation in
+`~/d/nodes/.github/workflows/ci.yml` and
+`~/d/nodes/.github/workflows/release.yml` to uv 0.11.29 through the action's
+`version:` input. Pinning the action implementation does not pin the uv binary
+it downloads; the explicit binary version makes the gates, build, rehearsal,
+signing, and publication use one reviewed toolchain.
+
+Add this command to `verify-artifacts` for the exact downloaded Python
+distributions:
+
+```bash
+uv publish --dry-run --trusted-publishing never \
+  dist-python/*.whl dist-python/*.tar.gz
+```
+
+The distribution-only globs exercise the uploader's metadata parser during
+rehearsals and tag runs while explicitly forbidding credential discovery or
+upload. This closes the gap that allowed the Twine/Metadata 2.5 incompatibility
+to survive the original rehearsal.
 
 The existing Python artifact verifier and install smoke tests remain. The dry
 run supplements them; it does not replace content, namespace-layout, or install
@@ -59,21 +76,30 @@ verification.
 
 ### 2.3 PyPI publication
 
-Replace `pypa/gh-action-pypi-publish` with three explicit, fail-closed steps in the
-existing `publish-pypi` job:
+Replace `pypa/gh-action-pypi-publish` with an explicit, fail-closed sequence in
+the existing `publish-pypi` job. Including the existing guards, the full order
+is:
 
-1. Install uv through the already SHA-pinned `astral-sh/setup-uv` action.
-2. Generate adjacent PEP 740 publish attestations for the downloaded wheel and
-   sdist with pinned `pypi-attestations==0.0.29`. In GitHub Actions, the signer
-   uses the job's ambient OIDC identity.
-3. Run `uv publish --trusted-publishing always --check-url
-   https://pypi.org/simple/ dist/*`.
+1. Install uv 0.11.29 through the SHA-pinned `astral-sh/setup-uv` action.
+2. Run the existing remote filename/SHA-256 pre-check.
+3. Generate adjacent PEP 740 publish attestations for `dist/*.whl` and
+   `dist/*.tar.gz` with pinned `pypi-attestations==0.0.29`. In GitHub Actions,
+   the signer uses the job's ambient OIDC identity.
+4. From the repository root, run
+   `uv publish --dry-run --trusted-publishing never` with no positional files.
+   This exercises uv's documented default
+   `dist/` discovery after the attestations exist, before any upload.
+5. Run
+   `uv publish --trusted-publishing always --check-url https://pypi.org/simple/`,
+   again with no positional files.
+6. Run the existing remote filename/SHA-256 post-check.
 
 `--trusted-publishing always` forbids a silent fallback to workstation or token
 credentials. `--check-url` makes a retry skip only byte-identical existing
-files. uv discovers and uploads the adjacent attestations with their matching
-distributions. The existing pre-upload and post-upload filename/SHA-256 checks
-remain as independent fail-closed guards.
+files. With no positionals, uv selects the distributions and their adjacent
+attestations from `dist/` and ignores unrelated files instead of receiving an
+expanded shell glob as an explicit upload set. The existing pre-upload and
+post-upload filename/SHA-256 checks remain as independent fail-closed guards.
 
 The job retains `environment: release`, `contents: read`, and `id-token: write`.
 No registry token or repository secret is added.
@@ -100,8 +126,12 @@ the corrected OIDC identity through the existing npm publish job.
   `id-token: write`; dispatch remains an unconditional rehearsal.
 - **Exact artifacts:** publish jobs download the artifacts built once by the
   successful build job. Neither job rebuilds.
-- **Attestation failure:** signing completes before `uv publish`; a signing
-  failure uploads nothing.
+- **Attestation first-use risk:** the signer requires ambient OIDC, so the
+  input-free rehearsal cannot execute it without granting a non-publish job
+  `id-token: write`. Least privilege wins: signing first runs in the real
+  tag-gated publish job. A signing failure uploads nothing; after signing, the
+  no-positionals dry run validates the complete `dist/` directory before the
+  upload; and a corrected rerun reuses the same stored distributions.
 - **Partial PyPI upload:** the existing preflight rejects unexpected remote
   filenames or hashes. uv skips only identical files, and the postflight
   requires the complete expected set with exact hashes.
@@ -118,9 +148,12 @@ Before the recovery commit:
 
 - Add focused workflow regression tests that fail against the current workflow
   and then prove:
-  - Python artifact verification includes `uv publish --dry-run
-    --trusted-publishing never`;
+  - every setup-uv use pins the uv binary to 0.11.29;
+  - Python artifact verification includes distribution-only globs with
+    `uv publish --dry-run --trusted-publishing never`;
   - the PyPI job pins `pypi-attestations==0.0.29` and signs the distributions;
+  - the PyPI job dry-runs and publishes through uv's default `dist/` discovery
+    with no positional upload set;
   - publication requires trusted publishing, uses the PyPI simple index for
     duplicate checks, and no longer invokes the incompatible PyPA action;
   - all four manifest/lockfile versions are 0.1.1.
@@ -132,7 +165,8 @@ Before tagging:
 - Push the reviewed commit to `main` and require its CI run to pass.
 - Run an input-free `workflow_dispatch` rehearsal for the exact commit. Gates,
   build, both artifact verifiers, both install smokes, npm's dry run, and uv's
-  dry run must pass; both publish jobs must be skipped.
+  unsigned-artifact dry run must pass; both publish jobs must be skipped. The
+  OIDC signing step is deliberately not rehearsed under dispatch.
 - Confirm neither registry contains 0.1.1 and no local or remote
   `core/v0.1.1` tag exists.
 
