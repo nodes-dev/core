@@ -101,6 +101,17 @@ attestations from `dist/` and ignores unrelated files instead of receiving an
 expanded shell glob as an explicit upload set. The existing pre-upload and
 post-upload filename/SHA-256 checks remain as independent fail-closed guards.
 
+The current `~/d/nodes/.github/scripts/pypi_upload_check.py` treats every entry
+in its distribution directory as a release file and requires exactly two. Once
+signing adds two `.publish.attestation` sidecars, that behavior would make the
+post-check fail locally. Update the checker to hash only the one wheel and one
+sdist, allow only the corresponding adjacent attestation filename for each,
+and reject every unrelated directory entry. Pre-check mode permits the clean
+unsigned pair; post-check mode additionally requires both matching sidecars to
+exist. The remote comparison remains strictly between PyPI's release files and
+the two local distributions; the Integrity API verifies the uploaded sidecars
+after publication.
+
 The job retains `environment: release`, `contents: read`, and `id-token: write`.
 No registry token or repository secret is added.
 
@@ -133,8 +144,10 @@ the corrected OIDC identity through the existing npm publish job.
   no-positionals dry run validates the complete `dist/` directory before the
   upload; and a corrected rerun reuses the same stored distributions.
 - **Partial PyPI upload:** the existing preflight rejects unexpected remote
-  filenames or hashes. uv skips only identical files, and the postflight
-  requires the complete expected set with exact hashes.
+  filenames or hashes. The local checker rejects sidecars that do not match a
+  distribution and all other stray files. uv skips only identical files, and
+  the postflight requires the complete expected distribution set with exact
+  hashes.
 - **Partial registry release:** if one registry succeeds and the other fails,
   the successful version remains immutable. Recovery reruns only the failed job
   with the same stored artifacts.
@@ -156,6 +169,8 @@ Before the recovery commit:
     with no positional upload set;
   - publication requires trusted publishing, uses the PyPI simple index for
     duplicate checks, and no longer invokes the incompatible PyPA action;
+  - the PyPI hash checker permits only matching attestation sidecars, requires
+    both in post mode, and rejects unmatched sidecars or unrelated files;
   - all four manifest/lockfile versions are 0.1.1.
 - Run the six repository gates and confirm `fixtures/` is untouched.
 - Run a production-only npm audit and scan the staged diff for secrets.
