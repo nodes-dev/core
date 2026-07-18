@@ -62,9 +62,18 @@ def _workflow_steps(path: Path) -> list[dict[str, object]]:
     ]
 
 
+def _job_steps(path: Path, job_name: str) -> list[dict[str, object]]:
+    workflow = yaml.safe_load(path.read_text())
+    return workflow["jobs"][job_name]["steps"]
+
+
+def _normalized_run(step: dict[str, object]) -> str:
+    return " ".join(str(step.get("run", "")).split())
+
+
 @pytest.mark.parametrize(
     ("workflow", "expected_count"),
-    [(CI_WORKFLOW, 1), (RELEASE_WORKFLOW, 2)],
+    [(CI_WORKFLOW, 1), (RELEASE_WORKFLOW, 3)],
 )
 def test_workflows_pin_every_setup_uv_binary(workflow: Path, expected_count: int) -> None:
     steps = [
@@ -88,6 +97,41 @@ def test_release_workflow_uses_explicit_filesystem_tarball_paths() -> None:
         'run: npm publish --dry-run "./$(ls dist-npm/*.tgz)"',
         '- run: npm publish "./$(ls dist-npm/*.tgz)"',
     ]
+
+
+def test_release_rehearses_uv_against_only_python_distributions() -> None:
+    commands = [_normalized_run(step) for step in _job_steps(RELEASE_WORKFLOW, "verify-artifacts")]
+
+    assert (
+        "uv publish --dry-run --trusted-publishing never "
+        "dist-python/*.whl dist-python/*.tar.gz"
+    ) in commands
+
+
+def test_release_pypi_job_signs_validates_and_publishes_default_dist() -> None:
+    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text())
+    job = workflow["jobs"]["publish-pypi"]
+    steps = _job_steps(RELEASE_WORKFLOW, "publish-pypi")
+    names = [step.get("name") for step in steps]
+    commands = [_normalized_run(step) for step in steps]
+    uses = [str(step.get("uses", "")) for step in steps]
+
+    assert job["if"] == "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/core/v')"
+    assert job["environment"] == "release"
+    assert job["permissions"] == {"contents": "read", "id-token": "write"}
+    assert not any(value.startswith("pypa/gh-action-pypi-publish@") for value in uses)
+    assert (
+        "uvx --from pypi-attestations==0.0.29 python -m pypi_attestations sign "
+        "dist/*.whl dist/*.tar.gz"
+    ) in commands
+    assert "uv publish --dry-run --trusted-publishing never" in commands
+    assert (
+        "uv publish --trusted-publishing always --check-url https://pypi.org/simple/"
+    ) in commands
+    assert names.index("PyPI pre-upload check") < names.index("Generate PyPI attestations")
+    assert names.index("Generate PyPI attestations") < names.index("Validate signed PyPI upload set")
+    assert names.index("Validate signed PyPI upload set") < names.index("Publish to PyPI")
+    assert names.index("Publish to PyPI") < names.index("PyPI post-upload check")
 
 
 def _regular_file(name: str, content: bytes = b"content") -> tuple[tarfile.TarInfo, bytes]:
