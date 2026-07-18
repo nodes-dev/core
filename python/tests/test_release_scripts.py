@@ -8,8 +8,10 @@ import sys
 import tarfile
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 NPM_VERIFIER = ROOT / ".github/scripts/verify_npm_tarball.py"
 NPM_SMOKE = ROOT / ".github/scripts/smoke_install_npm.sh"
 PYTHON_SMOKE = ROOT / ".github/scripts/smoke_install_python.sh"
@@ -21,6 +23,33 @@ REQUIRED = (
     "package/dist/index.js",
     "package/dist/index.d.ts",
 )
+UV_VERSION = "0.11.29"
+
+
+def _workflow_steps(path: Path) -> list[dict[str, object]]:
+    workflow = yaml.safe_load(path.read_text())
+    return [
+        step
+        for job in workflow["jobs"].values()
+        if isinstance(job, dict)
+        for step in job.get("steps", [])
+        if isinstance(step, dict)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("workflow", "expected_count"),
+    [(CI_WORKFLOW, 1), (RELEASE_WORKFLOW, 2)],
+)
+def test_workflows_pin_every_setup_uv_binary(workflow: Path, expected_count: int) -> None:
+    steps = [
+        step
+        for step in _workflow_steps(workflow)
+        if str(step.get("uses", "")).startswith("astral-sh/setup-uv@")
+    ]
+
+    assert len(steps) == expected_count
+    assert {step.get("with", {}).get("version") for step in steps} == {UV_VERSION}
 
 
 def test_release_workflow_uses_explicit_filesystem_tarball_paths() -> None:
